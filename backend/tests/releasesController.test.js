@@ -287,7 +287,7 @@ describe('POST /admin/releases — successful publish refreshes cache', () => {
       VALID_VERSION,
       'Test release',
       undefined,
-      { mentionEveryone: true },
+      { mentionEveryone: true, suppressNotifications: false },
     );
   });
 
@@ -314,7 +314,7 @@ describe('POST /admin/releases — successful publish refreshes cache', () => {
       VALID_VERSION,
       'HUD package included',
       { url: VALID_HUD_MOD_URL, version: VALID_HUD_MOD_VERSION },
-      { mentionEveryone: true },
+      { mentionEveryone: true, suppressNotifications: false },
     );
     expect(prismaMock.release.upsert).toHaveBeenCalledWith(expect.objectContaining({
       update: expect.objectContaining({
@@ -359,7 +359,7 @@ describe('POST /admin/releases — announce flag (quiet publish)', () => {
       VALID_VERSION,
       'Normal release',
       undefined,
-      { mentionEveryone: true },
+      { mentionEveryone: true, suppressNotifications: false },
     );
   });
 
@@ -380,7 +380,29 @@ describe('POST /admin/releases — announce flag (quiet publish)', () => {
       VALID_VERSION,
       'Dev release without a channel-wide mention',
       undefined,
-      { mentionEveryone: false },
+      { mentionEveryone: false, suppressNotifications: false },
+    );
+  });
+
+  it('passes a silent @everyone announcement through to Discord', async () => {
+    const discordService = require('../src/services/discordService');
+
+    await request(app)
+      .post('/admin/releases')
+      .set('Authorization', `Bearer ${RELEASE_TOKEN}`)
+      .send({
+        version: VALID_VERSION,
+        downloadUrl: VALID_DOWNLOAD_URL,
+        releaseNotes: 'Silent channel-wide HUD announcement',
+        mentionEveryone: true,
+        suppressNotifications: true,
+      });
+
+    expect(discordService.postReleaseAnnouncement).toHaveBeenCalledWith(
+      VALID_VERSION,
+      'Silent channel-wide HUD announcement',
+      undefined,
+      { mentionEveryone: true, suppressNotifications: true },
     );
   });
 });

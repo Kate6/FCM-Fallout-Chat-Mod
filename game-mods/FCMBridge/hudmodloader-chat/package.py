@@ -40,7 +40,7 @@ HUD_KEY_DEFAULTS = (
     "scrollUpKey=Up\n"
     "scrollDownKey=Down\n"
     "scrollBottomKey=\n"
-    "hideKey=\n"
+    "hideKey=DELETE\n"
 )
 
 
@@ -235,10 +235,12 @@ Key defaults
 The shipped Data/FCMChat.ini [FCMChat] key map is:
 {HUD_KEY_DEFAULTS}
 Insert opens the input; Enter sends; Escape cancels; Page Up/Page Down switch channels.
+If the host editor loses its final callback, FCM recovers an Enter send once or cancels the stale
+session so Insert can open chat again.
 scrollUpKey=Up and scrollDownKey=Down (Arrow Up / Down) scroll after Insert opens the input.
 scrollBottomKey is blank by default; set it in Data/FCMChat.ini (for example Home, End, or F12)
-if you want a keyboard shortcut for newest. hideKey is also blank by default; use /hide or the
-F11 menu to hide the feed. See KEYBINDS.txt
+if you want a keyboard shortcut for newest. Delete hides the feed while idle and edits text while
+input is open; /hide and the F11 menu also remain available. See KEYBINDS.txt
 for ZFE and xScal key paths, supported physical tokens, and conflict guidance.
 
 General shows General, current-room Server, Trading, Events, Infests, and Raids together.
@@ -366,7 +368,7 @@ def build_package(
             "scrollUpKey / scrollDownKey values scroll the feed (Arrow Up / Down\n"
             "are the defaults). scrollBottomKey is blank by default; set it in\n"
             "Data/FCMChat.ini to Home, End, F12, or a forwarded action if desired.\n"
-            "hideKey is blank by default; /hide and FCM -> Hide chat remain available.\n"
+            "hideKey=DELETE hides while idle and edits text while input is open.\n"
             "Before Insert, configured feed keys remain game controls. FCM -> Scroll\n"
             "to newest is always available from the F11 menu. Type /g, /t, /e, /i,\n"
             "or /r before a message to route it to General, Trading, Events, Infests,\n"

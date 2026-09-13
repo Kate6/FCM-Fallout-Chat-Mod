@@ -11,6 +11,9 @@ class TestFcmRenderGeneration {
         var second = gate.begin();
         check("new render invalidates the previous callback", !gate.isCurrent(first));
         check("new render token is current", gate.isCurrent(second));
+        check("current completed snapshot may commit", gate.mayCommit(second, true));
+        check("incomplete snapshot cannot commit", !gate.mayCommit(second, false));
+        check("superseded snapshot cannot commit", !gate.mayCommit(first, true));
 
         var third = gate.invalidate();
         check("rebuild invalidates the active callback", !gate.isCurrent(second));

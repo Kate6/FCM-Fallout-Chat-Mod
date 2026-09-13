@@ -3,8 +3,22 @@
 FCMChatWidget is the optional HUDModLoader chat widget for Fallout 76. It uses ZFE or xScal's
 native chat bridge and FCM's `/relay`. It is independent of the desktop overlay.
 
-**Local candidate: 2.10.78 (2026-09-12).** Source, SWF, and BA2 were reviewed and rebuilt locally.
-This is not a claim of publication, installation, hosted CI success, or in-game verification.
+**Local candidate: 2.10.85 (2026-09-13).** The feed builds delayed row batches in a hidden
+snapshot and swaps them into view only after positioning is complete, preventing the overlapping
+intermediate frame seen as a white flash. Windows 10 xScal measurements showed that the former
+32-row work slices still occupied 32-65 ms of a frame, so rebuilds now process six rows per timer
+turn while the last complete snapshot remains visible. The xScal/SharedHUDTools input path also records
+privacy-safe editor metadata (length, caret, selection, focus, and maximum length) while an edit is
+open. The single BA2 uses the visible SharedHUDTools editor with both providers and enables its
+public TextField selection/caret behavior. It retains the active draft only in memory: if Enter
+removes the host field but HUDModLoader fails to deliver its submit callback, a short watchdog
+submits that draft once and releases the editor state; other sustained focus loss cancels and
+re-arms Insert. Draft content is never logged. Provider detection keeps
+ZFE native input as a fallback and prevents xScal from receiving ZFE-only calls. Source validation is complete;
+fresh 2.10.85 in-game validation on both providers is still required. The preceding 2.10.84
+production-target BA2 was validated locally with xScal for visible multi-character editing and
+frame-budgeted message refresh; 2.10.85 is installed with xScal for final Delete-key acceptance.
+This is not a claim of publication or hosted CI success.
 See [BUILD.md](BUILD.md) for reproducible checks and installation, and the
 [HUD documentation index](../../../docs/overlay/zfe/README.md) for owning guides.
 
@@ -47,11 +61,14 @@ fallback is retained; the widget does not dispatch ControlMap lock events itself
 by renaming FCM's compatibility calls. See the [provider guide](../../../docs/overlay/zfe/modder-guide.md).
 
 The shipped key map is `openKey=INSERT`, `channelNextKey=NextPage`, `channelPrevKey=PrevPage`,
-`scrollUpKey=Up`, `scrollDownKey=Down`, `scrollBottomKey=` and `hideKey=`. Insert opens chat;
-Enter sends; Escape cancels. Page Up/Down switch channels while idle or editing. Up/Down scroll
-only while chat owns the visible editor. The blank newest and hide values are intentional: Home/End
-remain game controls, while `/hide` and the F11 menu hide the feed. `KEYBINDS.txt` covers aliases,
+`scrollUpKey=Up`, `scrollDownKey=Down`, `scrollBottomKey=` and `hideKey=DELETE`. Insert opens chat;
+Enter sends; Escape cancels. A missing host callback cannot leave Insert permanently latched.
+Page Up/Down switch channels while idle or editing. Up/Down scroll
+only while chat owns the visible editor. The blank newest value leaves Home/End as game controls.
+Delete hides while idle, while `/hide` and the F11 menu also hide the feed. `KEYBINDS.txt` covers aliases,
 rebinding, physical polling, and ZFE config precedence.
+The default `hideKey=DELETE` hides only while input is idle. While either
+provider owns an editor, Delete remains a text-edit key and cannot close or hide the widget.
 xScal's numeric `Input.*` operations require Boolean results; ZFE's compatibility decoder also
 handles its legacy envelopes. Registration does not promise gameplay suppression.
 

@@ -132,6 +132,13 @@ Controlled by a JS idle timer in `shell.ts` that sends `overlay:collapse` / `ove
 
 **Reset on re-show.** The idle tick keeps firing while hidden (focus-gated hide, tray, game-exit). `shell.ts` listens for `overlay:visibility` (`relayBridge.onVisibility`) and calls `markActivity()` on `true`, so a long tab-away doesn't re-show already collapsed. `false` must not call it; that would expand the window while it's hiding. Predicate: `shouldResetIdleOnVisibility` in `shell-core.ts` (unit-tested). ChatOverlay.tsx listens to the same IPC for its WS reconnect gate; idle-collapse stays shell-owned, not shared.
 
+**Game-launch expansion.** A full-hide idle mode shrinks the native window to one pixel. On a
+confirmed stopped-to-running Fallout 76 transition, the main process expands that window before
+showing it; otherwise KWin can correctly stack an effectively invisible one-pixel overlay above
+the game. The pure `shouldExpandOnGameLaunch` predicate covers this transition. Fully-contained
+portable mode also suppresses subsequent idle-collapse requests while the game remains running;
+the installed overlay retains the user's normal auto-hide behavior.
+
 **Collapse height + the CSS-zoom gotcha.** The collapsed window height is computed by `headerStripHeight()` (`shell.ts`) = shell-bar height + the two tab rows, clamped to a plausible band (24–160 visual px) so a bad mid-reflow measurement can never reveal the message body/input. The strip is measured with `getBoundingClientRect()` on elements inside the CSS-`zoom`ed `#root`. **Whether that rect already includes the zoom depends on the Chromium build** — Chromium ≤127 (Electron ≤31) returned UNSCALED CSS-px; Chromium 138 (Electron 39, the current pin) returns zoom-SCALED px. `rectsAreZoomScaled()` detects this once (an offscreen `zoom:2` probe), and the pure `resolveCollapsedHeight()` (in `shell-core.ts`, unit-tested both ways) applies the zoom factor **only** when rects are unscaled. The earlier code multiplied unconditionally, which after the Electron 31→39 bump **double-applied** the zoom and left the window tall enough to reveal the text input at Scale > 1 — the "collapses to the input box instead of the tabs" bug.
 
 **State variables** (`main.js:596`):
@@ -226,6 +233,11 @@ On KDE-Wayland a **second** gate sits on top: `nextGameFocusState` hides the ove
 ---
 
 ## Game-process detection
+
+Portable mode does not change this detector or its hysteresis. The portable application must
+already be running (normally in its tray) to observe a later game launch; a closed executable
+cannot activate itself. Experimental portable builds disable login auto-start and keep all
+detector-driven window state in their adjacent `FCMData/` profile.
 
 A periodic scan runs every **2.5 seconds** via `scanForGame()` (`main.js:500`):
 

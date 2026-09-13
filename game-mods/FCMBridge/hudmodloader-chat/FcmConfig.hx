@@ -126,7 +126,7 @@ class FcmConfig {
     public var scrollUpKey:String     = "Up";
     public var scrollDownKey:String   = "Down";
     public var scrollBottomKey:String = "";
-    public var hideKey:String        = "";        // unset = use /hide or the F11 menu
+    public var hideKey:String        = "DELETE";  // idle hide; suspended while an editor owns input
 
     // ── Feed toggles ───────────────────────────────────────────────────────────
     public var showChannelTag:Bool  = true;
@@ -705,7 +705,7 @@ class FcmConfig {
                 case "scrollupkey":     cfg.scrollUpKey = validScrollKey(val, cfg.scrollUpKey);
                 case "scrolldownkey":   cfg.scrollDownKey = validScrollKey(val, cfg.scrollDownKey);
                 case "scrollbottomkey": cfg.scrollBottomKey = validScrollKey(val, "");
-                case "hidekey":         cfg.hideKey = validAction(val, "");
+                case "hidekey":         cfg.hideKey = validAction(val, "DELETE");
                 case "showhints":       cfg.showHints = parseBool(val, cfg.showHints);
                 case "autobroadcastworldevents":
                     cfg.autoBroadcastWorldEvents = parseBool(val, cfg.autoBroadcastWorldEvents);

@@ -112,7 +112,7 @@ shipped values are explicit, including the two intentional blank defaults:
   scrollUpKey=Up
   scrollDownKey=Down
   scrollBottomKey=
-  hideKey=
+  hideKey=DELETE
 
 Up/Down are the packaged arrow-scroll bindings; their ArrowUp/ArrowDown, Cursor, and Dpad
 spellings are treated as aliases. Set either direction to a forwarded HUD action (for example
@@ -120,5 +120,6 @@ Console) or a physical xScal/ZFE token (for example F12) to rebind it. An empty 
 that direction. `scrollBottomKey` is intentionally blank by default, so Home and End remain
 game controls until one is explicitly selected. The F11 **Scroll to newest** menu action is
 always available. Feed keys are consumed only while the open-chat key owns the visible input
-session. A blank `hideKey` keeps `/hide` and the F11 **Hide chat** menu action available. See
+session. The default `hideKey=DELETE` hides only while idle; a blank value disables the keyboard
+hide binding while keeping `/hide` and the F11 **Hide chat** menu action available. See
 KEYBINDS.txt for provider-specific action names and physical-key behavior.

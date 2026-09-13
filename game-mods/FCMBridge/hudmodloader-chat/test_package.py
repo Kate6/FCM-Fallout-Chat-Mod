@@ -24,7 +24,7 @@ HUD_KEY_DEFAULTS = {
     "scrollUpKey": "Up",
     "scrollDownKey": "Down",
     "scrollBottomKey": "",
-    "hideKey": "",
+    "hideKey": "DELETE",
 }
 
 
@@ -75,6 +75,33 @@ def main() -> None:
     )
     assert "mergeNativeInputTextWithMode" in source_hx and "detectNativeInputMode" in source_hx, (
         "native input must distinguish cumulative and delta provider buffers"
+    )
+    assert "_pendingFeedContentLayer" in source_hx and "commitFeedSnapshot" in source_hx \
+        and "mayCommit(renderToken, _renderPending)" in source_hx, (
+        "delayed feed rebuilds must commit one complete generation atomically"
+    )
+    assert "startSharedInputDiagnostics" in source_hx and '"inputdiag"' in source_hx \
+        and "tf.length" in source_hx and "tf.selectionBeginIndex" in source_hx, (
+        "shared editor diagnostics must capture metadata without the draft text"
+    )
+    assert "FcmInputRoute.preferred(provider" in source_hx \
+        and "FcmInputRoute.mayUseNativeFallback" in source_hx \
+        and "tf.selectable = true" in source_hx, (
+        "the shared widget must route ZFE and xScal input by detected provider"
+    )
+    assert "FcmSharedInputRecovery.decide" in source_hx \
+        and "onSharedInputKeyDown" in source_hx \
+        and "recovered missing SharedHUDTools submit callback" in source_hx, (
+        "lost SharedHUDTools callbacks must submit an Enter draft or release stale input ownership"
+    )
+    assert "RENDER_SLICE_ROWS:Int = 6" in source_hx \
+        and "start + _renderSliceSize" in source_hx, (
+        "feed rebuild slices must stay within the measured Windows Scaleform frame budget"
+    )
+    assert "FcmCommand.configuredHideAction(action, _cfg.hideKey, _inputOpen)" in source_hx \
+        and '"hide ignored while editor owns input"' in source_hx \
+        and "_cfg.scrollBottomKey, _cfg.hideKey" in source_hx, (
+        "configured hide keys must remain text-edit keys while either provider owns input"
     )
     assert "startXscalWarmup" in source_hx and "becameAuthenticated" in source_hx and "startZfeInitialHistoryDrain" in source_hx and '_history.needsRecovery(_authState == "authenticated", flash.Lib.getTimer())' in source_hx, (
         "both providers' initial subscriber history must be drained promptly without a duplicate RESYNC"
@@ -179,6 +206,10 @@ def main() -> None:
                 assert "CUSTOMIZATION.txt" in names
                 assert "KEYBINDS.txt" in names
                 keybinds = archive.read("KEYBINDS.txt")
+                assert b"PROVIDER KEYBIND CONTRACT" in keybinds
+                assert b"ZFE       effective [TextChat] OpenChatKey + matching openKey" in keybinds
+                assert b"xScal     Data/FCMChat.ini openKey only" in keybinds
+                assert b"`hello` remains five characters" in keybinds
                 assert b"openKey=DELETE" in keybinds
                 assert b"OpenChatKey=DELETE" in keybinds
                 assert b"DELETE is the recommended alternative" in keybinds
@@ -214,7 +245,7 @@ def main() -> None:
                 assert "OpenChatKey=INSERT" in install
                 for key, value in HUD_KEY_DEFAULTS.items():
                     assert f"{key}={value}" in install
-                assert "hideKey is also blank by default" in install
+                assert "Delete hides the feed while idle" in install
                 assert "Initial history" not in install
                 assert "Send an emoji" not in install
                 assert "Steam sign-in" not in install
@@ -334,7 +365,7 @@ def main() -> None:
                     assert b"scrollDownKey" in install
                     assert b"scrollBottomKey" in install
                     assert b"scrollBottomKey is blank by default" in install
-                    assert b"hideKey is also blank by default" in install
+                    assert b"Delete hides the feed while idle" in install
                     assert b"Shipped Data/FCMChat.ini key map:" in menu
                     for key, value in HUD_KEY_DEFAULTS.items():
                         assert f"{key}={value}".encode() in install
