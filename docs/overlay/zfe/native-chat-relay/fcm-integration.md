@@ -245,6 +245,43 @@ The shared finalizer passes the server-resolved supporter tier to the outbound D
 relay, which renders the immutable `★` beside the author; Discord cannot reproduce the
 web/HUD star colour in ordinary message text.
 
+Message-row rebuilds use an atomic display snapshot. Delayed slices create and position rows in a
+hidden staging container while the last valid feed remains visible. Only the current render
+generation may commit the completed container; channel/link/account changes, panel rebuilds,
+failures, and unloads invalidate and discard it. This prevents partially positioned rows from
+overlapping at the feed origin during refresh.
+
+The slice size is six rows per timer turn. A Windows 10 xScal 0.1.15 trace from widget 2.10.79
+measured the previous 32-row turns at 32-65 ms and full 76-187-row rebuilds at a 166 ms median,
+with outliers above three seconds. Native relay polls never crossed the logged 50 ms threshold in
+that trace. Six rows targets an observed sub-eight-millisecond Scaleform work budget per turn;
+the total rebuild remains asynchronous behind the last committed snapshot.
+
+The xScal path continues to use SharedHUDTools for owned text entry. Diagnostic builds may sample
+the focused TextField's length, selection, caret, type, and `maxChars` under the `inputdiag` log
+category. They must not log the draft or force a caret/selection change. This metadata distinguishes
+selection replacement, field recreation, focus loss, and visual clipping in the host editor.
+The active draft is retained only in memory while the field exists. An observational key-down
+listener arms Enter recovery; if the field loses focus and the normal callback does not arrive
+within 225 ms, the widget invalidates that editor generation, balances `EndTextEdit`, and submits
+the captured draft once. Escape, Tab, and unexplained focus loss cancel the stale session instead.
+Logs expose draft length and recovery outcome, never message content.
+Both providers select the visible SharedHUDTools editor first. The widget enables the focused
+public input TextField's selection behavior after HUDTools creates it; this preserves normal caret
+and multi-character entry without reading or rewriting the draft. Provider discovery keeps ZFE's
+buffered native API available only as a fallback and prevents xScal from receiving ZFE-only calls.
+Both paths remain in the same provider-neutral widget BA2.
+
+The keybinding contract is provider-specific even though the BA2 is shared. ZFE's authoritative
+open key is the effective `[TextChat] OpenChatKey`; `Data/configuration/zfe.ini` overrides the
+widget fragment, and `FCMChat.ini` `openKey` must match. xScal has no `OpenChatKey`: it registers
+`FCMChat.ini` `openKey` through numeric `Input.RegisterKey` and polls `Input.IsKeyPressed` on the
+separate generic callback surface. Channel and scroll actions come from `FCMChat.ini` for both.
+The default matrix is Insert, NextPage/PrevPage, Up/Down, bottom unbound, and Delete for idle hide.
+The `hideKey=DELETE` action is suspended while either editor is active.
+Delete remains available to the editor for character removal; the binding resumes after the edit
+ends. The lower-level `hide()` guard enforces the same rule for every hide entry point.
+
 Before a valid HUD message is decorated, the relay asks Discord for the linked user's
 current member roles at most once per minute per deployment, coordinated by a Redis
 `SET NX EX` slot (with a local fallback if Redis is temporarily unavailable). The

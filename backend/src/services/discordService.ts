@@ -1384,11 +1384,12 @@ async function postReleaseAnnouncement(
   version: string,
   releaseNotes: string,
   hudMod?: HudModDownload,
-  options: { mentionEveryone?: boolean } = {},
+  options: { mentionEveryone?: boolean; suppressNotifications?: boolean } = {},
 ): Promise<void> {
   const attemptDelays = [0, 500, 1500, 3000, 5000]; // 5 tries, ~10s total
   let lastErr: unknown = null;
   const mentionEveryone = options.mentionEveryone ?? true;
+  const suppressNotifications = options.suppressNotifications ?? false;
 
   for (let i = 0; i < attemptDelays.length; i++) {
     if (attemptDelays[i] > 0) await new Promise((r) => setTimeout(r, attemptDelays[i]));
@@ -1414,10 +1415,10 @@ async function postReleaseAnnouncement(
         .setTimestamp(new Date());
       const message = {
         embeds: [embed],
-        ...releaseAnnouncementMessage(mentionEveryone),
+        ...releaseAnnouncementMessage(mentionEveryone, suppressNotifications),
       } satisfies MessageCreateOptions;
       await (channel as TextChannel).send(message);
-      logger.info({ version, channelId: UPDATES_CHANNEL_ID, attempt: i + 1, mentionEveryone }, 'Posted release announcement to Discord');
+      logger.info({ version, channelId: UPDATES_CHANNEL_ID, attempt: i + 1, mentionEveryone, suppressNotifications }, 'Posted release announcement to Discord');
       return; // success
     } catch (err) {
       lastErr = err;

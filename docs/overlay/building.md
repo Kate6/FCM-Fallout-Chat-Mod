@@ -49,8 +49,48 @@ Vite compiles `src/main.tsx` (and all `@dashboard`-aliased dashboard code) into 
 | `npm run dist:win` | Windows | NSIS installer + portable `.exe` |
 | `npm run dist:mac` | macOS | `.dmg` + `.zip` (x64 + arm64) |
 | `npm run dist:linux` | Linux | `.AppImage` + `.deb` (x64) |
+| `npm run dist:portable:experimental` | Windows / Linux | Dev-relay, fully-contained experimental portable artifact |
 
 Output lands in `dist-electron/`.
+
+### Fully-contained portable experiment
+
+`dist:portable:experimental` is a non-publishing test channel. It stamps
+`fcmPortable=true`, targets `dev.falloutchatmod.com`, and uses a distinct product name.
+Windows produces only the electron-builder portable `.exe`; Linux produces an AppImage.
+
+At startup, portable mode resolves the stable executable/AppImage folder and redirects
+`userData`, `sessionData`, logs, and crash dumps to its sibling `FCMData/` directory before
+Electron creates any profile state. Startup fails when that folder is unavailable, read-only,
+or a symlink. Portable mode never imports the installed profile and never registers itself at
+login. Deleting the artifact plus `FCMData/` removes FCM-owned durable state; operating-system
+temporary execution files, recent-item history, and security logs are outside this guarantee.
+
+The experiment stores the existing install identity in `FCMData/overlay-state.json`. Use only a
+disposable dev/QA identity; do not link a production account. Cross-machine protected identity
+requires a later passphrase-vault feature.
+
+On later launches, portable QA silently re-registers that stable install identity and receives a
+fresh, memory-only session token. Discord OAuth opens in the operating system's default browser
+only on first use or when the backend no longer authorizes the saved identity. Keep the artifact
+and its sibling `FCMData/` together to preserve this login state and all settings.
+
+After setup, portable mode is game-only: automatic visibility requires Fallout 76 even for
+moderator/admin accounts or an installed-build force-visible preference. First-run authentication
+remains visible so setup can be completed.
+
+Linux laptop smoke test:
+
+```bash
+npm run smoke:portable:experimental -- "dist-electron/Fallout Chat Mod Portable Experimental-<version>.AppImage"
+```
+
+Pass `--preserve` after the artifact path to retain an existing `FCMData/` profile for a
+move-and-relaunch test.
+
+The harness uses an isolated X display and config home, verifies the portable log/profile path,
+and terminates only its spawned process group. It never uses `pkill`, never touches the installed
+overlay, and never terminates Fallout 76.
 
 electron-builder picks up: `main.js`, `preload.js`, `dist-renderer/**`, `assets/**`.
 

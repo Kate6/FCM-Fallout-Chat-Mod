@@ -84,6 +84,7 @@ const releaseBodySchema = z.object({
   // When false, post the release embed without a channel-wide @everyone mention.
   // This is useful for corrected follow-up notes while retaining the announcement.
   mentionEveryone: z.boolean().optional().default(true),
+  suppressNotifications: z.boolean().optional().default(false),
 }).refine(
   (value) => Boolean(value.hudModVersion) === Boolean(value.hudModUrl),
   { message: 'hudModVersion and hudModUrl must be provided together' },
@@ -160,7 +161,7 @@ async function publishRelease(req: Request, res: Response, next: NextFunction): 
       return next(createError(400, detail));
     }
 
-    const { version, downloadUrl, releaseNotes, announce, mentionEveryone, hudModUrl, hudModVersion } = parsed.data;
+    const { version, downloadUrl, releaseNotes, announce, mentionEveryone, suppressNotifications, hudModUrl, hudModVersion } = parsed.data;
     const publishedAt = new Date();
 
     // Pipeline gate: verify all five overlay artifacts and, when supplied, the
@@ -203,9 +204,9 @@ async function publishRelease(req: Request, res: Response, next: NextFunction): 
     if (announce) {
       try {
         if (hudModUrl && hudModVersion) {
-          await postReleaseAnnouncement(version, releaseNotes, { url: hudModUrl, version: hudModVersion }, { mentionEveryone });
+          await postReleaseAnnouncement(version, releaseNotes, { url: hudModUrl, version: hudModVersion }, { mentionEveryone, suppressNotifications });
         } else {
-          await postReleaseAnnouncement(version, releaseNotes, undefined, { mentionEveryone });
+          await postReleaseAnnouncement(version, releaseNotes, undefined, { mentionEveryone, suppressNotifications });
         }
       } catch (e: any) {
         return next(createError(

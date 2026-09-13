@@ -27,7 +27,9 @@ describe('full auto-hide wiring', () => {
 
     expect(shell).toContain("window.relayBridge.collapse(h, fullAutoHide)");
     expect(preload).toContain('collapse: (headerHeight, fullAutoHide = false)');
-    expect(main).toContain("{ headerHeight, fullAutoHide }) => collapseToHeader(headerHeight, !!fullAutoHide)");
+    expect(main).toContain("ipcMain.on('overlay:collapse', (_evt, { headerHeight, fullAutoHide }) => {");
+    expect(main).toContain('collapseToHeader(headerHeight, !!fullAutoHide);');
+    expect(main).toContain('shouldSuppressIdleCollapse({ portable: IS_PORTABLE, gameRunning })');
     expect(main).toContain('const target = fullAutoHide ? FULL_AUTO_HIDE_HEIGHT : Math.max(24, Math.round(headerH));');
     expect(main).toContain('const FULL_AUTO_HIDE_HEIGHT = 1;');
   });

@@ -14,11 +14,11 @@ name: CI
 #
 # The single required branch-protection check is the `CI Summary` job below.
 # It gates: unit-vitest (overlay + dashboard matrix), overlay-launch-smoke-linux
-# (packaged-launch smoke), overlay-build-windows-nsis (NSIS build verification),
+# (packaged-launch smoke), overlay-build-windows-nsis (NSIS + portable build verification),
 # lint-typecheck, backend-jest, and gamemod-anchors (in-game .ba2 SWF anchors) —
 # all blocking for PRs.
 #
-# The `overlay-build-windows-nsis` job builds the NSIS installer NATIVELY on
+# The `overlay-build-windows-nsis` job builds the NSIS installer and portable exe NATIVELY on
 # `windows-latest` (no Wine, no Docker, no GHCR image — the self-hosted Wine/DinD
 # strategy was superseded by the runner migration). It statically verifies the
 # artifacts (installer + exe present) and that NO auto-update feed files
@@ -496,8 +496,8 @@ jobs:
         working-directory: cross-platform-overlay
       - name: Verify xScal HUD configuration setup
         run: '& ./game-mods/FCMBridge/hudmodloader-chat/test-xscal-setup.ps1'
-      - name: Build Windows NSIS package (native)
-        run: npx electron-builder --win nsis --publish=never
+      - name: Build Windows NSIS + portable packages (native)
+        run: npx electron-builder --win nsis portable --publish=never
         working-directory: cross-platform-overlay
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'

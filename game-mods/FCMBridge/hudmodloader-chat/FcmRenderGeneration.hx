@@ -25,6 +25,11 @@ class FcmRenderGeneration {
         return token == _value;
     }
 
+    /** A completed snapshot may replace the display only while its generation still owns it. */
+    public function mayCommit(token:Int, pending:Bool):Bool {
+        return pending && isCurrent(token);
+    }
+
     /** Every delayed slice needs its own exception boundary; the scheduler's catch has ended. */
     public function runCurrent(token:Int, work:Void->Void, failed:Dynamic->Void):Void {
         if (!isCurrent(token)) return;

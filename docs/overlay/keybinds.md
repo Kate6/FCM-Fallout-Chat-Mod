@@ -149,10 +149,10 @@ steps in both `INSTALL.txt` and `HUDMODLOADER-MENU.txt`.
 | `Arrow Up` / `Arrow Down` | `scrollUpKey=Up` / `scrollDownKey=Down` | After `Insert` opens the typing session, scroll the active feed one line. Arrow/Cursor/Dpad aliases match the default action. Before then they remain game controls. |
 | (optional) newest key | `scrollBottomKey` | Return the feed to the newest message. **Default is UNSET**; choose `Home`, `End`, `F12`, or a forwarded action to enable it. Before `Insert`, the key remains a game control. |
 | `/hide` + `F11` | (`/hide` slash command; F11 HUDModLoader menu) | Hide the panel. Feed keeps running in the background; restore with the open key (`Insert`). |
-| (optional) `hideKey` | `hideKey` = `<action>` | Optional power-user hide bind; default **UNSET**. Accepts a forwarded action only; hide is always available via `/hide` + the F11 menu regardless. |
+| `Delete` | `hideKey=DELETE` | Hides the HUD while idle. During an active typing session the hide binding is suspended and Delete edits the draft. Both providers poll its physical VK edge when available; named loader actions remain supported. Set the value blank to disable keyboard hiding. |
 | Mouse-wheel | (not a keybind) | Scroll the feed history. F11 **Scroll to newest** remains available even when `scrollBottomKey` is unset. |
 
-`Enter` (send) and `Esc` (cancel) stay native to the game's chat input session and are **not**
+`Enter` (send), `Esc` (cancel), and Delete/Backspace editing stay native to the game's chat input session and are **not**
 rebindable. SharedHUDTools owns the primary editor’s balanced text-edit lock; the legacy ZFE
 fallback does not provide the same lock contract. FCM closes its owned editor on send/cancel and
 relevant failure/menu/unload paths. Do not describe compatibility polling as gameplay suppression.

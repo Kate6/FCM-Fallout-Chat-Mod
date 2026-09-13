@@ -87,7 +87,9 @@ publish 502s and no release is recorded.
   `allowedMentions: { parse: ['everyone'] }`; the ping only fires if the bot holds
   **Mention Everyone** in that channel (otherwise it posts silently). Pass
   `{ mentionEveryone: false }` for a replacement or corrected announcement that keeps
-  the embed but omits both the content and the mention permission.
+  the embed but omits both the content and the mention permission. Pass
+  `{ mentionEveryone: true, suppressNotifications: true }` to retain the visible
+  `@everyone` mention while setting Discord's Suppress Notifications message flag.
 - **Download field** — direct 🪟 Windows ZIP / 🐧 Linux AppImage / Linux `.deb` links, the
   Linux ZIP with install docs, the Download-page link, and the versioned **FCM HUD Mod ZIP**
   link when the release includes HUD metadata.

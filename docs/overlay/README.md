@@ -31,6 +31,7 @@ The Electron shell provides everything the web `ChatOverlay.tsx` component does 
 
 - **Window chrome** — transparent/frameless BrowserWindow, drag strip, tray icon, min/close buttons
 - **Game-process detection** — `tasklist` (Windows) / `ps -A` (Linux) to detect `Fallout76.exe`; shows or hides the overlay automatically when the game starts or exits
+- **Experimental contained portable mode** — explicit portable builds keep FCM-owned durable state beside the artifact under `FCMData/`, while retaining normal process-triggered visibility. This dev-relay experiment neither imports installed state nor registers auto-start; see [building.md](building.md#fully-contained-portable-experiment).
 - **Global hotkeys** — navigation-cluster keys (Insert, Delete, End, PageUp/Down, Home, `\`, `/`) intercepted before the game receives them
 - **Click-through** — `setIgnoreMouseEvents` so clicks pass through to the game behind
 - **Update notification** — passive OS toast (Windows / Linux libnotify / macOS) when a newer version is available; version delivered over the chat WebSocket (`app:update-available`); downloads/installs nothing; clicking opens Nexus Mods for a manual download. See `auto-update.md`.
@@ -225,7 +226,9 @@ When `BUILD_CHANNEL === 'qa'` the overlay resolves relay URLs to the dev backend
 A `qa`-channel build does not use the standard Discord OAuth link flow. Instead, it
 presents an in-app "QA Login" button that:
 
-1. Opens `/auth/discord/qa/start` in a browser window (on the dev backend).
+1. Opens `/auth/discord/qa/start` in the operating system's default browser (on the dev
+   backend). Discord authentication is never embedded in an Electron `BrowserWindow`, so the
+   browser can reuse the user's existing Discord login and passkey session.
 2. The user completes Discord OAuth; the dev backend verifies they hold the `DEV_QA_ROLE_ID`
    role in the dev guild and stores a one-time session grant in Redis.
 3. The overlay polls `GET /api/auth/qa-status/:installToken` (with
@@ -233,6 +236,10 @@ presents an in-app "QA Login" button that:
    response with a session token.
 4. If the backend returns HTTP 426 (`OUTDATED_BUILD`), the build version does not match
    the active QA version and the overlay shows an update prompt instead of completing login.
+
+The standard Discord link/relink flow follows the same external-browser rule. Because its OAuth
+state is bound to the install token on the backend, the overlay polls link status for up to the
+state's five-minute lifetime and re-registers automatically after linking succeeds.
 
 ### `X-Client-Version` header
 

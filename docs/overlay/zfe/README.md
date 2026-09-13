@@ -77,11 +77,11 @@ stale work cannot replace a newer feed with a fallback.
 ## Input and appearance
 
 The shipped key map is `openKey=INSERT`, `channelNextKey=NextPage`, `channelPrevKey=PrevPage`,
-`scrollUpKey=Up`, `scrollDownKey=Down`, `scrollBottomKey=`, and `hideKey=`. Insert opens chat by
+`scrollUpKey=Up`, `scrollDownKey=Down`, `scrollBottomKey=`, and `hideKey=DELETE`. Insert opens chat by
 default; Enter sends and Escape cancels. Page Up/Down switch channels while idle or typing.
 Configured feed scrolling acts only while chat owns a visible input session. The blank newest and
-hide values are intentional: Home/End remain unassigned, and `/hide` plus F11 → FCM → Hide chat
-remain available. F11 → FCM → Scroll to newest is always available.
+newest value is intentional: Home/End remain unassigned. Delete hides only while idle; `/hide` plus
+F11 → FCM → Hide chat remain available. F11 → FCM → Scroll to newest is always available.
 Aliases and reversed Up/Down bindings use the same navigation policy. Edge guards key on
 normalized action names; different aliases are not universally one shared latch. Test simultaneous
 named/physical delivery on the installed loader before claiming one action per physical press.
@@ -92,7 +92,36 @@ key API takes numeric VK codes and returns Booleans. Registration does not promi
 suppression. FCM's ZFE `Input.*` route remains a tested compatibility path on specific builds,
 not the public `zfe-input-v1` contract. That capability names owner-scoped `input.v1.*` text
 sessions. The public [hotkey contract](https://www.nexusmods.com/fallout76/articles/270) is now
-available; migration to `hotkeys.v1.*` is not implemented in 2.10.78 and needs separate tests.
+available; migration to `hotkeys.v1.*` is not implemented in 2.10.85 and needs separate tests.
+
+| Provider | Authoritative open key | Detection | Configuration precedence |
+| --- | --- | --- | --- |
+| ZFE | `[TextChat] OpenChatKey`, matching `FCMChat.ini` `openKey` | ZFE `isChatKeyPressed` | `Data/configuration/zfe.ini` overrides `Data/ZFE/TextChat/fragments/FCMChatWidget.ini` |
+| xScal | `FCMChat.ini` `openKey` only | Numeric `Input.RegisterKey` / `Input.IsKeyPressed` | `xscal.ini` has transport settings only and must not contain `OpenChatKey` |
+
+| Behavior | ZFE | xScal |
+| --- | --- | --- |
+| Shared package | One provider-neutral `FCMChatWidget.ba2` | Same BA2 |
+| Provider selection | Validated only when no supported xScal chat surface is active | Preferred when its required `chatInterface` methods validate |
+| Primary visible editor | SharedHUDTools `TextEdit` | SharedHUDTools `TextEdit` |
+| Native editor fallback | Legacy ZFE buffer only after SharedHUDTools fails to open | Never receives ZFE-only input calls |
+| Multi-character typing | Focused public field has selection/caret enabled | Same shared field rule |
+| Missing submit callback | Enter draft recovered once after 225 ms; other focus loss cancels | Same shared recovery rule |
+| Delete while typing | Deletes characters; an optional Delete hide binding is suspended | Same shared priority rule |
+| Default open key | `OpenChatKey=INSERT`, matching `openKey=INSERT` | `openKey=INSERT` only |
+| Channel / feed keys | Page Up/Down; Arrow Up/Down after input opens | Same behavior through named actions and numeric physical polling |
+| Feed refresh | Atomic hidden staging, six rows per timer turn | Same renderer; verified locally without recurring over-30 ms message turns |
+| Transport payload | Command plus JSON string | ActionScript object or no arguments according to method |
+| Settings persistence | ZFE vendor-scoped storage | Relay persistence only when the capability is advertised |
+
+Channel and scroll bindings always come from `FCMChat.ini`. Both providers use the visible
+SharedHUDTools editor; only ZFE can use the native draft buffer as a fallback. Provider acceptance
+must verify Insert opens one visible editor, `hello` remains five characters, Page Up/Down switch
+channels only during the owned edit, Escape cancels, and Enter submits once. If the host editor
+loses focus without its callback, the widget waits 225 ms, recovers an Enter submission once, or
+cancels other stale sessions so Insert works again. The recovery draft stays in memory and logs
+only its length. Do not infer xScal
+key support from ZFE commands or route ZFE input verbs through xScal's `chatInterface`.
 
 Both providers use the host's SharedHUDTools editor first. The widget does not dispatch its own
 ControlMap lock events. A legacy ZFE editor fallback has different ownership guarantees and must

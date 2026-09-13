@@ -24,6 +24,8 @@
     "dist": "npm run build:renderer && electron-builder",
     "dist:qa": "node scripts/build-qa.mjs",
     "dist:dev": "node scripts/build-dev.mjs",
+    "dist:portable:experimental": "node scripts/build-portable-experimental.mjs",
+    "smoke:portable:experimental": "node scripts/portable-smoke.mjs",
     "dist:win": "npm run build:renderer && electron-builder --win",
     "dist:mac": "npm run build:renderer && electron-builder --mac",
     "dist:linux": "npm run build:renderer && electron-builder --linux",

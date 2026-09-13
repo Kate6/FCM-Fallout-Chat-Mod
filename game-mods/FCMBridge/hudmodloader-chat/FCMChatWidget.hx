@@ -2,6 +2,7 @@ import flash.display.MovieClip;
 import flash.display.Shape;
 import flash.display.Sprite;
 import flash.events.Event;
+import flash.events.KeyboardEvent;
 import flash.events.TimerEvent;
 import flash.utils.Timer;
 import flash.text.TextField;
@@ -74,7 +75,7 @@ class FCMChatWidget extends MovieClip {
     // 2.10.0 is the first build that reports clientVersion to the relay. The relay
     // treats "no version reported" as "oldest possible client" and gates any new wire
     // field on this, so the version bump IS the capability signal.
-    static inline var VERSION:String  = "2.10.78"; // Combined General feed and replay/render guards (local candidate)
+    static inline var VERSION:String  = "2.10.85"; // Delete edits while typing and hides while idle (local candidate)
     static inline var SETTINGS_PATH:String = "settings.ini";
     // This is a top-level ZFE command, not a relay operation. ZFE owns the DPAPI/local auth file
     // and must clear it; the SWF is not allowed to write arbitrary files from the HUD domain.
@@ -236,6 +237,10 @@ class FCMChatWidget extends MovieClip {
     // supporter marker and its text share one row-local coordinate system.
     var _logTf:TextField;
     var _feedLayer:Sprite;
+    // The active feed is an immutable, fully-positioned snapshot. Delayed render slices build
+    // into a hidden sibling and replace this container only after the snapshot is complete.
+    var _feedContentLayer:Sprite;
+    var _pendingFeedContentLayer:Sprite;
     var _tabTf:TextField;
     var _subTf:TextField;
     var _promptTf:TextField;
@@ -389,6 +394,14 @@ class FCMChatWidget extends MovieClip {
     static inline var USE_NATIVE_INPUT:Bool = true;
     var _nativeInput:Bool        = false;          // true while a native session owns input
     var _inputTimer:flash.utils.Timer = null;      // in-session native input poll (~100 ms)
+    var _sharedInputDiagTimer:flash.utils.Timer = null;
+    var _lastSharedInputDiag:String = "";
+    static inline var SHARED_INPUT_FOCUS_GRACE_MS:Float = 225;
+    var _sharedInputField:TextField = null;
+    var _sharedInputDraft:String = "";
+    var _sharedInputSubmitArmed:Bool = false;
+    var _sharedInputCancelArmed:Bool = false;
+    var _sharedInputFocusLostAt:Float = 0;
     var _inProgress:String       = "";             // last readChatInput buffer text
     var _nativeInputMode:String   = "unknown";    // cumulative, delta, or unknown
     var _lastObservedInput:String = "";           // raw logical buffer from the prior changed read
@@ -662,6 +675,24 @@ class FCMChatWidget extends MovieClip {
 
     function stopInputTimer():Void {
         if (_inputTimer != null) { _inputTimer.stop(); _inputTimer = null; }
+        stopSharedInputDiagnostics();
+    }
+
+    function stopSharedInputDiagnostics():Void {
+        if (_sharedInputDiagTimer != null) {
+            _sharedInputDiagTimer.stop();
+            _sharedInputDiagTimer = null;
+        }
+        if (_sharedInputField != null) {
+            try { _sharedInputField.removeEventListener(KeyboardEvent.KEY_DOWN, onSharedInputKeyDown); }
+            catch (_:Dynamic) {}
+        }
+        _sharedInputField = null;
+        _sharedInputDraft = "";
+        _sharedInputSubmitArmed = false;
+        _sharedInputCancelArmed = false;
+        _sharedInputFocusLostAt = 0;
+        _lastSharedInputDiag = "";
     }
 
     function stopWorldTimer():Void {
@@ -695,6 +726,8 @@ class FCMChatWidget extends MovieClip {
         _subTf = null;
         _logTf = null;
         _feedLayer = null;
+        _feedContentLayer = null;
+        _pendingFeedContentLayer = null;
         _promptTf = null;
         _feedRows = [];
     }
@@ -894,6 +927,8 @@ class FCMChatWidget extends MovieClip {
         _feedLayer.mouseChildren = false;
         _feedLayer.scrollRect = new Rectangle(0, 0, _logTf.width, _logTf.height);
         _feedLayer.visible = false;
+        _feedContentLayer = new Sprite();
+        _feedLayer.addChild(_feedContentLayer);
         addChild(_feedLayer);
 
         // Mouse-wheel over the log scrolls history (CAP-008, VER-2). HUD-availability
@@ -1338,6 +1373,15 @@ class FCMChatWidget extends MovieClip {
             return true;
         }
 
+        // A user may bind hideKey=DELETE. While either provider's editor owns input, Delete must
+        // reach that editor as character deletion and must not close or hide the widget.
+        var hideAction:String = FcmCommand.configuredHideAction(action, _cfg.hideKey, _inputOpen);
+        if (hideAction == "editor") return false;
+        if (hideAction == "hide") {
+            if (isDown) hide();
+            return true;
+        }
+
         // Navigation is a set of one-shot commands, never a persistent "channel selection"
         // mode. This matters because the same stage also hosts the SharedHUDTools editor: an
         // ordinary character or an Unmapped action must never be routed into channel handling.
@@ -1461,8 +1505,8 @@ class FCMChatWidget extends MovieClip {
     function hide():Void {
         if (_disposed) return;
         if (_inputOpen) {
-            if (_nativeInput) closeInputNative();
-            else closeInputSharedHudTools("hide");
+            zfeLog("info", "hide", "hide ignored while editor owns input");
+            return;
         }
         this.visible = false;
         _hidden = true;
@@ -2313,22 +2357,17 @@ class FCMChatWidget extends MovieClip {
         // The open key both restores a hidden panel AND opens input (CAP-011, guaranteed).
         if (_hidden) show();
         bumpAutoHide();   // opening input = activity (the timer also never hides while input is open)
-        // SharedHUDTools is the only supported path for a session that must suppress gameplay
-        // input. It dispatches ControlMap::StartEditText/EndEditText from the HUD host domain,
-        // where Bethesda's event contract is known to work. A child widget dispatching the same
-        // event through a dynamically resolved class caused the repeated Error #1014 flood and
-        // left the game-control lock active in v2.10.45. Try the host-owned editor first.
-        openInputSharedHudTools();
+        // One BA2 serves both providers. Both use the visible host-owned SharedHUDTools editor;
+        // provider detection controls transport and whether ZFE's native buffer is available as
+        // a last-resort fallback. xScal never receives ZFE-only input calls.
+        var provider:String = _api == null ? "" : _api.provider;
+        var route:String = FcmInputRoute.preferred(provider, USE_NATIVE_INPUT && _nativeInputUsable);
+        if (route == FcmInputRoute.SHARED) openInputSharedHudTools();
         if (_inputOpen) return;
 
-        // ZFE native input is deliberately a no-lock fallback. It is better to provide a
-        // receive/send editor than to dispatch the unsafe child-domain ControlMap event again;
-        // when this fallback is active, movement keys remain owned by the game.
-        if (USE_NATIVE_INPUT && _nativeInputUsable) {
-            zfeLog("warn", "input", "SharedHUDTools unavailable; using no-lock native fallback");
+        if (FcmInputRoute.mayUseNativeFallback(provider, USE_NATIVE_INPUT && _nativeInputUsable)) {
+            zfeLog("warn", "input", "SharedHUDTools unavailable; using no-lock ZFE native fallback");
             if (openInputNative()) return;
-            // Do not keep re-triggering a known-bad native implementation for every Insert.
-            // A reconnect resets this capability so a transient ZFE startup failure can retry.
             _nativeInputUsable = false;
         }
     }
@@ -2545,6 +2584,7 @@ class FCMChatWidget extends MovieClip {
      * widget state first and does not submit the draft.
      */
     function resetSharedInputState():Void {
+        stopSharedInputDiagnostics();
         _inputGeneration++;
         _inputOpen = false;
         _inProgress = "";
@@ -2643,6 +2683,7 @@ class FCMChatWidget extends MovieClip {
             // Do not mirror that same field into _promptTf, or every character appears twice.
             setPrompt(typingPrompt());
             zfeLog("info", "input", "opened");
+            startSharedInputDiagnostics(generation);
         } catch (e:Dynamic) {
             // A partial Format/OSK/TextEdit sequence is not a usable editor. EndTextEdit is
             // only requested after TextEdit was entered; otherwise the local state is enough
@@ -2661,6 +2702,7 @@ class FCMChatWidget extends MovieClip {
      */
     function onInputSubmit(text:Dynamic):Void {
         if (_disposed) return;
+        stopSharedInputDiagnostics();
         _inputOpen = false;
         clearNavigationLatches();
         setPrompt(idlePrompt());
@@ -2678,6 +2720,110 @@ class FCMChatWidget extends MovieClip {
             zfeLog("warn", "input", "TextEdit callback isolated: " + clip200(Std.string(err)));
             try { setPrompt(idlePrompt()); } catch (_:Dynamic) {}
         }
+    }
+
+    /**
+     * Observe the host-owned editor without recording its text. This distinguishes a selected
+     * character being replaced from field reinitialization, focus loss, and visual clipping.
+     * The focused TextField is a public Stage property; HUDTools' private field is not accessed.
+     */
+    function startSharedInputDiagnostics(generation:Int):Void {
+        stopSharedInputDiagnostics();
+        pollSharedInputDiagnostics(generation);
+        _sharedInputDiagTimer = new flash.utils.Timer(75);
+        _sharedInputDiagTimer.addEventListener(TimerEvent.TIMER, function(_:Dynamic) {
+            try { pollSharedInputDiagnostics(generation); }
+            catch (err:Dynamic) {
+                zfeLog("warn", "inputdiag", "shared editor diagnostic isolated: " + clip200(Std.string(err)));
+                stopSharedInputDiagnostics();
+            }
+        });
+        _sharedInputDiagTimer.start();
+    }
+
+    function bindSharedInputField(tf:TextField):Void {
+        if (_sharedInputField == tf) return;
+        if (_sharedInputField != null) {
+            try { _sharedInputField.removeEventListener(KeyboardEvent.KEY_DOWN, onSharedInputKeyDown); }
+            catch (_:Dynamic) {}
+        }
+        _sharedInputField = tf;
+        _sharedInputField.addEventListener(KeyboardEvent.KEY_DOWN, onSharedInputKeyDown, false, 1000);
+    }
+
+    function onSharedInputKeyDown(e:KeyboardEvent):Void {
+        if (_disposed || !_inputOpen || _nativeInput || _sharedInputField == null) return;
+        // Keep the draft only in memory so an observed HUDTools callback loss cannot discard an
+        // Enter submission. Neither the characters nor derived content are written to the log.
+        _sharedInputDraft = _sharedInputField.text;
+        if (e.keyCode == 13) _sharedInputSubmitArmed = true;
+        else if (e.keyCode == 27 || e.keyCode == 9) _sharedInputCancelArmed = true;
+    }
+
+    function recoverLostSharedInputFocus(generation:Int, decision:String):Void {
+        if (!FcmCommand.acceptsInputCallback(_inputOpen, _inputGeneration, generation)) return;
+        var draft:String = _sharedInputDraft;
+        var draftLength:Int = draft == null ? 0 : draft.length;
+        closeInputSharedHudTools("host editor callback missing");
+        if (decision == FcmSharedInputRecovery.SUBMIT) {
+            zfeLog("warn", "input", "recovered missing SharedHUDTools submit callback len=" + draftLength);
+            handleSubmittedText(draft);
+        } else {
+            zfeLog("warn", "input", "released SharedHUDTools session after editor focus loss");
+        }
+    }
+
+    function pollSharedInputDiagnostics(generation:Int):Void {
+        if (_disposed || !_inputOpen || _nativeInput || generation != _inputGeneration || stage == null) {
+            stopSharedInputDiagnostics();
+            return;
+        }
+        var focused:Dynamic = stage.focus;
+        var isTextField:Bool = focused != null && Std.isOfType(focused, TextField);
+        var length:Int = -1;
+        var selectionStart:Int = -1;
+        var selectionEnd:Int = -1;
+        var caret:Int = -1;
+        var maxChars:Int = -1;
+        var inputType:String = "none";
+        if (isTextField) {
+            var tf:TextField = cast focused;
+            bindSharedInputField(tf);
+            _sharedInputDraft = tf.text;
+            _sharedInputFocusLostAt = 0;
+            // HUDTools creates an INPUT field with selectable=false. In observed Scaleform builds
+            // that leaves the caret unstable and the draft returns to length zero between keys.
+            // Enabling selection is the public TextField fix; it does not read or rewrite text.
+            if (!tf.selectable) {
+                tf.selectable = true;
+                zfeLog("info", "inputdiag", "shared editor selectable enabled");
+            }
+            length = tf.length;
+            selectionStart = tf.selectionBeginIndex;
+            selectionEnd = tf.selectionEndIndex;
+            caret = tf.caretIndex;
+            maxChars = tf.maxChars;
+            inputType = Std.string(tf.type);
+        } else if (_sharedInputField != null) {
+            var now:Float = flash.Lib.getTimer();
+            if (_sharedInputFocusLostAt == 0) _sharedInputFocusLostAt = now;
+            var lostMs:Float = now - _sharedInputFocusLostAt;
+            var decision:String = FcmSharedInputRecovery.decide(true, lostMs,
+                SHARED_INPUT_FOCUS_GRACE_MS, _sharedInputSubmitArmed, _sharedInputCancelArmed,
+                _sharedInputDraft == null ? 0 : _sharedInputDraft.length);
+            if (decision != FcmSharedInputRecovery.WAIT) {
+                recoverLostSharedInputFocus(generation, decision);
+                return;
+            }
+        }
+        var signature:String = "generation=" + generation
+            + " focusedTextField=" + (isTextField ? "yes" : "no")
+            + " type=" + inputType + " len=" + length
+            + " selection=" + selectionStart + ":" + selectionEnd
+            + " caret=" + caret + " maxChars=" + maxChars;
+        if (signature == _lastSharedInputDiag) return;
+        _lastSharedInputDiag = signature;
+        zfeLog("info", "inputdiag", signature);
     }
 
     /**
@@ -3756,7 +3902,7 @@ class FCMChatWidget extends MovieClip {
         // configured below; scroll-to-bottom is intentionally absent unless the user
         // selected a physical token in FCMChat.ini.
         var keyCodes:Array<Int> = [VK_PAGEUP, VK_PAGEDOWN, VK_UP, VK_DOWN];
-        for (token in [_cfg.scrollUpKey, _cfg.scrollDownKey, _cfg.scrollBottomKey]) {
+        for (token in [_cfg.scrollUpKey, _cfg.scrollDownKey, _cfg.scrollBottomKey, _cfg.hideKey]) {
             var configuredCode:Int = FcmCommand.virtualKeyCode(token);
             if (configuredCode > 0 && keyCodes.indexOf(configuredCode) < 0) keyCodes.push(configuredCode);
         }
@@ -3794,7 +3940,8 @@ class FCMChatWidget extends MovieClip {
             + _api.provider + " interval=" + PHYSICAL_NAV_POLL_MS + "ms keys="
             + _physicalNavRegistered.join(",") + " openKey=" + _physicalOpenKey
             + " scrollUp=" + _cfg.scrollUpKey + " scrollDown=" + _cfg.scrollDownKey
-            + " scrollBottom=" + (_cfg.scrollBottomKey.length > 0 ? _cfg.scrollBottomKey : "<unset>"));
+            + " scrollBottom=" + (_cfg.scrollBottomKey.length > 0 ? _cfg.scrollBottomKey : "<unset>")
+            + " hideKey=" + (_cfg.hideKey.length > 0 ? _cfg.hideKey : "<unset>"));
     }
 
     var _physicalNavStep:String = "idle";
@@ -3835,7 +3982,8 @@ class FCMChatWidget extends MovieClip {
             if (_api.provider == FcmNativeApi.XSCAL && keyCode == _physicalOpenKey) continue;
             // Page keys switch channels in either state. Configured feed keys remain ordinary
             // game controls until the player has opened the editor with Insert.
-            var action:String = FcmCommand.physicalNavigationAction(keyCode,
+            var isPhysicalHide:Bool = FcmCommand.virtualKeyCode(_cfg.hideKey) == keyCode;
+            var action:String = isPhysicalHide ? _cfg.hideKey : FcmCommand.physicalNavigationAction(keyCode,
                 _cfg.scrollUpKey, _cfg.scrollDownKey, _cfg.scrollBottomKey);
             if (action.length == 0) continue;
             var command:String = FcmCommand.navigationAction(action,
@@ -3857,9 +4005,10 @@ class FCMChatWidget extends MovieClip {
             if (isDown) {
                 _physicalNavStep = "dispatch-key-" + keyCode;
                 var handled:Bool = handleUserEvent(action, true);
-                if (command.length > 0) {
+                if (command.length > 0 || isPhysicalHide) {
                     zfeLog("info", "input", "physical key=" + keyCode + " action=" + action
-                        + " edge=down command=" + command + " handled=" + (handled ? "true" : "false"));
+                        + " edge=down command=" + (isPhysicalHide ? "hide" : command)
+                        + " handled=" + (handled ? "true" : "false"));
                 }
                 _physicalNavigationDown.set(keyCode, true);
             } else {
@@ -5231,9 +5380,11 @@ class FCMChatWidget extends MovieClip {
 
     var _renderStep:String = "idle";
     var _ownNameColor:String = "";
-    // Mitigation C chunking — renderRecords slices to avoid ~1s Flash stalls
+    // Windows 10 xScal evidence measured 32-row slices at 32-65ms. Six rows keeps the observed
+    // per-slice construction cost below an 8ms UI-work budget while the old snapshot stays visible.
     var _renderPending:Bool = false;
-    var _renderSliceSize:Int = 32;
+    static inline var RENDER_SLICE_ROWS:Int = 6;
+    var _renderSliceSize:Int = RENDER_SLICE_ROWS;
     var _pendingVisibleRecords:Array<ChatRecord> = null;
     var _pendingContentY:Float = 0;
     var _renderGeneration:FcmRenderGeneration = new FcmRenderGeneration();
@@ -5241,6 +5392,41 @@ class FCMChatWidget extends MovieClip {
     /** Invalidate delayed slices before replacing or detaching the feed display tree. */
     function cancelPendingRender():Void {
         _renderGeneration.invalidate();
+        discardPendingFeedSnapshot();
+    }
+
+    function discardPendingFeedSnapshot():Void {
+        if (_pendingFeedContentLayer != null && _feedLayer != null) {
+            try { _feedLayer.removeChild(_pendingFeedContentLayer); } catch (_:Dynamic) {}
+        }
+        _pendingFeedContentLayer = null;
+        _renderPending = false;
+        _pendingVisibleRecords = null;
+        _pendingContentY = 0;
+    }
+
+    /** Commit one completed snapshot without exposing partially positioned rows. */
+    function commitFeedSnapshot(renderToken:Int, layer:Sprite, rows:Array<FeedRowView>, contentHeight:Float):Void {
+        if (!_renderGeneration.mayCommit(renderToken, _renderPending)
+                || _feedLayer == null || layer == null || layer != _pendingFeedContentLayer) return;
+        if (_feedContentLayer != null) {
+            try { _feedLayer.removeChild(_feedContentLayer); } catch (_:Dynamic) {}
+        }
+        _feedContentLayer = layer;
+        _pendingFeedContentLayer = null;
+        _feedRows = rows;
+        _feedContentHeight = contentHeight;
+        _feedMaxScrollY = Math.max(0, _feedContentHeight - _logTf.height);
+        if (!_bScrolling) {
+            _feedScrollY = _feedMaxScrollY;
+        } else {
+            _feedScrollY = Math.max(0, Math.min(_feedScrollY, _feedMaxScrollY));
+            if (_feedMaxScrollY <= 0) { _bScrolling = false; _newWhileScrolled = 0; }
+        }
+        applyFeedScroll();
+        layer.visible = true;
+        _logTf.visible = false;
+        _feedLayer.visible = true;
         _renderPending = false;
         _pendingVisibleRecords = null;
         _pendingContentY = 0;
@@ -5249,9 +5435,7 @@ class FCMChatWidget extends MovieClip {
 
     function renderRecords():Void {
         var renderToken:Int = _renderGeneration.begin();
-        _renderPending = false;
-        _pendingVisibleRecords = null;
-        _pendingContentY = 0;
+        discardPendingFeedSnapshot();
         if (_logTf == null || _feedLayer == null) return;
 
         try {
@@ -5279,10 +5463,12 @@ class FCMChatWidget extends MovieClip {
             setLogText("No messages in " + CHAN_NAMES[_chanIdx] + " yet"); return;
         }
 
-        clearFeedRows();
-        _logTf.visible = false;
-        _feedLayer.visible = true;
-        // Small feeds render synchronously to keep snappiness; large feeds slice at 32 per tick
+        var stagingLayer:Sprite = new Sprite();
+        stagingLayer.visible = false;
+        _pendingFeedContentLayer = stagingLayer;
+        _feedLayer.addChild(stagingLayer);
+        var stagingRows:Array<FeedRowView> = [];
+        // Small feeds render synchronously; larger feeds spend at most six rows per timer turn.
         if (visibleRecords.length <= _renderSliceSize) {
             var contentY:Float = 0;
             var customNameColors:Int = 0;
@@ -5297,8 +5483,9 @@ class FCMChatWidget extends MovieClip {
                     zfeLog("warn", "emoji", "kept styled row; step=" + _renderStep + ": " + clip200(Std.string(emojiError)));
                 }
                 rendered.contentY = contentY;
-                _feedRows.push(rendered);
-                _feedLayer.addChild(rendered.view);
+                rendered.view.y = contentY;
+                stagingRows.push(rendered);
+                stagingLayer.addChild(rendered.view);
                 contentY += rendered.height + FEED_ROW_GAP;
             }
             zfeLog("info", "name-colors", "rows=" + visibleRecords.length + " differentFromTheme=" + customNameColors);
@@ -5306,21 +5493,15 @@ class FCMChatWidget extends MovieClip {
                 var notice:FeedRowView = buildFeedNoticeRow(
                     "v " + _newWhileScrolled + " new - wheel down or F11 Scroll to newest", _logTf.width);
                 notice.contentY = contentY;
-                _feedRows.push(notice);
-                _feedLayer.addChild(notice.view);
+                notice.view.y = contentY;
+                stagingRows.push(notice);
+                stagingLayer.addChild(notice.view);
                 contentY += notice.height + FEED_ROW_GAP;
             }
-            _feedContentHeight = contentY;
-            _feedMaxScrollY = Math.max(0, _feedContentHeight - _logTf.height);
-            if (!_bScrolling) {
-                _feedScrollY = _feedMaxScrollY;
-            } else {
-                _feedScrollY = Math.max(0, Math.min(_feedScrollY, _feedMaxScrollY));
-                if (_feedMaxScrollY <= 0) { _bScrolling = false; _newWhileScrolled = 0; }
-            }
-            applyFeedScroll();
+            _renderPending = true;
+            commitFeedSnapshot(renderToken, stagingLayer, stagingRows, contentY);
         } else {
-            // Chunked path — 32 rows per 1ms tick, keeps 60fps under Wine
+            // Chunked path — six rows per timer turn based on the Windows 10 frame-time trace.
             var pendingRecords:Array<ChatRecord> = visibleRecords;
             var pendingContentY:Float = 0;
             _pendingVisibleRecords = pendingRecords;
@@ -5335,7 +5516,8 @@ class FCMChatWidget extends MovieClip {
                 // older callback consume the next render's shared state or touch a detached
                 // Scaleform display object.
                 if (_disposed || !_renderGeneration.isCurrent(renderToken)
-                        || !_renderPending || _pendingVisibleRecords == null || _feedLayer == null) {
+                        || !_renderPending || _pendingVisibleRecords == null || _feedLayer == null
+                        || _pendingFeedContentLayer != stagingLayer) {
                     if (_renderGeneration.isCurrent(renderToken)) {
                         _renderPending = false;
                         _pendingVisibleRecords = null;
@@ -5357,8 +5539,9 @@ class FCMChatWidget extends MovieClip {
                         zfeLog("warn", "emoji", "kept styled row; step=" + _renderStep + ": " + clip200(Std.string(emojiError)));
                     }
                     rendered.contentY = pendingContentY;
-                    _feedRows.push(rendered);
-                    _feedLayer.addChild(rendered.view);
+                    rendered.view.y = pendingContentY;
+                    stagingRows.push(rendered);
+                    stagingLayer.addChild(rendered.view);
                     pendingContentY += rendered.height + FEED_ROW_GAP;
                     _pendingContentY = pendingContentY;
                 }
@@ -5376,22 +5559,12 @@ class FCMChatWidget extends MovieClip {
                         var notice:FeedRowView = buildFeedNoticeRow(
                             "v " + _newWhileScrolled + " new - wheel down or F11 Scroll to newest", _logTf.width);
                         notice.contentY = contentY;
-                        _feedRows.push(notice);
-                        _feedLayer.addChild(notice.view);
+                        notice.view.y = contentY;
+                        stagingRows.push(notice);
+                        stagingLayer.addChild(notice.view);
                         contentY += notice.height + FEED_ROW_GAP;
                     }
-                    _feedContentHeight = contentY;
-                    _feedMaxScrollY = Math.max(0, _feedContentHeight - _logTf.height);
-                    if (!_bScrolling) {
-                        _feedScrollY = _feedMaxScrollY;
-                    } else {
-                        _feedScrollY = Math.max(0, Math.min(_feedScrollY, _feedMaxScrollY));
-                        if (_feedMaxScrollY <= 0) { _bScrolling = false; _newWhileScrolled = 0; }
-                    }
-                    applyFeedScroll();
-                    _renderPending = false;
-                    _pendingVisibleRecords = null;
-                    _pendingContentY = 0;
+                    commitFeedSnapshot(renderToken, stagingLayer, stagingRows, contentY);
                     var dt:Float = flash.Lib.getTimer() - tChunkStart;
                     if (dt > 80) zfeLog("info", "render", "sliced render complete dt=" + dt + "ms rows=" + pendingRecords.length);
                 }
@@ -5475,10 +5648,11 @@ class FCMChatWidget extends MovieClip {
 
     /** Remove message rows by reference; no native child enumeration is needed. */
     function clearFeedRows():Void {
-        if (_feedLayer != null) {
-            for (row in _feedRows) {
-                try { _feedLayer.removeChild(row.view); } catch (e:Dynamic) {}
-            }
+        discardPendingFeedSnapshot();
+        if (_feedLayer != null && _feedContentLayer != null) {
+            try { _feedLayer.removeChild(_feedContentLayer); } catch (_:Dynamic) {}
+            _feedContentLayer = new Sprite();
+            try { _feedLayer.addChild(_feedContentLayer); } catch (_:Dynamic) {}
         }
         _feedRows = [];
         _feedContentHeight = 0;
@@ -5487,9 +5661,9 @@ class FCMChatWidget extends MovieClip {
 
     /** Apply the current content offset to every row inside the clipped feed layer. */
     function applyFeedScroll():Void {
-        if (_feedLayer == null) return;
+        if (_feedLayer == null || _feedContentLayer == null) return;
         _feedScrollY = Math.max(0, Math.min(_feedScrollY, _feedMaxScrollY));
-        for (row in _feedRows) row.view.y = row.contentY - _feedScrollY;
+        _feedContentLayer.y = -_feedScrollY;
     }
 
     public function scrollUp():Void {

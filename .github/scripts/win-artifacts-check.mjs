@@ -1,7 +1,7 @@
 /**
  * .github/scripts/win-artifacts-check.mjs
  *
- * Static verification of Windows NSIS build artifacts.
+ * Static verification of Windows NSIS + portable build artifacts.
  *
  * Run after `electron-builder --win nsis` to assert that the packaged installer
  * and executable are present and non-trivial, AND that NO auto-update feed files
@@ -25,6 +25,7 @@ const DIST = path.join(REPO_ROOT, 'cross-platform-overlay', 'dist-electron');
 
 const MIN_EXE_BYTES = 50 * 1024 * 1024;   // 50 MB — sanity floor; real build ~200 MB
 const MIN_INSTALLER_BYTES = 50 * 1024 * 1024;
+const MIN_PORTABLE_BYTES = 50 * 1024 * 1024;
 
 let failures = 0;
 
@@ -73,12 +74,25 @@ check('installer .exe exists', () => {
   pass(`${installer} — ${(size / 1024 / 1024).toFixed(1)} MB`);
 });
 
-// ── 3. NO auto-update feed files (compliance: the build must not emit a feed) ──
+// ── 3. Portable executable ────────────────────────────────────────────────────
+
+console.log('\n[win-check] 3. portable executable');
+check('portable .exe exists', () => {
+  const entries = fs.existsSync(DIST) ? fs.readdirSync(DIST) : [];
+  const portable = entries.find(f => f.endsWith('.exe') && !f.includes('Setup'));
+  if (!portable) throw new Error(`no portable *.exe found in ${DIST} — files: ${entries.join(', ')}`);
+  const portablePath = path.join(DIST, portable);
+  const { size } = fs.statSync(portablePath);
+  if (size < MIN_PORTABLE_BYTES) throw new Error(`${portable}: too small: ${size} bytes`);
+  pass(`${portable} — ${(size / 1024 / 1024).toFixed(1)} MB`);
+});
+
+// ── 4. NO auto-update feed files (compliance: the build must not emit a feed) ──
 // Inverted assertion: app-update.yml / latest.yml / latest-linux.yml must be ABSENT.
 // electron-updater + build.publish were removed, so electron-builder no longer
 // generates these. If any reappear, an updater feed crept back in — fail.
 
-console.log('\n[win-check] 3. no auto-update feed files');
+console.log('\n[win-check] 4. no auto-update feed files');
 const forbidden = [
   path.join(DIST, 'win-unpacked', 'resources', 'app-update.yml'),
   path.join(DIST, 'latest.yml'),

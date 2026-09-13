@@ -8,7 +8,7 @@
  * artifacts 404).
  */
 
-import type { MessageCreateOptions } from 'discord.js';
+import { MessageFlags, type MessageCreateOptions } from 'discord.js';
 import {
   windowsZipUrl,
   linuxZipUrl,
@@ -29,11 +29,16 @@ export const RELEASE_PING = '@everyone';
 /** Message options for a release post's optional whole-channel mention. */
 export function releaseAnnouncementMessage(
   mentionEveryone: boolean,
-): Pick<MessageCreateOptions, 'content' | 'allowedMentions'> {
-  if (!mentionEveryone) return {};
+  suppressNotifications = false,
+): Pick<MessageCreateOptions, 'content' | 'allowedMentions' | 'flags'> {
+  const notificationOptions: Pick<MessageCreateOptions, 'flags'> = suppressNotifications
+    ? { flags: MessageFlags.SuppressNotifications }
+    : {};
+  if (!mentionEveryone) return notificationOptions;
   return {
     content: RELEASE_PING,
     allowedMentions: { parse: ['everyone'] },
+    ...notificationOptions,
   };
 }
 
