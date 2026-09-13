@@ -23,8 +23,33 @@ const {
   isSinglePrintableChar,
   canShowOverlay,
   showModeFor,
+  shouldExpandOnGameLaunch,
+  shouldSuppressIdleCollapse,
   ACTIVATING_REASONS,
 } = core;
+
+describe('shouldExpandOnGameLaunch', () => {
+  it('expands an idle-hidden overlay when the game transitions to running', () => {
+    expect(shouldExpandOnGameLaunch({ gameRunning: true, wasRunning: false, collapsed: true })).toBe(true);
+  });
+
+  it.each([
+    [false, false, true],
+    [true, true, true],
+    [true, false, false],
+  ])('does not expand for gameRunning=%s wasRunning=%s collapsed=%s', (gameRunning, wasRunning, collapsed) => {
+    expect(shouldExpandOnGameLaunch({ gameRunning, wasRunning, collapsed })).toBe(false);
+  });
+});
+
+describe('shouldSuppressIdleCollapse', () => {
+  it('keeps portable chat visible while the game is running', () => {
+    expect(shouldSuppressIdleCollapse({ portable: true, gameRunning: true })).toBe(true);
+  });
+  it.each([[false, true], [true, false], [false, false]])('does not suppress for portable=%s gameRunning=%s', (portable, gameRunning) => {
+    expect(shouldSuppressIdleCollapse({ portable, gameRunning })).toBe(false);
+  });
+});
 
 // The main.js *_SHORTCUT defaults (only the relationships matter here).
 const DEFAULTS = {
@@ -152,6 +177,20 @@ describe('visibilityDecision (reevaluateVisibility)', () => {
   it('only shows when permitted AND not user-hidden', () => {
     expect(visibilityDecision(true, false)).toBe('show');
     expect(visibilityDecision(true, true)).toBe('hide');
+  });
+});
+
+describe('portable game-only visibility', () => {
+  it('hides a configured privileged user while the game is absent', () => {
+    expect(canShowOverlay({ gameOnly: true, role: 'moderator', gameRunning: false, chatActive: true })).toBe(false);
+  });
+
+  it('still permits first-run setup before chat becomes active', () => {
+    expect(canShowOverlay({ gameOnly: true, gameRunning: false, chatActive: false })).toBe(true);
+  });
+
+  it('shows a configured portable overlay while the game is running', () => {
+    expect(canShowOverlay({ gameOnly: true, gameRunning: true, chatActive: true })).toBe(true);
   });
 });
 

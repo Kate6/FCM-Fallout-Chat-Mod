@@ -1,6 +1,6 @@
 # FCMChatWidget build, install, and verification
 
-**Widget version:** 2.10.78. Local review candidate, audited 2026-09-12.
+**Widget version:** 2.10.85. Local review candidate, audited 2026-09-13.
 This is the explicit opt-in HUD-mod track. The desktop overlay never installs or modifies it.
 
 ## Status and scope
@@ -8,8 +8,9 @@ This is the explicit opt-in HUD-mod track. The desktop overlay never installs or
 The source and local SWF/BA2 include combined General, retained-message replay protection,
 stricter own-echo matching, delayed-render failure recovery, and configurable scroll bindings.
 Local Haxe, backend relay, Python packaging/anchor, SWF, and decoded BA2 checks passed during
-review. The candidate has not been installed, tested in-game, or published by this review;
-hosted CI is still required for promotion. Earlier desktop ZFE colors/emoji confirmation is
+review. The production-target candidate is installed locally with ZFE for acceptance testing; it
+has not yet been tested in-game or published, and hosted CI is still required for promotion.
+Earlier desktop ZFE colors/emoji confirmation is
 recorded separately in [styling history](../../../docs/testing/hud-emoji-status.md).
 
 [README.md](README.md) describes behavior. [BUILD-HISTORY.md](BUILD-HISTORY.md) preserves dated
@@ -151,6 +152,18 @@ navigation map is `NextPage`/`PrevPage` for Page Up/Down, `Up`/`Down` for feed s
 explicit blank values for `scrollBottomKey` and `hideKey`; feed scrolling requires a visible owned
 editor. See [KEYBINDS.txt](KEYBINDS.txt).
 
+Every hide entry point refuses to hide while an editor owns input. In particular, a configured
+The default `hideKey=DELETE` is physically registered and returned to the SharedHUDTools or ZFE fallback editor so it deletes characters.
+The binding resumes its hide behavior after the input session closes. `/hide` is evaluated after
+submission and remains available, as does the idle F11 menu action.
+
+The widget observes the host field's Enter/Escape/Tab edge and keeps its current draft only in
+memory. It gives the normal SharedHUDTools callback a 225 ms grace window. If Enter removed the
+field and no callback arrives, the widget submits the captured draft exactly once, calls the public
+`EndTextEdit()` cleanup path, and invalidates the callback generation. Other sustained focus loss
+cancels the stale session so Insert can open a fresh editor. Logs contain draft length and state,
+never message text.
+
 The widget uses runtime-proven Fallout font aliases with embedded-font mode; that is not proof
 that arbitrary fonts/glyphs work. Rows use plain text plus formatting ranges, with row-local
 vector decorations. See [appearance](../../../docs/overlay/zfe/ingame-chat-appearance.md) and
@@ -183,7 +196,7 @@ operation and must not claim success on a rejected reset. Credentials remain ext
 ## In-game acceptance checklist
 
 1. Record game distribution/version, provider version/probe, loader registration, archive order,
-   effective endpoint, and actual `chatv1-widget-v2.10.78` startup marker. Compare the installed
+   effective endpoint, and actual `chatv1-widget-v2.10.85` startup marker. Compare the installed
    BA2's decoded SWF with the reviewed build. Do not infer target from a fragment alone.
 2. Confirm exactly one FCM renderer. Test linked and limited states, late account data, correct
    public account handle, invalid-token recovery, and relink failure/success.

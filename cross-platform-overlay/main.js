@@ -47,13 +47,44 @@
  *     the tray menu and the in-renderer ✕/− strip — those DO work.
  */
 
-const { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, MenuItem, screen, nativeImage, shell, clipboard, Notification } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, MenuItem, screen, nativeImage, shell, clipboard, Notification, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 // Pure logic lives in overlay-core (no electron / no side effects). Required up
 // here so the logger below can use resolveLogLevel/shouldRotateLog.
 const overlayCore = require('./overlay-core');
+
+// Portable identity is build metadata, never a filename heuristic. Configure all
+// Electron-owned durable paths before logging, Linux relaunch, state constants,
+// sessions, or the single-instance lock can resolve the installed profile.
+let _packageMeta = {};
+try { _packageMeta = require('./package.json'); } catch { /* packaging failure surfaces later */ }
+const IS_PORTABLE = _packageMeta.fcmPortable === true || _packageMeta.fcmPortable === 'true';
+const PORTABLE_LAYOUT = overlayCore.resolvePortableLayout({
+  enabled: IS_PORTABLE,
+  platform: process.platform,
+  env: process.env,
+  execPath: process.execPath,
+}, path);
+if (IS_PORTABLE) {
+  const portableCheck = overlayCore.validatePortableLayout(fs, PORTABLE_LAYOUT, path);
+  if (!portableCheck.ok) {
+    const detail = `Portable startup refused: ${portableCheck.error}`;
+    if (process.env.FCM_PORTABLE_NO_DIALOG !== '1') {
+      try { dialog.showErrorBox('Fallout Chat Mod Portable', detail); } catch { /* stderr remains */ }
+    }
+    try { console.error(detail); } catch { /* ignore */ }
+    process.exit(1);
+  }
+  for (const dir of [PORTABLE_LAYOUT.sessionData, PORTABLE_LAYOUT.logs, PORTABLE_LAYOUT.crashDumps]) {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+  app.setPath('userData', PORTABLE_LAYOUT.dataRoot);
+  app.setPath('sessionData', PORTABLE_LAYOUT.sessionData);
+  app.setPath('crashDumps', PORTABLE_LAYOUT.crashDumps);
+  app.setAppLogsPath(PORTABLE_LAYOUT.logs);
+}
 
 // ─── Diagnostic logging ───────────────────────────────────────────────────────
 // Always-on file log so failures on machines we can't access (especially
@@ -731,7 +762,7 @@ const NEXUS_MOD_URL = 'https://www.nexusmods.com/fallout76/mods/4082';
 // Path B (dev:local):                            http://localhost:7076
 // Production default (no override):              https://falloutchatmod.com
 const BUILD_CHANNEL = (() => {
-  try { return require('./package.json').fcmChannel || process.env.BUILD_CHANNEL || 'stable'; }
+  try { return _packageMeta.fcmChannel || process.env.BUILD_CHANNEL || 'stable'; }
   catch { return process.env.BUILD_CHANNEL || 'stable'; }
 })();
 const { relayHttp: RELAY_HTTP, relayWs: RELAY_WS } = overlayCore.resolveRelayUrls(process.env, BUILD_CHANNEL);
@@ -824,7 +855,7 @@ function emitVisibility(isVisible) {
     }, 20_000);
   }
 }
-const APP_TITLE = app.isPackaged ? 'Fallout Chat Mod' : 'Fallout Chat Mod [DEV]';
+const APP_TITLE = IS_PORTABLE ? 'Fallout Chat Mod [PORTABLE EXPERIMENT]' : (app.isPackaged ? 'Fallout Chat Mod' : 'Fallout Chat Mod [DEV]');
 const RENDERER_URL = process.env.RENDERER_URL || null; // set for `vite` dev server
 
 // The real product icon. Platform-specific formats for best results:
@@ -936,7 +967,7 @@ function isPrivileged() {
 // hide the overlay even on a monitor the game isn't on.
 function canShowOverlay() {
   const focusAware = (KDE_WAYLAND || IS_X11 || IS_HYPRLAND) && foregroundDetect && isOverlaySameOutputAsGame() === true;
-  return overlayCore.canShowOverlay({ forceVisible, role: userRole, gameRunning, chatActive, focusAware, gameFocused });
+  return overlayCore.canShowOverlay({ gameOnly: IS_PORTABLE, forceVisible, role: userRole, gameRunning, chatActive, focusAware, gameFocused });
 }
 
 // Throttled tray balloon: shown when a regular user tries to open the overlay
@@ -1117,6 +1148,11 @@ function onGamePresenceChanged(found) {
   if (gameRunning && !wasRunning) {
     diag('[game-gate] game launched — clearing userHidden');
     userHidden = false;
+    if (overlayCore.shouldExpandOnGameLaunch({ gameRunning, wasRunning, collapsed })) {
+      diag('[game-gate] expanding idle-hidden overlay for game launch');
+      sendToRenderer('overlay:force-expand', true);
+      expandFromHeader(false);
+    }
     // Probe the game's display asynchronously. Stacking stays ordinary while
     // the output is unknown, then enables only after a confirmed same-output
     // result.
@@ -1494,7 +1530,7 @@ function loadState() {
   let changed = false;
   if (!state.installToken) { state.installToken = crypto.randomUUID(); changed = true; }
   if (!state.username) { state.username = 'Overlay' + crypto.randomInt(1000, 10000); changed = true; }
-  if (changed) { try { fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2)); } catch { /* best-effort */ } }
+  if (changed) { try { writeDurableFile(STATE_FILE, JSON.stringify(state, null, 2)); } catch { /* best-effort */ } }
   return state;
 }
 
@@ -1504,7 +1540,12 @@ function saveState(patch) {
   let state = {};
   try { state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { /* fresh */ }
   Object.assign(state, patch);
-  try { fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2)); } catch { /* best-effort */ }
+  try { writeDurableFile(STATE_FILE, JSON.stringify(state, null, 2)); } catch { /* best-effort */ }
+}
+
+function writeDurableFile(target, content) {
+  if (IS_PORTABLE) return overlayCore.atomicWriteFileSync(fs, target, content);
+  return fs.writeFileSync(target, content);
 }
 
 // ─── keybinds.cfg — human-editable plain-text keybind file ───────────────────
@@ -1566,7 +1607,7 @@ function writeKeybindsCfg(kb) {
   }
   const content = lines.join('\n') + '\n';
   _lastWrittenCfgContent = content;
-  try { fs.writeFileSync(KEYBINDS_FILE, content); }
+  try { writeDurableFile(KEYBINDS_FILE, content); }
   catch (e) { diag('[keybinds-cfg] write failed:', String(e && e.message || e)); }
 }
 
@@ -1640,16 +1681,18 @@ function startKeybindFileWatch() {
 // (setLoginItemSettings is unreliable for AppImages — handled by the install
 // script's .desktop entry instead).
 function isAutoLaunchEnabled() {
+  if (IS_PORTABLE) return false;
   try { return loadState().autoLaunch !== false; } catch { return true; } // default ON
 }
 function applyAutoLaunch(enabled) {
-  if (!app.isPackaged || process.platform === 'linux') return;
+  if (IS_PORTABLE || !app.isPackaged || process.platform === 'linux') return;
   try {
     app.setLoginItemSettings({ openAtLogin: !!enabled });
     diag('[auto-launch] openAtLogin=' + !!enabled);
   } catch (e) { diag('[auto-launch] failed:', String(e && e.message || e)); }
 }
 function setAutoLaunch(enabled) {
+  if (IS_PORTABLE) return;
   saveState({ autoLaunch: !!enabled });
   applyAutoLaunch(enabled);
 }
@@ -1675,6 +1718,10 @@ function setAutoLaunch(enabled) {
 const stateHasRealData = overlayCore.stateHasRealData;
 
 function migrateLegacyUserData() {
+  if (IS_PORTABLE) {
+    diag('[migrate] portable mode — installed profile migration disabled');
+    return;
+  }
   try {
     const currentDir = app.getPath('userData');
     // Derive the legacy dir generically: replace the productName segment
@@ -2325,7 +2372,13 @@ ipcMain.on('overlay:set-modal', (_evt, open) => {
 // Idle collapse/expand driven by the renderer's idle timer + activity detector.
 // { collapsed: true, headerHeight, fullAutoHide } → shrink to idle target (top anchored).
 // { collapsed: false, focusInput? } → grow back downward (top anchored).
-ipcMain.on('overlay:collapse', (_evt, { headerHeight, fullAutoHide }) => collapseToHeader(headerHeight, !!fullAutoHide));
+ipcMain.on('overlay:collapse', (_evt, { headerHeight, fullAutoHide }) => {
+  if (overlayCore.shouldSuppressIdleCollapse({ portable: IS_PORTABLE, gameRunning })) {
+    diag('[collapse] portable in-game collapse suppressed');
+    return;
+  }
+  collapseToHeader(headerHeight, !!fullAutoHide);
+});
 ipcMain.on('overlay:expand', (_evt, { focusInput }) => expandFromHeader(!!focusInput));
 
 // Cross-channel @mention: renderer asks main to show the overlay from tray.
@@ -2577,107 +2630,26 @@ ipcMain.on('shell:diag', (_evt, msg) => {
   try { diag('[renderer] ' + String(msg).slice(0, 300)); } catch { /* ignore */ }
 });
 
-// Discord account link/relink — opens an in-app BrowserWindow so the user
-// completes the Discord OAuth flow without leaving the overlay.
-//
-// Completion detection: we watch did-navigate / will-redirect / did-redirect-navigation
-// for the backend's link/callback URL.  The callback serves a PIP_BOY_HTML success
-// page at   /auth/discord/link/callback   (on success) or the same URL on error/cancel.
-// Either way, arriving at that URL means the OAuth round-trip is done — we close
-// the window and immediately fire discord:refresh-status so linked state updates.
-//
-// Note: the callback URL lives on RELAY_HTTP (the same host as the relay), not on
-// localhost or a custom scheme, so a normal https: BrowserWindow can reach it fine.
+// Discord account link/relink. OAuth belongs in the OS default browser so Discord
+// can reuse that browser's login/passkey session instead of treating Electron's
+// isolated Chromium profile as a new device. The backend binds the result to the
+// install token, so completion is detected by polling rather than window navigation.
+const DISCORD_OAUTH_POLL_ATTEMPTS = 200; // 200 * 1.5s = backend's 5-minute state TTL
+let discordOAuthPollGeneration = 0;
 ipcMain.on('discord:link', () => {
   const st = loadState();
   if (!st || !st.installToken) return;
   providerLoginRequested = true;
   const linkUrl = `${RELAY_HTTP}/auth/discord/link?installToken=${encodeURIComponent(st.installToken)}`;
-  // The backend's success callback lands on /auth/discord/link/callback (any status).
-  const callbackPath = '/auth/discord/link/callback';
-
-  let oauthWin = null;
+  const pollGeneration = ++discordOAuthPollGeneration;
   try {
-    oauthWin = new BrowserWindow({
-      width: 520, height: 720,
-      parent: mainWindow || undefined,
-      modal: false, // true would block the parent — keep it non-modal so the overlay stays usable
-      title: 'Link Discord — Fallout Chat Mod',
-      icon: appIcon() || undefined,
-      resizable: true,
-      center: true,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        // No preload — this is a plain browser window for the Discord OAuth flow.
-      },
+    Promise.resolve(shell.openExternal(linkUrl)).catch((e) => {
+      diag('[discord-link] could not open default browser:', String(e && e.message || e));
     });
   } catch (e) {
-    // BrowserWindow creation failed (rare — e.g. headless environment). Fall back.
-    try { shell.openExternal(linkUrl); } catch { /* ignore */ }
-    return;
+    diag('[discord-link] could not open default browser:', String(e && e.message || e));
   }
-
-  const wc = oauthWin.webContents;
-
-  // Detect navigation to the callback URL (success or error from the backend).
-  // We key on the path portion so it works regardless of query params / fragments.
-  const checkNav = (url) => {
-    try {
-      const parsed = new URL(url);
-      if (parsed.pathname === callbackPath) {
-        // Give the success/error page a moment to render (UX), then close + refresh.
-        setTimeout(() => {
-          if (oauthWin && !oauthWin.isDestroyed()) oauthWin.close();
-        }, 1200);
-      }
-    } catch { /* ignore invalid URLs */ }
-  };
-
-  wc.on('did-navigate', (_evt, url) => checkNav(url));
-  wc.on('will-redirect', (_evt, url) => checkNav(url));
-  wc.on('did-redirect-navigation', (_evt, url) => checkNav(url));
-
-  // If the OAuth page itself fails to load (network / DNS / CF challenge), don't
-  // leave a blank window the user can't act on. Fall back to their default browser
-  // (which has working network + existing Discord cookies) and show a short note
-  // in the window explaining what happened.
-  let _oauthFellBack = false;
-  const oauthFallback = (why) => {
-    if (_oauthFellBack) return;
-    _oauthFellBack = true;
-    diag('[discord-link] OAuth window failed (' + why + ') — falling back to external browser');
-    try { shell.openExternal(linkUrl); } catch { /* ignore */ }
-    try {
-      if (oauthWin && !oauthWin.isDestroyed()) {
-        const safe = String(why).replace(/[<>&]/g, ' ');
-        oauthWin.webContents.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(
-          '<body style="font-family:system-ui,Segoe UI,sans-serif;background:#0b0f0b;color:#18FF62;padding:24px;line-height:1.5">' +
-          '<h3 style="margin-top:0">Opening Discord in your browser…</h3>' +
-          '<p>The in-app login could not load (' + safe + '). We opened the link in your default browser instead — ' +
-          'finish linking there, then return to the overlay.</p>' +
-          '<p style="opacity:.6;font-size:12px">You can close this window.</p></body>'
-        )).catch(() => { /* ignore */ });
-      }
-    } catch { /* ignore */ }
-  };
-  wc.on('did-fail-load', (_evt, errorCode, errorDesc, _url, isMainFrame) => {
-    // errorCode -3 (ABORTED) fires on our own programmatic close/redirects — ignore.
-    if (!isMainFrame || errorCode === -3) return;
-    oauthFallback('load error ' + errorCode + ' ' + (errorDesc || ''));
-  });
-  // Renderer process of the OAuth window crashed — also fall back.
-  wc.on('render-process-gone', (_evt, details) => oauthFallback('render gone: ' + (details && details.reason || 'unknown')));
-
-  // User closed the window manually before completing — treat as cancel (no crash).
-  oauthWin.on('closed', () => {
-    oauthWin = null;
-    // Refresh discord status regardless: if they DID complete in the window before
-    // closing it early, we still pick up the linked state.
-    ipcMain.emit('discord:refresh-status');
-  });
-
-  oauthWin.loadURL(linkUrl).catch((e) => oauthFallback(String(e && e.message || e)));
+  refreshDiscordStatus(0, { waitForLink: true, pollGeneration, pollAttempt: 0 });
 });
 
 // Steam account link/relink — same in-app browser pattern as Discord, but the
@@ -2754,46 +2726,27 @@ ipcMain.on('steam:link', () => {
 });
 
 // ─── QA login (golden dev build) ──────────────────────────────────────────────
-// Opens the QA Discord OAuth in a window, then polls /api/auth/qa-status until the
+// Opens QA Discord OAuth in the default browser, then polls /api/auth/qa-status until the
 // backend hands back a role-gated session token (or 426 OUTDATED_BUILD).
 function startQaLogin() {
   const st = loadState();
   if (!st || !st.installToken) return;
   const startUrl = `${RELAY_HTTP}/auth/discord/qa/start?installToken=${encodeURIComponent(st.installToken)}`;
-  const callbackPath = '/auth/discord/qa/callback';
   sendToRenderer('relay:status', { state: 'qa_required' });
-
-  let win = null;
   try {
-    win = new BrowserWindow({
-      width: 520, height: 720, parent: mainWindow || undefined, modal: false,
-      title: 'QA Login — Fallout Chat Mod', icon: appIcon() || undefined, center: true,
-      webPreferences: { contextIsolation: true, nodeIntegration: false },
+    Promise.resolve(shell.openExternal(startUrl)).catch((e) => {
+      diag('[qa-login] could not open default browser:', String(e && e.message || e));
     });
-  } catch {
-    try { shell.openExternal(startUrl); } catch { /* ignore */ }
-    pollQaStatus(0);
-    return;
+  } catch (e) {
+    diag('[qa-login] could not open default browser:', String(e && e.message || e));
   }
-  const wc = win.webContents;
-  const checkNav = (url) => {
-    try {
-      if (new URL(url).pathname === callbackPath) {
-        setTimeout(() => { if (win && !win.isDestroyed()) win.close(); }, 1200);
-      }
-    } catch { /* ignore */ }
-  };
-  wc.on('did-navigate', (_e, url) => checkNav(url));
-  wc.on('will-redirect', (_e, url) => checkNav(url));
-  wc.on('did-redirect-navigation', (_e, url) => checkNav(url));
-  win.on('closed', () => { win = null; pollQaStatus(0); });
-  win.loadURL(startUrl).catch(() => { try { shell.openExternal(startUrl); } catch { /* ignore */ } pollQaStatus(0); });
+  pollQaStatus(0);
 }
 
 function pollQaStatus(attempt = 0) {
   const st = loadState();
   if (!st || !st.installToken) return;
-  const MAX = 20;
+  const MAX = 200; // Match the backend's five-minute QA OAuth state lifetime.
   const url = new URL(`${RELAY_HTTP}/api/auth/qa-status/${encodeURIComponent(st.installToken)}`);
   const req = httpModule(url).request(
     { hostname: url.hostname, port: url.port || undefined, path: url.pathname, method: 'GET',
@@ -2842,21 +2795,33 @@ ipcMain.handle('overlay:qa-login', async () => { startQaLogin(); return { ok: tr
 // retry a few times with short backoff before giving up. On final failure we tell
 // the renderer the status is unavailable (it keeps the last known link state)
 // rather than silently dropping the result.
-function refreshDiscordStatus(attempt = 0) {
+function refreshDiscordStatus(attempt = 0, oauthPoll = null) {
+  if (oauthPoll && oauthPoll.pollGeneration !== discordOAuthPollGeneration) return;
   const requestGeneration = authGeneration;
   const st = loadState();
   if (!st || !st.installToken) return;
   const MAX_STATUS_ATTEMPTS = 4;
+  const continueOAuthPoll = () => {
+    if (!oauthPoll?.waitForLink || oauthPoll.pollGeneration !== discordOAuthPollGeneration) return false;
+    const nextPollAttempt = oauthPoll.pollAttempt + 1;
+    if (nextPollAttempt >= DISCORD_OAUTH_POLL_ATTEMPTS) {
+      diag('[discord-link] OAuth status polling ended after five minutes');
+      return false;
+    }
+    setTimeout(() => refreshDiscordStatus(0, { ...oauthPoll, pollAttempt: nextPollAttempt }), 1500);
+    return true;
+  };
   const retry = (why) => {
     if (requestGeneration !== authGeneration) return;
     if (attempt + 1 >= MAX_STATUS_ATTEMPTS) {
+      if (continueOAuthPoll()) return;
       diag('[discord-status] giving up after ' + MAX_STATUS_ATTEMPTS + ' attempts (' + why + ')');
       sendToRenderer('relay:discord-status', { linked: !!st.discordLinked, discordName: st.discordName || '', error: 'status-unavailable' });
       return;
     }
     const backoff = 1500 * (attempt + 1);
     diag('[discord-status] ' + why + ' — retry ' + (attempt + 1) + '/' + MAX_STATUS_ATTEMPTS + ' in ' + backoff + 'ms');
-    setTimeout(() => refreshDiscordStatus(attempt + 1), backoff);
+    setTimeout(() => refreshDiscordStatus(attempt + 1, oauthPoll), backoff);
   };
   const url = new URL(RELAY_HTTP + '/api/auth/discord-status/' + encodeURIComponent(st.installToken));
   const req = httpModule(url).request(
@@ -2879,6 +2844,8 @@ function refreshDiscordStatus(attempt = 0) {
           // Include discordDisplayName so the onboarding step-3 prefill can
           // default the FO76 name input to the user's Discord display name.
           sendToRenderer('relay:discord-status', { linked, discordName, discordDisplayName });
+
+          if (!linked) continueOAuthPoll();
 
           // If the Discord link state just changed (false → true), the installToken
           // may have been RECLAIMED onto an existing account (e.g. "Devotek-").
@@ -3391,6 +3358,16 @@ async function startRelay(retryCount = 0) {
   } catch (err) {
     const msg = err && err.message ? err.message : String(err);
     if (err && (err.authRequired || err.discordAuthRequired)) {
+      // Portable QA keeps a stable install identity in its adjacent FCMData.
+      // Returning users reach this branch only when that identity is no longer
+      // authorized; first-time users still get the QA role-gated OAuth flow.
+      // Session bearer tokens remain memory-only and are freshly minted by the
+      // normal registration path on every successful startup.
+      if (BUILD_CHANNEL === 'qa' && IS_PORTABLE) {
+        diag('[relay] portable QA identity requires authorization — starting QA login');
+        startQaLogin();
+        return;
+      }
       // Backend provider gate: this install has no linked Discord or Steam account.
       // Tell the renderer to show the blocking login wall. Never auto-retry —
       // the user must complete a Discord or Steam provider link first.
@@ -4848,7 +4825,10 @@ function createWindow() {
         ).catch(() => { /* ignore */ });
       }
     } catch { /* ignore */ }
-    if (BUILD_CHANNEL === 'qa') {
+    // Official golden QA builds preserve their existing login behavior. Portable
+    // QA first re-registers its stable install identity so a linked user resumes
+    // silently; startRelay falls back to QA OAuth only when authorization is gone.
+    if (BUILD_CHANNEL === 'qa' && !IS_PORTABLE) {
       startQaLogin();
     } else {
       startRelay();
@@ -4981,6 +4961,7 @@ app.whenReady().then(() => {
     diag('version=' + APP_VERSION, 'platform=' + process.platform, 'arch=' + process.arch,
       'electron=' + process.versions.electron, 'node=' + process.versions.node);
     diag('packaged=' + app.isPackaged, 'relayHost=' + RELAY_HOST, 'userData=' + app.getPath('userData'));
+    if (IS_PORTABLE) diag('[portable] root=' + PORTABLE_LAYOUT.root, 'dataRoot=' + PORTABLE_LAYOUT.dataRoot);
     diag('logFile=' + diagPath(), 'logLevel=' + _logLevel, 'execPath=' + process.execPath);
     if (IS_LINUX) {
       diag('[startup] desktop=' + (process.env.XDG_CURRENT_DESKTOP || '?'),

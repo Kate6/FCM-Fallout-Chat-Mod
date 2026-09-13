@@ -18,7 +18,16 @@ describe('overlay QA login flow', () => {
     expect(main).toMatch(/426/);
   });
   it('auto-starts QA login on the qa channel', () => {
-    expect(main).toMatch(/BUILD_CHANNEL === 'qa'/);
+    expect(main).toMatch(/BUILD_CHANNEL === 'qa' && !IS_PORTABLE/);
+  });
+  it('portable QA restores its linked install identity before requiring OAuth', () => {
+    const fallback = main.slice(main.indexOf("if (BUILD_CHANNEL === 'qa' && IS_PORTABLE"), main.indexOf("if (BUILD_CHANNEL === 'qa' && IS_PORTABLE") + 300);
+    expect(fallback).toMatch(/startQaLogin\(\);/);
+    expect(main).toMatch(/BUILD_CHANNEL === 'qa' && !IS_PORTABLE/);
+  });
+  it('starts the normal token-registration path for portable QA on startup', () => {
+    const startup = main.slice(main.indexOf("if (BUILD_CHANNEL === 'qa' && !IS_PORTABLE"), main.indexOf("if (BUILD_CHANNEL === 'qa' && !IS_PORTABLE") + 180);
+    expect(startup).toMatch(/else \{\s*startRelay\(\);/);
   });
   it('registers an overlay:qa-login IPC handler', () => {
     expect(main).toMatch(/ipcMain\.(on|handle)\('overlay:qa-login'/);

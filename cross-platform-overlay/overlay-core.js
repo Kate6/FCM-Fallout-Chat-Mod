@@ -253,6 +253,17 @@ function nextPresenceState({ found, gameRunning, candidate, stableCount, appearS
   return { candidate: null, stableCount: 0, commit: true, gameRunning: found };
 }
 
+// A full-hide idle collapse leaves the native window one pixel high. Showing that
+// same window on a later game launch is technically visible but effectively
+// invisible, so a genuine stopped -> running transition must restore its height.
+function shouldExpandOnGameLaunch({ gameRunning, wasRunning, collapsed } = {}) {
+  return gameRunning === true && wasRunning !== true && collapsed === true;
+}
+
+function shouldSuppressIdleCollapse({ portable, gameRunning } = {}) {
+  return portable === true && gameRunning === true;
+}
+
 // Hysteresis reducer for focus, mirroring nextPresenceState's accumulator (found →
 // candidate/stableCount → commit after `need` consecutive samples) but committing
 // `gameFocused`. Game-not-running commits false instantly, no debounce. There's no
@@ -343,6 +354,7 @@ function isPrivilegedRole(role) {
 // aware version (Windows / non-KDE unaffected).
 function canShowOverlay(state) {
   state = state || {};
+  if (state.gameOnly && state.chatActive && !state.gameRunning) return false;
   if (state.forceVisible) return true;
   if (state.focusAware && state.gameRunning) return !!state.gameFocused;
   if (isPrivilegedRole(state.role)) return true;
@@ -1226,6 +1238,85 @@ function shouldPromptCursorLock({ wayland, grabFullscreen, grabPointer, alreadyP
   return !grabFullscreen || !grabPointer;
 }
 
+// Resolve the stable folder that owns every durable file for an explicitly
+// portable build. Never infer portable mode from a filename: installed builds
+// can be renamed, and an accidental inference would strand their real profile.
+function resolvePortableLayout({ enabled, platform, env = {}, execPath = '' }, pathApi) {
+  if (!enabled) return { enabled: false };
+  const path = pathApi || require('path'); // eslint-disable-line global-require
+  let root = '';
+  if (platform === 'win32') root = env.PORTABLE_EXECUTABLE_DIR || '';
+  else if (platform === 'linux') {
+    const transientMount = /(?:^|\/)(?:\.mount_[^/]+|appimage_extracted_[^/]+)\//.test(execPath || '');
+    if (transientMount) {
+      if (!env.APPIMAGE) return { enabled: true, error: 'stable AppImage path unavailable' };
+      root = path.dirname(env.APPIMAGE);
+    } else {
+      // Ignore an inherited APPIMAGE from a parent launcher (for example T3 Code
+      // itself). An unpacked executable owns the directory containing execPath.
+      root = path.dirname(execPath || '');
+    }
+  }
+  else root = path.dirname(execPath || '');
+  if (!root || root === '.') return { enabled: true, error: 'stable portable root unavailable' };
+  root = path.resolve(root);
+  const dataRoot = path.join(root, 'FCMData');
+  return {
+    enabled: true,
+    root,
+    dataRoot,
+    sessionData: path.join(dataRoot, 'Session'),
+    logs: path.join(dataRoot, 'logs'),
+    crashDumps: path.join(dataRoot, 'CrashDumps'),
+  };
+}
+
+// Fail closed before Electron creates a profile. Reject a pre-created symlinked
+// FCMData directory so "contained" cannot silently resolve outside the package.
+function validatePortableLayout(fs, layout, pathApi) {
+  const path = pathApi || require('path'); // eslint-disable-line global-require
+  if (!layout || !layout.enabled) return { ok: true };
+  if (layout.error) return { ok: false, error: layout.error };
+  try {
+    const rootReal = fs.realpathSync(layout.root);
+    if (fs.existsSync(layout.dataRoot) && fs.lstatSync(layout.dataRoot).isSymbolicLink()) {
+      return { ok: false, error: 'FCMData must not be a symbolic link' };
+    }
+    fs.mkdirSync(layout.dataRoot, { recursive: true, mode: 0o700 });
+    const dataReal = fs.realpathSync(layout.dataRoot);
+    if (dataReal !== rootReal && !dataReal.startsWith(rootReal + path.sep)) {
+      return { ok: false, error: 'FCMData resolves outside the portable folder' };
+    }
+    const probe = path.join(layout.dataRoot, `.fcm-write-probe-${process.pid}`);
+    const moved = probe + '.ok';
+    const fd = fs.openSync(probe, 'wx', 0o600);
+    try {
+      fs.writeSync(fd, 'portable-write-probe');
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(probe, moved);
+    if (fs.readFileSync(moved, 'utf8') !== 'portable-write-probe') throw new Error('write probe mismatch');
+    fs.unlinkSync(moved);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error && error.message ? error.message : String(error) };
+  }
+}
+
+function atomicWriteFileSync(fs, target, content) {
+  const temp = `${target}.tmp-${process.pid}`;
+  const fd = fs.openSync(temp, 'w', 0o600);
+  try {
+    fs.writeSync(fd, content);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(temp, target);
+}
+
 module.exports = {
   DEFAULT_APP_CLIENT_KEY,
   DEFAULT_WIDTH,
@@ -1277,6 +1368,8 @@ module.exports = {
   desiredTopmost,
   shouldIgnoreMouse,
   nextPresenceState,
+  shouldExpandOnGameLaunch,
+  shouldSuppressIdleCollapse,
   nextGameFocusState,
   shouldHidePanelInGame,
   buildPanelHidingSaveScript,
@@ -1302,4 +1395,7 @@ module.exports = {
   fo76UserRegCandidates,
   parseWineGrabSettings,
   shouldPromptCursorLock,
+  resolvePortableLayout,
+  validatePortableLayout,
+  atomicWriteFileSync,
 };

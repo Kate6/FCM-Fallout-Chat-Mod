@@ -10,6 +10,96 @@
 
 ---
 
+## Local physical Delete candidate 2.10.85
+
+The 2.10.84 xScal trace confirmed that Delete reached the host as `Unmapped` and eventually reduced
+the focused field from four characters to zero, while the editor-safe hide guard kept the panel
+visible. It also exposed a configuration gap: `hideKey` still shipped blank and physical Delete
+was not registered as an idle hide trigger. Version 2.10.85 makes `hideKey=DELETE` the shared
+default, registers it through the selected provider's physical `Input.*` surface, and sends its
+edge through the same input-ownership guard. Delete edits while an editor is open and hides after
+the editor closes. Named-action behavior remains available on loaders that forward Delete by name.
+
+## Local editor-safe Delete candidate 2.10.84
+
+All hide entry points now fail closed while either provider's editor owns keyboard input. If a
+user configured `hideKey=DELETE`, the named Delete action returns unhandled to SharedHUDTools or
+the ZFE fallback so it can edit the draft; it cannot close the editor or hide the panel. Once the
+editor closes, that same configured action hides normally. `/hide` still works because commands
+are evaluated after submission, and the F11 menu remains available while idle. Pure command tests
+cover idle hide, active-editor Delete, blank bindings, and unrelated actions. The maintained
+ZFE/xScal matrix records this shared rule alongside the visible editor, callback recovery, provider
+discovery, key sources, and frame-budgeted renderer.
+
+## Local Windows frame-budget candidate 2.10.83
+
+An xScal 0.1.15 log from Windows 10 confirmed that 2.10.79 removed the white intermediate frame
+but continued rebuilding every visible retained row when a message arrived. At 76-187 rows, 115
+of 119 sliced rebuilds took at least 100 ms end to end, with a 166 ms median and 3,038 ms maximum.
+More directly, the synchronous first slice repeatedly occupied 32-65 ms. No native relay poll
+crossed the widget's 50 ms slow-call threshold, so the log does not support the network call as
+the observed stall source.
+
+Version 2.10.83 reduces each render turn from 32 rows to six. Using the observed cost of roughly
+one millisecond per row, this targets less than eight milliseconds of Scaleform construction per
+turn. Atomic staging remains in place, so the older complete feed stays visible until all slices
+finish and the new snapshot commits. Packaging tests lock the slice limit. This mitigates the
+confirmed frame spikes without changing history limits, ordering, filtering, emoji, or provider
+behavior; fresh Windows 10 xScal frame-time validation remains required.
+
+## Local lost-submit recovery candidate 2.10.82
+
+The 2026-09-13 ZFE log confirmed that 2.10.81 opened the SharedHUDTools editor and retained four
+successive characters, but Enter removed `stage.focus` without invoking the registered TextEdit
+callback. No send followed, while the widget's logical `_inputOpen` flag remained true and blocked
+later Insert edges.
+
+Version 2.10.82 binds a high-priority, observational key-down listener to the public focused input
+field. It retains the draft only in memory and arms recovery on Enter without preventing the host
+event. A 225 ms watchdog gives the normal callback priority. If the field disappears and the
+callback remains missing, the widget invalidates that generation, balances `EndTextEdit`, and
+submits the captured draft once. Escape, Tab, and unexplained focus loss cancel instead and restore
+Insert. `FcmSharedInputRecovery` has pure tests for grace, submit, cancel, empty draft, and missing
+editor cases; package anchors require the recovery integration. The same BA2 behavior applies to
+ZFE and xScal because both use SharedHUDTools first. The production-target BA2 was installed in the
+local Steam/Proton game directory with ZFE and the default key map; fresh in-game acceptance is
+pending.
+
+## Local visible-input correction candidate 2.10.81
+
+Both providers again open the visible SharedHUDTools editor first. The widget enables selection on
+the focused public input TextField because the host creates it with `selectable=false`; the
+2.10.79 trace showed that field returning to length zero between ordinary keys. ZFE retains its
+buffered native editor only as a fallback when SharedHUDTools cannot open. xScal never receives
+ZFE-only input calls. Shipped key settings remain Insert, Page Up/Down, Up/Down, with newest and
+hide unbound.
+
+## Local provider-aware input candidate 2.10.80
+
+This superseded candidate selected ZFE's buffered native API first. In-game testing showed Insert
+was detected, but the native buffer did not provide the visible chat field. Version 2.10.81
+restores the shared visible editor and keeps native input as fallback only.
+
+Pure Haxe tests cover ZFE, xScal, unavailable-native, and unknown-provider routing. Both provider
+transports, history recovery, rendering, and packaging remain in the single shared artifact.
+
+## Local atomic-refresh diagnostic candidate 2.10.79
+
+The message feed retains its last complete display snapshot while delayed row batches are built in
+a hidden staging container. Each staged row receives its final content position before one guarded
+commit replaces the active snapshot. A newer render generation, panel rebuild, link/account state
+change, failure, or unload discards the staging container without exposing it. This removes the
+partially positioned overlapping rows that produced a bright flash during message refresh.
+
+For xScal sessions, SharedHUDTools remains the only lock-owning text editor. While that editor is
+open, the widget samples only public `stage.focus` TextField metadata: text length, caret and
+selection indexes, input type, and `maxChars`. Logs use the `inputdiag` category and never include
+the draft. This is diagnostic instrumentation for the reported `hello` -> `o` replacement; it does
+not force the caret or alter selection before the runtime trace establishes the cause.
+
+Pure Haxe generation tests cover the commit gate, and package/source tests require both the atomic
+snapshot and privacy-safe input diagnostic anchors. In-game xScal validation remains pending.
+
 ## Local combined General candidate 2.10.78
 
 General displays General, current-room Server, Trading, Events, Infests, and Raids using

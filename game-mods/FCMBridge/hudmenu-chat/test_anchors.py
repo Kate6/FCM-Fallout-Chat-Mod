@@ -480,10 +480,10 @@ if widget_src:
           and 'refreshAuthState();' in widget_src
           and 'isPendingTransportResponse' in widget_src,
           "FCMChatWidget refreshes xScal auth during polling and ignores pending transport responses")
-    shared_input = widget_src.find("        openInputSharedHudTools();")
-    native_input = widget_src.find("        if (USE_NATIVE_INPUT && _nativeInputUsable)")
-    check(shared_input >= 0 and native_input > shared_input,
-          "FCMChatWidget tries the host-domain SharedHUDTools editor before native input")
+    check('FcmInputRoute.preferred(provider, USE_NATIVE_INPUT && _nativeInputUsable)' in widget_src
+          and 'FcmInputRoute.mayUseNativeFallback' in widget_src
+          and 'openInputSharedHudTools();' in widget_src,
+          "FCMChatWidget routes shared input and ZFE fallback in one build")
     check("function dispatchEditText" not in widget_src
           and "_editTextLockOwned" not in widget_src
           and "BSUIDataManager.dispatchEvent" not in widget_src,
@@ -586,7 +586,8 @@ if widget_src:
           and 'row.addChild(channelTf)' not in widget_src
           and 'contentTf.x = box.x' not in widget_src
           and 'row.addChild(contentTf)' in widget_src
-          and 'row.view.y = row.contentY - _feedScrollY' in widget_src
+          and 'rendered.view.y = contentY' in widget_src
+          and '_feedContentLayer.y = -_feedScrollY' in widget_src
           and 'contentTf.y + authorBounds.y' in widget_src
           and 'localToGlobal' not in widget_src
           and 'globalToLocal' not in widget_src,
@@ -694,9 +695,9 @@ if widget_src:
           and "reconcileDisplayName" not in widget_src,
           "FCMChatWidget has no cached late-identity native reconnect path")
     check("openInputSharedHudTools();" in widget_src
-          and "SharedHUDTools is the only supported path" in widget_src
-          and "no-lock native fallback" in widget_src,
-          "FCMChatWidget gives the game-control lock to host HUDTools and keeps native input no-lock")
+          and "xScal never receives ZFE-only input calls" in widget_src
+          and "no-lock ZFE native fallback" in widget_src,
+          "FCMChatWidget keeps provider-specific input ownership explicit")
     try:
         user_event_src = open(USER_EVENT_HX, encoding="utf-8").read()
     except FileNotFoundError:

@@ -83,6 +83,14 @@ class TestFcmCommand {
             FcmCommand.navigationAction("F12", "NextPage", "PrevPage", "Up", "Down", "F12") == "feed-bottom");
         check("default scroll-to-bottom navigation remains unbound",
             FcmCommand.navigationAction("Home", "NextPage", "PrevPage", "Up", "Down", "") == "");
+        check("Delete hide binding works while idle",
+            FcmCommand.configuredHideAction("Delete", "DELETE", false) == "hide");
+        check("Delete remains an editor key while typing",
+            FcmCommand.configuredHideAction("Delete", "DELETE", true) == "editor");
+        check("blank hide binding stays disabled",
+            FcmCommand.configuredHideAction("Delete", "", false) == "");
+        check("unrelated action does not hide",
+            FcmCommand.configuredHideAction("Home", "DELETE", false) == "");
         check("ordinary text never enters channel selection",
             FcmCommand.navigationAction("A", "NextPage", "PrevPage") == "");
         check("Unmapped never enters channel selection",

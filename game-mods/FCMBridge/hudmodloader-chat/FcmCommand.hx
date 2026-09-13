@@ -144,6 +144,13 @@ class FcmCommand {
         return inputOpen && !hidden;
     }
 
+    /** A configured hide action is inactive while an editor owns keyboard input. */
+    public static function configuredHideAction(raw:String, configured:String, inputOpen:Bool):String {
+        if (StringTools.trim(configured == null ? "" : configured).length == 0
+                || !sameAction(normalizeAction(raw), configured)) return "";
+        return inputOpen ? "editor" : "hide";
+    }
+
     /** A latched action has already been handled; this accepts key-up-only loaders as well. */
     public static function navigationEdgeIsNew(alreadyLatched:Bool):Bool {
         return !alreadyLatched;

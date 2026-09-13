@@ -151,7 +151,7 @@ class TestFcmConfig {
         eqs("default scrollUpKey", d.scrollUpKey, "Up");
         eqs("default scrollDownKey", d.scrollDownKey, "Down");
         eqs("default scrollBottomKey (unset)", d.scrollBottomKey, "");
-        eqs("default hideKey (unset)", d.hideKey, "");
+        eqs("default hideKey", d.hideKey, "DELETE");
         eqb("default showChannelTag", d.showChannelTag, true);
         eqb("default showHints", d.showHints, false);
         eqs("default linkUrl", d.linkUrl, "falloutchatmod.com/link");

@@ -44,6 +44,14 @@ describe('releaseAnnouncement', () => {
     });
   });
 
+  test('silent release mentions everyone without pushing a notification', () => {
+    assert.deepEqual(releaseAnnouncementMessage(true, true), {
+      content: '@everyone',
+      allowedMentions: { parse: ['everyone'] },
+      flags: 4096,
+    });
+  });
+
   describe('nexusModUrl', () => {
     test('defaults to the FCM Nexus page', () => {
       delete process.env.NEXUS_MOD_URL;

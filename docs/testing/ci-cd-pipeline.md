@@ -115,7 +115,7 @@ check  -jest   (matrix)     -smoke-linux    -windows-nsis
 | `backend-jest` | `ubuntu-latest` | **Required** | `postgres:16` + `redis:7` service containers; service containers on `localhost` (hosted) or `docker` hostname (self-hosted DinD); `prisma generate` + `db push`; `npm run build` then `npm test` + `npm run test:unit` |
 | `unit-vitest` | `ubuntu-latest` | **Required** | **Consolidated matrix** (`cross-platform-overlay`, `admin-dashboard`); replaced the former `overlay-unit-component` + `dashboard-unit-component` jobs |
 | `overlay-launch-smoke-linux` | `ubuntu-latest` | **Required** | Validates the Linux installer decision path (`bash -n`, `--help`, `--print-plan`), then builds once and runs packaged-launch smoke (`ci-launch-smoke.mjs`); the former auto-update E2E step was removed when auto-update was retired; replaced former `overlay-e2e-linux` |
-| `overlay-build-windows-nsis` | `windows-latest` | **Required** (prod+PRs) | Builds the NSIS installer **natively** on `windows-latest` (no Wine/Docker/GHCR); runs `.github/scripts/win-artifacts-check.mjs` — asserts the installer + exe are present and that `app-update.yml` / `latest*.yml` are **absent** (the overlay no longer auto-updates); renamed from `overlay-autoupdate-e2e-windows` |
+| `overlay-build-windows-nsis` | `windows-latest` | **Required** (prod+PRs) | Builds the NSIS installer and portable `.exe` **natively** on `windows-latest` (no Wine/Docker/GHCR); runs `.github/scripts/win-artifacts-check.mjs` — asserts unpacked, installer, and portable executables are present and that `app-update.yml` / `latest*.yml` are **absent** (the overlay no longer auto-updates); renamed from `overlay-autoupdate-e2e-windows` |
 | `ci-summary` | `ubuntu-latest` | **The single required gate** | `if: always()`; fails if any listed job is `failure`, `cancelled`, or `skipped` |
 
 All runner values above are defaults (no `CI_RUNNER` / `CI_RUNNER_WINDOWS` variable set). See
@@ -229,6 +229,9 @@ The former auto-update E2E step (`tests/mock-relay/auto-update.e2e.mjs`) was rem
 `electron-updater` was retired for Nexus Mods ToS compliance.
 
 ## Windows NSIS CI (`overlay-build-windows-nsis`)
+
+Despite the historical job ID, this gate builds both `nsis` and `portable` targets. Static
+artifact checks require the unpacked executable, installer, and standalone portable executable.
 
 Builds the NSIS installer **natively on `windows-latest`** (no Wine, no Docker, no
 `ghcr.io/unn-corp/win-electron-builder` image). The prior Wine/DinD/docker-cp strategy was
