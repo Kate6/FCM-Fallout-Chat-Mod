@@ -6,15 +6,27 @@ All frames are JSON objects with a `type` string and a `payload` object. Directi
 
 ---
 
-## Admin Observer Connections (`/auth/ws-ticket`)
+## Browser Connections (`/auth/ws-ticket`)
 
-The `/auth/ws-ticket` REST endpoint issues a 60-second single-use token that upgrades a WebSocket connection at `/ws?ticket=<token>` to an admin-observer socket.
+The `/auth/ws-ticket` REST endpoint issues a 60-second single-use token that upgrades a WebSocket connection at `/ws?ticket=<token>`.
 
-**Role gate:** Only sessions with role `owner`, `admin`, or `moderator` (i.e. `isPrivilegedRole()` returns true) may obtain a ticket. Non-staff members receive HTTP 403. The ticket JSON stored in Redis carries the role and is re-validated inside `handleAdminObserver` as defense in depth — a ticket issued before a role downgrade is rejected at upgrade time.
+**Role routing:** Sessions with role `owner`, `admin`, or `moderator` receive an
+`admin` ticket and enter `handleAdminObserver`; the role is re-validated during
+upgrade as defense in depth. Regular Discord guild members receive a `web` ticket
+containing the server-resolved game-user ID and enter the standard client handler,
+where normal party/private-chat, block, ban, mute, rate-limit, and per-frame
+authorization rules apply. A non-staff session without a linked/provisioned game
+user receives HTTP 403.
 
 **Ticket JSON shape stored in Redis:**
 ```json
 { "type": "admin", "discordId": "...", "username": "...", "role": "moderator" }
+```
+
+or:
+
+```json
+{ "type": "web", "userId": "..." }
 ```
 
 ---

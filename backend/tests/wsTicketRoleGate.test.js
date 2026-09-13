@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * Unit tests for the /auth/ws-ticket role gate (fix #1) and the
- * handleAdminObserver defense-in-depth re-check.
+ * Unit tests for /auth/ws-ticket routing and the handleAdminObserver
+ * defense-in-depth re-check.
  *
  * These tests exercise the role-gate logic without booting a real HTTP server
  * or Redis — they mock session and the Redis client at the module level.
@@ -17,14 +17,16 @@ function isPrivilegedRole(role) {
 // ── Simulate the role-gate check in /auth/ws-ticket ──────────────────────────
 
 /**
- * Mimics the gate logic from server.ts /auth/ws-ticket:
- *   if (!isPrivilegedRole(discordUser.role)) → 403
- *   else → issue ticket
+ * Mimics the routing logic from server.ts /auth/ws-ticket. Privileged sessions
+ * get observer tickets; members with a linked game user get web-client tickets.
  */
-function simulateWsTicketGate(sessionDiscordUser) {
+function simulateWsTicketGate(sessionDiscordUser, gameUserId = null) {
   if (!sessionDiscordUser) return { status: 401 };
-  if (!isPrivilegedRole(sessionDiscordUser.role)) return { status: 403 };
-  return { status: 200, ticketPayload: { type: 'admin', ...sessionDiscordUser } };
+  if (isPrivilegedRole(sessionDiscordUser.role)) {
+    return { status: 200, ticketPayload: { type: 'admin', ...sessionDiscordUser } };
+  }
+  if (!gameUserId) return { status: 403 };
+  return { status: 200, ticketPayload: { type: 'web', userId: gameUserId } };
 }
 
 // ── Simulate the handleAdminObserver defense-in-depth re-check ───────────────
@@ -46,16 +48,20 @@ describe('/auth/ws-ticket role gate', () => {
     expect(simulateWsTicketGate(null).status).toBe(401);
   });
 
-  it('returns 403 for role:member', () => {
+  it('returns a web-client ticket for a member with a game user', () => {
+    const result = simulateWsTicketGate(
+      { id: '1', username: 'user', role: 'member' },
+      '11111111-1111-4111-8111-111111111111',
+    );
+    expect(result.status).toBe(200);
+    expect(result.ticketPayload).toEqual({
+      type: 'web',
+      userId: '11111111-1111-4111-8111-111111111111',
+    });
+  });
+
+  it('returns 403 when a non-privileged session has no game user', () => {
     expect(simulateWsTicketGate({ id: '1', username: 'user', role: 'member' }).status).toBe(403);
-  });
-
-  it('returns 403 for role:user', () => {
-    expect(simulateWsTicketGate({ id: '1', username: 'user', role: 'user' }).status).toBe(403);
-  });
-
-  it('returns 403 for role:supporter', () => {
-    expect(simulateWsTicketGate({ id: '1', username: 'sup', role: 'supporter' }).status).toBe(403);
   });
 
   it('returns 200 and ticket for role:moderator', () => {
