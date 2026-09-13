@@ -37,13 +37,13 @@ sequenceDiagram
     participant R as Redis
 
     C->>B: GET /auth/ws-ticket (HTTP, credentials: include)
-    B->>R: SET ws_ticket:<uuid> "admin-json-or-installToken" EX 30
+    B->>R: SET ws_ticket:<uuid> "admin-or-web JSON" EX 60
     B-->>C: { data: { ticket: "<uuid>" } }
 
     C->>B: WS Upgrade /ws?ticket=<uuid>
     B->>R: GET ws_ticket:<uuid>  (one-time use; DEL immediately)
-    R-->>B: ticket value (discordId + role)
-    B-->>C: WS OPEN (admin observer path)
+    R-->>B: ticket value (staff identity or member userId)
+    B-->>C: WS OPEN (admin observer or standard client path)
 
     Note over C,B: Game-client path (Electron overlay)
 
@@ -65,11 +65,16 @@ sequenceDiagram
 | Path | How to connect | Who uses it |
 |------|---------------|-------------|
 | **Game client** | `X-Auth-Token: <session-token>` header | Electron overlay |
-| **Admin observer** | `?ticket=<uuid>` query param | Web dashboard admin tab |
+| **Browser ticket** | `?ticket=<uuid>` query param | Website chat (staff observer or regular member client) |
 
 The ticket is a one-time Redis key (`ws_ticket:<uuid>`) consumed on first use (`handlers.ts:1438`). The session token is a long-lived Redis key (`session:<token>`) with a 24h TTL (`usersController.ts:20`).
 
-**Admin observer role gate:** `GET /auth/ws-ticket` requires the session user's role to be `owner`, `admin`, or `moderator`. Non-privileged (e.g. `member`/`user`) sessions receive HTTP 403. The role is also stored in the ticket JSON and re-validated when the WebSocket upgrade arrives (`handleAdminObserver`) as defense in depth against role-downgrade races.
+**Browser role routing:** `GET /auth/ws-ticket` issues `admin` tickets to
+owner/admin/moderator sessions and `web` tickets to regular members. Admin roles
+are re-validated when the upgrade arrives. A `web` ticket carries only the
+server-resolved game-user ID and enters the standard client handler, so members
+receive the same authorization enforcement as desktop clients without gaining
+admin-observer visibility.
 
 Close codes used by the backend:
 

@@ -1646,29 +1646,42 @@ app.get('/auth/logout', apiLimiter, (req: Request, res: Response) => {
 });
 
 /**
- * GET /auth/ws-ticket -- issues a 60-second single-use WS ticket for admin observers.
- * Only privileged roles (owner/admin/moderator) may obtain a ticket.
+ * GET /auth/ws-ticket -- issues a 60-second single-use WS ticket for browser chat.
+ * Privileged roles use the admin-observer path; regular members use the same
+ * permission-checked client path as the desktop overlay.
  */
 app.get('/auth/ws-ticket', apiLimiter, async (req: Request, res: Response) => {
   if (!(req.session as any)?.discordUser) { res.status(401).json({ data: null }); return; }
 
   const discordUser = (req.session as any).discordUser;
-  // Role gate: only privileged staff may open admin-observer sockets.
   const { isPrivilegedRole } = await import('./services/userRoleService.js').then(m => m.default ?? m);
-  if (!isPrivilegedRole(discordUser.role)) {
-    res.status(403).json({ data: null });
-    return;
-  }
+  const privileged = isPrivilegedRole(discordUser.role);
+
+  // A normal browser client must enter the standard client handler so party,
+  // PM, block, ban, mute, and per-frame permission checks remain authoritative.
+  // Resolve the server-owned user ID here; never trust an ID from the browser.
+  const gameUser = privileged
+    ? null
+    : await prisma.user.findFirst({ where: { discordId: discordUser.id }, select: { id: true } });
+  if (!privileged && !gameUser) { res.status(403).json({ data: null }); return; }
 
   const ticket = uuidv4();
   try {
     const redis = await getRedisClient();
-    await redis.set(`ws_ticket:${ticket}`, JSON.stringify({
-      type: 'admin',
-      discordId: discordUser.id,
-      username: discordUser.username,
-      role: discordUser.role,
-    }), { EX: 60 });
+    let ticketPayload: Record<string, string>;
+    if (privileged) {
+      ticketPayload = {
+        type: 'admin',
+        discordId: discordUser.id,
+        username: discordUser.username,
+        role: discordUser.role,
+      };
+    } else {
+      // The guard above proves this branch has a provisioned game user.
+      if (!gameUser) { res.status(403).json({ data: null }); return; }
+      ticketPayload = { type: 'web', userId: gameUser.id };
+    }
+    await redis.set(`ws_ticket:${ticket}`, JSON.stringify(ticketPayload), { EX: 60 });
     res.json({ data: { ticket } });
   } catch (err) {
     logger.error({ err }, 'Failed to create WS ticket');

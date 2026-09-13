@@ -69,7 +69,7 @@ Every subsequent request from the desktop client includes `X-Auth-Token: <sessio
 
 4. **`GET /auth/me`** — returns the session user's identity + DB-resolved `fo76Name` and avatar URL.
 
-5. **`GET /auth/ws-ticket`** — issues a 60s single-use UUID ticket in Redis (`ws_ticket:<ticket>`) so admin observers can open an authenticated WebSocket without re-sending cookie credentials.
+5. **`GET /auth/ws-ticket`** — issues a 60s single-use UUID ticket in Redis (`ws_ticket:<ticket>`) so browser clients can open an authenticated WebSocket without exposing cookie credentials to the upgrade. Staff receive an `admin` observer ticket; regular members receive a `web` ticket routed through the standard permission-checked client handler.
 
 ### `requireDiscordRole(...allowedRoles)`
 

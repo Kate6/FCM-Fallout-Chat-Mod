@@ -1449,9 +1449,12 @@ function markClientMuted(userId: string, muted: boolean, detail?: { until: strin
 }
 
 async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<void> {
-  // Check for admin observer ticket (?ticket=<uuid>)
+  // Check for a one-time browser ticket (?ticket=<uuid>). Staff enter the
+  // admin-observer handler; members continue through the standard client path.
   const urlParams = new URLSearchParams((req.url || '').split('?')[1] || '');
   const ticket = urlParams.get('ticket');
+  let webTicketUserId: string | null = null;
+  let webConnectionToken: string | null = null;
 
   if (ticket) {
     let adminIdentity: AdminIdentity = {};
@@ -1468,19 +1471,29 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
       } else {
         try {
           const parsed = JSON.parse(ticketVal);
-          if (parsed.type !== 'admin') {
+          if (parsed.type === 'web') {
+            if (typeof parsed.userId !== 'string' || !UUID_RE.test(parsed.userId)) {
+              ws.close(WS_CLOSE_AUTH_FAILED, 'Malformed web ticket');
+              return;
+            }
+            webTicketUserId = parsed.userId;
+            // The normal handler keys its connection registry by session token.
+            // A ticket-derived key is unique, ephemeral, and contains no secret.
+            webConnectionToken = `web:${ticket}`;
+          } else if (parsed.type !== 'admin') {
             ws.close(WS_CLOSE_AUTH_FAILED, 'Invalid ticket type');
             return;
+          } else {
+            // Defense-in-depth: re-validate the stored role even if the ticket
+            // endpoint already checked. Protects against role degradation races
+            // and legacy tickets issued without the role gate.
+            const { isPrivilegedRole } = require('../services/userRoleService') as typeof import('../services/userRoleService');
+            if (!isPrivilegedRole(parsed.role ?? '')) {
+              ws.close(WS_CLOSE_AUTH_FAILED, 'Insufficient role');
+              return;
+            }
+            adminIdentity = { discordId: parsed.discordId, username: parsed.username };
           }
-          // Defense-in-depth: re-validate the stored role even if the ticket
-          // endpoint already checked. Protects against role degradation races
-          // and legacy tickets issued without the role gate.
-          const { isPrivilegedRole } = require('../services/userRoleService') as typeof import('../services/userRoleService');
-          if (!isPrivilegedRole(parsed.role ?? '')) {
-            ws.close(WS_CLOSE_AUTH_FAILED, 'Insufficient role');
-            return;
-          }
-          adminIdentity = { discordId: parsed.discordId, username: parsed.username };
         } catch {
           ws.close(WS_CLOSE_AUTH_FAILED, 'Malformed ticket');
           return;
@@ -1491,8 +1504,10 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
       ws.close(WS_CLOSE_AUTH_FAILED, 'Auth service unavailable');
       return;
     }
-    handleAdminObserver(ws, adminIdentity);
-    return;
+    if (!webTicketUserId) {
+      handleAdminObserver(ws, adminIdentity);
+      return;
+    }
   }
 
   // ── Early-frame buffer (connect-time race fix) ─────────────────────────────
@@ -1508,7 +1523,7 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
   ws.on('message', earlyFrameBuffer);
 
   // Extract token from header (game client upgrade request)
-  const token = req.headers['x-auth-token'] as string | undefined;
+  const token = webConnectionToken ?? req.headers['x-auth-token'] as string | undefined;
 
   if (!token) {
     ws.close(WS_CLOSE_AUTH_FAILED, 'Missing X-Auth-Token');
@@ -1516,14 +1531,16 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
   }
 
   // Validate token against Redis
-  let userId: string | null;
-  try {
-    const redis = await getRedisClient();
-    userId = await redis.get(`session:${token}`);
-  } catch (err) {
-    logger.error({ err }, 'Redis error during WS auth');
-    ws.close(WS_CLOSE_AUTH_FAILED, 'Auth service unavailable');
-    return;
+  let userId: string | null = webTicketUserId;
+  if (!userId) {
+    try {
+      const redis = await getRedisClient();
+      userId = await redis.get(`session:${token}`);
+    } catch (err) {
+      logger.error({ err }, 'Redis error during WS auth');
+      ws.close(WS_CLOSE_AUTH_FAILED, 'Auth service unavailable');
+      return;
+    }
   }
 
   if (!userId) {

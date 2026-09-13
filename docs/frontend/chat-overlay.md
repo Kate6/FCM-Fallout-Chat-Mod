@@ -305,6 +305,11 @@ the retry loop stops and the component enters **terminal auth state**
 - Any manual reconnect trigger (gate change, `wsReconnectTick` bump) resets the
   terminal state and starts a fresh connect sequence.
 
+All authenticated Discord guild members may obtain a ticket. Staff tickets enter
+the privileged admin-observer handler; regular-member `web` tickets enter the same
+permission-checked client handler as the desktop overlay, including party/private
+chat, block, ban, mute, and frame-level authorization enforcement.
+
 Pure helpers exported for testing:
 - `nextTicketRetryDelay(attempt, rand?)` — same formula as `backoffDelay`; delegates to it.
 - `isAuthTerminal(consecutiveAuthFailures)` — returns true at ≥ 3.
