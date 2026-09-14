@@ -384,6 +384,9 @@ jobs:
       - name: Test delayed HUD render invalidation
         working-directory: game-mods/FCMBridge/hudmodloader-chat
         run: haxe test-render-generation.hxml
+      - name: Test feed render planning (coalescing, prefix reuse, slice budget)
+        working-directory: game-mods/FCMBridge/hudmodloader-chat
+        run: haxe test-feed-plan.hxml
       - name: Run native bridge compatibility tests
         working-directory: game-mods/FCMBridge
         run: haxe test-native-api.hxml

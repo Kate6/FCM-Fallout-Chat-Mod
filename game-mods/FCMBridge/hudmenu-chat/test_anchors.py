@@ -596,7 +596,8 @@ if widget_src:
     check('contentTf.text = runs.text;' in feed_row
           and 'runs.nameStart, runs.nameEnd, FONT_BOLD, nameColor' in feed_row
           and 'runs.nameEnd, runs.statusStart, FONT_BODY, _cfg.textColor' in feed_row
-          and 'tf.setTextFormat(fmt, start, end)' in widget_src,
+          and 'function formatFeedRange' in widget_src
+          and 'tf.setTextFormat(' in widget_src,
           "FCMChatWidget formats exact name and body ranges without HTML color inheritance")
     check('static inline var LOG_INPUT_GAP:Int     = 4;' in widget_src
           and 'var logBottom:Int = h - _cfg.effectiveInputHeight() - LOG_INPUT_GAP;' in widget_src
@@ -847,6 +848,16 @@ if widget_src:
           and 'function renderRecordsFallback(err:Dynamic)' in widget_src
           and 'function(_:Dynamic) { doSlice(); }' not in widget_src,
           "FCMChatWidget guards delayed render exceptions as well as the first slice")
+    check('function requestRender()' in widget_src
+          and 'FcmRenderCoalescer' in widget_src
+          and '_renderCoalescer.request()' in widget_src
+          and 'function buildFeedRowSinglePass' in widget_src
+          and 'FcmFeedPlan.needsEmojiPass' in widget_src
+          and 'FcmFeedPlan.prefixReuseCount' in widget_src
+          and 'FcmFeedPlan.nextSliceSize' in widget_src
+          and 'cachedFeedFormat(' in widget_src
+          and 'cachedLineHeight()' in widget_src,
+          "FCMChatWidget coalesces burst renders and reuses feed rows")
     event_parser = widget_src[widget_src.index('function parseAndRenderEvents('):widget_src.index('function markSeenEvent(')]
     replay_guard = event_parser.find('!markSeenEvent(channel, evId, messageId)')
     echo_match = event_parser.find('if (reconcileOwnEcho(')

@@ -90,6 +90,15 @@ static vector sprites; unsupported custom emoji fall back to readable names. No 
 images or GIF playback are loaded. Delayed row slices check their generation and catch their own
 failures; fallback invalidates pending work. Flash/JavaScript tests do not establish GFx behavior.
 
+Burst traffic (poll batches, optimistic echo, ACK reconciliation) coalesces into one deferred
+render per tick; tab switches, resizes, and config changes still render immediately. Tail
+appends reuse the committed snapshot's matching prefix rows and only construct the new suffix.
+Rows take a single build pass (plain bodies skip the emoji planner via a fast prefilter),
+`TextFormat` objects and font measurements are cached per font size, staging layers and the
+slice timer are reused, and the slice size adapts within 4-12 rows to hold the per-tick UI
+budget. Pure planning helpers live in `FcmFeedPlan.hx`/`FcmRenderCoalescer.hx` with
+`test-feed-plan.hxml` coverage.
+
 F11 → FCM → Customize changes position, independent panel dimensions, feed/input text size, input
 height, backgrounds, text colors, opacity, and auto-hide. Input width/alignment follow the panel.
 Server-resolved user colors override the default local sender color. Timestamps are not shown;
@@ -108,6 +117,7 @@ persistence leaves changes session-local. A code checkout does not establish bac
 | `FcmCommand.hx`, `FcmHistory.hx`, `FcmEcho.hx`, `FcmOutbox.hx` | Channel/command, replay, echo, retry guards |
 | `FcmConfig.hx`, `FcmHudLayout.hx` | INI settings and optional per-device persistence |
 | `FcmRenderGeneration.hx`, `FcmFeedText.hx`, `FcmEmoji*.hx` | Delayed rendering, styled text, bundled emoji |
+| `FcmFeedPlan.hx`, `FcmRenderCoalescer.hx`, `TestFcmFeedPlan.hx` | Pure render planning (coalescing, prefix reuse, slice budget) + tests |
 | `FCMChat.ini`, `FCMChatWidget.ini`, `hudmodloader.ini` | Package configuration templates and loader line |
 | `build.hxml`, `normalize_swf.py`, `emoji/` | Haxe build, FWS normalization, bundled sprite data/licenses |
 | `package.py`, `test_package.py`, `test-*.hxml` | Target/provider/distribution packaging and checks |

@@ -1,0 +1,89 @@
+/**
+ * Pure feed-render planning helpers for the in-game chat text feed.
+ *
+ * These functions contain no Flash/Scaleform dependencies so they run under
+ * `haxe --interp` CI. FCMChatWidget uses them to decide:
+ * - whether a row can skip the emoji planner entirely (fast prefilter),
+ * - how many leading rows of a new snapshot can reuse the previous snapshot,
+ * - how to adapt the per-tick slice size to measured construction cost,
+ * - whether burst-triggered renders should coalesce into one deferred render.
+ *
+ * Rendering itself still builds one full-width native TextField per row with
+ * TextFormat ranges, keeps the readable baseline before optional emoji work,
+ * and guards delayed slices with FcmRenderGeneration.
+ */
+class FcmFeedPlan {
+    /** Bounds for the adaptive slice size (rows per timer turn). */
+    public static inline var MIN_SLICE_ROWS:Int = 4;
+    public static inline var DEFAULT_SLICE_ROWS:Int = 6;
+    public static inline var MAX_SLICE_ROWS:Int = 12;
+
+    /**
+     * Fast prefilter: true only when the body could contain an emoji token.
+     * Unicode emoji needs a non-ASCII char; custom Discord markup needs ':' or
+     * '<' (e.g. `:name:` or `<:name:123>`). Plain ASCII chat without those
+     * characters can skip FcmEmoji.plan() entirely.
+     */
+    public static function needsEmojiPass(body:String):Bool {
+        if (body == null || body.length == 0) return false;
+        for (i in 0...body.length) {
+            var c:Int = body.charCodeAt(i);
+            if (c > 127 || c == 58 || c == 60) return true; // non-ASCII, ':' or '<'
+        }
+        return false;
+    }
+
+    /**
+     * Stable identity key for prefix-reuse comparison. Prefers the durable
+     * messageId, falls back to the optimistic localSendId transaction token,
+     * mirroring the widget's ACK reconciliation (never body/sender fallback).
+     */
+    public static function recordKey(channel:String, messageId:String, localSendId:String, pending:Bool):String {
+        var mid:String = messageId == null ? "" : messageId;
+        var txn:String = localSendId == null ? "" : localSendId;
+        var ch:String = channel == null ? "" : channel;
+        if (mid.length > 0) return ch + "\x1fM" + mid;
+        if (txn.length > 0) return ch + "\x1fT" + txn + (pending ? "\x1fp" : "\x1ff");
+        // Records without any identity cannot be reused safely; give each call
+        // site a non-matching key so prefix reuse stops before them.
+        return ch + "\x1fX";
+    }
+
+    /**
+     * Count how many leading keys of the new snapshot match the previous
+     * snapshot in order. Those rows may be reparented as-is; only the suffix
+     * needs fresh construction. Any mismatch (including pending-status flips
+     * on identity-less rows) stops reuse so stale delivery state is rebuilt.
+     */
+    public static function prefixReuseCount(oldKeys:Array<String>, newKeys:Array<String>):Int {
+        if (oldKeys == null || newKeys == null) return 0;
+        var n:Int = oldKeys.length < newKeys.length ? oldKeys.length : newKeys.length;
+        var count:Int = 0;
+        for (i in 0...n) {
+            var a:String = oldKeys[i];
+            var b:String = newKeys[i];
+            if (a == null || b == null || a.length == 0 || b.length == 0) break;
+            // Identity-less sentinel keys never match; String.endsWith("\x1fX")
+            // would also collide across different rows, so stop reuse here.
+            if (a.charCodeAt(a.length - 1) == 0x1F + 0) {} // no-op guard for clarity
+            if (StringTools.endsWith(a, "\x1fX") || StringTools.endsWith(b, "\x1fX")) break;
+            if (a != b) break;
+            count++;
+        }
+        return count;
+    }
+
+    /**
+     * Adapt the slice size to the measured construction cost of the last slice.
+     * Keeps per-tick UI work near the ~8ms budget the widget's slice comment
+     * targets: grow when cheap, shrink when expensive, otherwise hold.
+     */
+    public static function nextSliceSize(current:Int, sliceMs:Float):Int {
+        var size:Int = current;
+        if (size < MIN_SLICE_ROWS) size = MIN_SLICE_ROWS;
+        if (size > MAX_SLICE_ROWS) size = MAX_SLICE_ROWS;
+        if (sliceMs < 4 && size < MAX_SLICE_ROWS) return size + 1;
+        if (sliceMs > 12 && size > MIN_SLICE_ROWS) return size - 1;
+        return size;
+    }
+}

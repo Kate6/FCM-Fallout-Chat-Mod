@@ -18,6 +18,14 @@ work and build the plain-text fallback. Every delayed slice must check its rende
 catch exceptions inside that callback; the scheduling stack's catch cannot handle later failures.
 A stale failure must not replace a newer feed.
 
+Burst ingest/echo/ACK traffic coalesces into one deferred render per tick; tab, resize, and
+config changes still render immediately. Tail appends reuse the committed snapshot's matching
+prefix rows (durable message ID first, transaction token second, never body fallback) and build
+only the new suffix in a single pass — plain bodies skip the emoji planner via a fast prefilter.
+`TextFormat` objects, line height, and NBSP advance are cached per font size; staging layers and
+the slice timer are reused; the slice size adapts within 4–12 rows to hold the per-tick UI budget.
+Pure planning lives in `FcmFeedPlan.hx`/`FcmRenderCoalescer.hx` with `test-feed-plan.hxml` coverage.
+
 Layout changes on data, resize, scroll, or settings changes, not every frame. Measure the actual
 rendered text after wrapping. `getCharBoundaries` is a layout/advance rectangle, not a tight glyph
 outline. Use text-field offsets when marker and field share a proven row coordinate basis; use
