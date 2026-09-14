@@ -1,5 +1,6 @@
 describe('/online command', () => {
   let tryHandleCommand;
+  let buildHelpResponse;
   let mockGetGlobalOnlineCount;
   let mockGetServerPlayersForUser;
 
@@ -39,7 +40,7 @@ describe('/online command', () => {
       GiveawayError: class GiveawayError extends Error {},
     }));
 
-    ({ tryHandleCommand } = require('../src/services/commandService'));
+    ({ tryHandleCommand, buildHelpResponse } = require('../src/services/commandService'));
   });
 
   test('returns a private online reply with global chat count and world count when available', async () => {
@@ -82,5 +83,13 @@ describe('/online command', () => {
 
     expect(result).toMatchObject({ handled: true, actionType: 'private' });
     expect(result.botMessage).toContain('/online — Show total users online in chat');
+  });
+
+  test('can omit party-only shortcuts from the Discord help reference', () => {
+    const help = buildHelpResponse([{ trigger: '/ss', description: 'Announce Sinkhole Solutions', actionType: 'announce' }], { includeParty: false });
+
+    expect(help).not.toContain('— PARTY');
+    expect(help).not.toContain('/recent');
+    expect(help).toContain('/ss — Announce Sinkhole Solutions');
   });
 });

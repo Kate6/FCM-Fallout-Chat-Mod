@@ -22,6 +22,7 @@ describe('Discord bot-commands sticky help', () => {
       inline: false,
     }]);
     expect(embed.data.fields[0].value).toContain('/nukecodes');
+    expect(embed.data.fields[0].value).toContain('/giveaway');
     expect(embed.data.fields[0].value).toContain('/events');
   });
 

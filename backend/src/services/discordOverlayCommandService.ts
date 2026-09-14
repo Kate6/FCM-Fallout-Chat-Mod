@@ -37,7 +37,7 @@ import {
 
 const COMMAND_NAME = 'fcm';
 const MODERATION_COMMAND = 'moderate';
-const SPECIAL_COMMANDS = new Set(['wiki', 'camp', 'minerva', 'nukecodes', 'newcodes', 'serverstatus', 'help', 'appearance', 'events']);
+const SPECIAL_COMMANDS = new Set(['wiki', 'camp', 'minerva', 'nukecodes', 'newcodes', 'serverstatus', 'help', 'appearance', 'events', 'giveaway']);
 const CATEGORY_CHOICES = REASON_CATEGORIES.map((name) => ({ name, value: name }));
 
 type CommandContext = { channelId: string; channelName: string; parentChannelId: string | null };
@@ -47,10 +47,17 @@ function clip(value: string, limit = 1_900): string {
 }
 
 async function replyWithPrivatePages(interaction: ChatInputCommandInteraction, value: string): Promise<void> {
-  const [first, ...rest] = splitDiscordResponse(value);
-  await interaction.reply({ content: first, flags: MessageFlags.Ephemeral });
+  const [heading, ...body] = value.split('\n');
+  const [first, ...rest] = splitDiscordResponse(body.join('\n').trim(), 4_000);
+  await interaction.reply({
+    embeds: [new EmbedBuilder().setTitle(heading.replace(/^◈\s*/, '')).setColor(0xf1c40f).setDescription(first)],
+    flags: MessageFlags.Ephemeral,
+  });
   for (const page of rest) {
-    await interaction.followUp({ content: page, flags: MessageFlags.Ephemeral });
+    await interaction.followUp({
+      embeds: [new EmbedBuilder().setTitle(`${heading.replace(/^◈\s*/, '')} (continued)`).setColor(0xf1c40f).setDescription(page)],
+      flags: MessageFlags.Ephemeral,
+    });
   }
 }
 
@@ -93,6 +100,7 @@ function commandText(interaction: ChatInputCommandInteraction): string | null {
     case 'nukecodes':
     case 'newcodes': return '/nukecodes';
     case 'serverstatus': return '/serverstatus';
+    case 'giveaway': return `/giveaway ${interaction.options.getString('command', true)}`;
     default: return null;
   }
 }
@@ -133,7 +141,7 @@ async function replyForCommand(interaction: ChatInputCommandInteraction, result:
 
 async function handleOverlayCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (interaction.commandName === 'help') {
-    await replyWithPrivatePages(interaction, buildHelpResponse(await getCommands()));
+    await replyWithPrivatePages(interaction, buildHelpResponse(await getCommands(), { includeParty: false }));
     return;
   }
   if (interaction.commandName === 'appearance') {
@@ -389,6 +397,7 @@ async function registerCommands(client: Client): Promise<void> {
     buildSpecialCommand('serverstatus', 'Show Fallout 76 server status'),
     buildSpecialCommand('help', 'Show the private FCM quick command guide'),
     buildSpecialCommand('appearance', 'Show chat-name and appearance commands'),
+    buildSpecialCommand('giveaway', 'Run a Fallout Chat Mod giveaway command', { name: 'command', description: 'For example: list, join <id>, or start <item>' }),
     buildEventsCommand(),
     buildModerationCommand(),
   ];

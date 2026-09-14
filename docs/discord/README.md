@@ -30,9 +30,14 @@ card data. Other command results are ephemeral to avoid flooding the relay
 channel. `/fcm` accepts only slash-prefixed input, for example
 `/fcm command:"/g hello"` or `/fcm command:"/help"`.
 
+`/giveaway command:` is also available directly in Discord; for example use
+`/giveaway command:list` or `/giveaway command:"join <id>"`.
+
 `/help` is an ephemeral copy of the complete overlay command reference, including
-all built-in and enabled dynamic commands. If it exceeds Discord's response limit,
-the bot sends additional private pages so no command is omitted. `/appearance` explains
+all built-in and enabled dynamic commands that apply in Discord. Party-only shortcuts
+are omitted because they are overlay-local. The response is one Discord embed when it
+fits (with private continuation embeds only if future command growth requires them).
+`/appearance` explains
 the private `/name` and `/cosmetics` controls. `/events` without an option lists
 every currently enabled overlay command whose action is an event announcement;
 `/events command:"/ss"` runs one. The event message is finalized through the

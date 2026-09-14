@@ -119,7 +119,7 @@ function substituteTemplate(
 
 // ── /help Response Builder ────────────────────────────────────────────────────
 
-export function buildHelpResponse(commands: ChatCommand[]): string {
+export function buildHelpResponse(commands: ChatCommand[], options: { includeParty?: boolean } = {}): string {
   const lines: string[] = ['◈ VAULT-TEC COMMAND REFERENCE'];
 
   // PUBLIC channels — these also relay to Discord. Never describe one as a party
@@ -131,11 +131,13 @@ export function buildHelpResponse(commands: ChatCommand[]): string {
   lines.push('/r (/raid) <message> — Send to Raids');
   lines.push('/i <message> — Send to Infests');
 
-  lines.push('', '— PARTY (private — only your party sees these) —');
-  lines.push('/recent (/rp) <message> — Send to your most recent party');
-  lines.push('/p1 <message> — Send to your 1st joined party (Party-tab order, left to right)');
-  lines.push('/p2 <message> — Send to your 2nd joined party');
-  lines.push('/p3 <message> — Send to your 3rd joined party');
+  if (options.includeParty !== false) {
+    lines.push('', '— PARTY (private — only your party sees these) —');
+    lines.push('/recent (/rp) <message> — Send to your most recent party');
+    lines.push('/p1 <message> — Send to your 1st joined party (Party-tab order, left to right)');
+    lines.push('/p2 <message> — Send to your 2nd joined party');
+    lines.push('/p3 <message> — Send to your 3rd joined party');
+  }
 
   lines.push('', '— MODERATION —');
   lines.push('/report bug <description> — Report a bug to the team');

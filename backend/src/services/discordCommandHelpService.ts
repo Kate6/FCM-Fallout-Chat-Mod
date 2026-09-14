@@ -13,7 +13,7 @@ export function buildBotCommandsHelpEmbed(): EmbedBuilder {
     .setColor(0xf1c40f)
     .addFields({
       name: 'Common Commands',
-      value: '`/help` · `/camp` · `/wiki` · `/minerva` · `/nukecodes` · `/appearance` · `/events`',
+      value: '`/help` · `/camp` · `/wiki` · `/minerva` · `/nukecodes` · `/giveaway` · `/appearance` · `/events`',
       inline: false,
     });
 }
