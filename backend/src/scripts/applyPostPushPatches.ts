@@ -13,6 +13,13 @@ export interface PostPushPatchClient {
 
 export const POST_PUSH_PATCHES = [
   {
+    // Prisma's schema DSL cannot express PostgreSQL extensions. Keep required
+    // extensions here because baseline deployments reconcile migration history
+    // instead of replaying raw-SQL migrations on every database.
+    name: 'required-pg-trgm-extension',
+    sql: 'CREATE EXTENSION IF NOT EXISTS pg_trgm;',
+  },
+  {
     name: 'messages-source-check',
     sql: `
 DO $$
