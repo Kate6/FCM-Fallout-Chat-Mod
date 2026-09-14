@@ -33,6 +33,13 @@ channel. `/fcm` accepts only slash-prefixed input, for example
 `/giveaway command:` is also available directly in Discord; for example use
 `/giveaway command:list` or `/giveaway command:"join <id>"`.
 
+`/wiki query:` and `/camp item:` search the local FCM catalog as the user types;
+choosing a result then produces the same public rich card used by the overlay,
+including its stored thumbnail when available. Discord's autocomplete picker is
+text-only, so it cannot render images or an overlay inside the picker itself.
+`/report bug description:` files a bug report, while `/report player user: description:`
+searches linked FCM, Discord, and Steam identities before filing a player report.
+
 `/help` is an ephemeral copy of the complete overlay command reference, including
 all built-in and enabled dynamic commands that apply in Discord. Party-only shortcuts
 are omitted because they are overlay-local. The response is one Discord embed when it

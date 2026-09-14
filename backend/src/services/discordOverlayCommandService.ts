@@ -22,6 +22,8 @@ import prisma from '../config/prisma';
 import { buildHelpResponse, getCommands, tryHandleCommand, type CommandResult } from './commandService';
 import { buildDiscordOverlayCard } from './discordOverlayCommandEmbeds';
 import { splitDiscordResponse } from '../lib/discordResponsePagination';
+import { searchEntries } from './wikiCatalogService';
+import { searchCampItems } from './campService';
 import { finalizeMessage } from './ingestMessage';
 import { getUserByDiscordId, getUserById } from './userLookup';
 import { getEffectiveRole, isPrivilegedRole } from './userRoleService';
@@ -37,7 +39,7 @@ import {
 
 const COMMAND_NAME = 'fcm';
 const MODERATION_COMMAND = 'moderate';
-const SPECIAL_COMMANDS = new Set(['wiki', 'camp', 'minerva', 'nukecodes', 'newcodes', 'serverstatus', 'help', 'appearance', 'events', 'giveaway']);
+const SPECIAL_COMMANDS = new Set(['wiki', 'camp', 'minerva', 'nukecodes', 'newcodes', 'serverstatus', 'help', 'appearance', 'events', 'giveaway', 'apply']);
 const CATEGORY_CHOICES = REASON_CATEGORIES.map((name) => ({ name, value: name }));
 
 type CommandContext = { channelId: string; channelName: string; parentChannelId: string | null };
@@ -101,6 +103,7 @@ function commandText(interaction: ChatInputCommandInteraction): string | null {
     case 'newcodes': return '/nukecodes';
     case 'serverstatus': return '/serverstatus';
     case 'giveaway': return `/giveaway ${interaction.options.getString('command', true)}`;
+    case 'apply': return '/apply';
     default: return null;
   }
 }
@@ -141,7 +144,7 @@ async function replyForCommand(interaction: ChatInputCommandInteraction, result:
 
 async function handleOverlayCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (interaction.commandName === 'help') {
-    await replyWithPrivatePages(interaction, buildHelpResponse(await getCommands(), { includeParty: false }));
+    await replyWithPrivatePages(interaction, buildHelpResponse(await getCommands(), { includeParty: false, discordUsage: true }));
     return;
   }
   if (interaction.commandName === 'appearance') {
@@ -281,6 +284,75 @@ async function handleModerationAutocomplete(interaction: AutocompleteInteraction
   }
 }
 
+async function handleLookupAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
+  const focused = interaction.options.getFocused().trim();
+  if (!focused) return void interaction.respond([]);
+  try {
+    if (interaction.commandName === 'wiki') {
+      const matches = await searchEntries(focused, 25);
+      await interaction.respond(matches.map((match) => ({
+        name: `${match.name}${match.kind ? ` — ${match.kind}` : ''}`.slice(0, 100),
+        value: match.name.slice(0, 100),
+      })));
+      return;
+    }
+    if (interaction.commandName === 'camp') {
+      const matches = await searchCampItems(focused, 25);
+      await interaction.respond(matches.map((match) => ({
+        name: `${match.name} — ${match.category}`.slice(0, 100),
+        value: match.name.slice(0, 100),
+      })));
+      return;
+    }
+  } catch (err) {
+    logger.warn({ err, command: interaction.commandName }, '[discord-overlay-commands] lookup autocomplete failed');
+  }
+  await interaction.respond([]).catch(() => {});
+}
+
+async function handleReportAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
+  if (interaction.commandName !== 'report' || interaction.options.getFocused(true).name !== 'user') return;
+  try {
+    const query = interaction.options.getFocused().trim();
+    const users = await prisma.user.findMany({
+      where: query ? { OR: [
+        { discordId: { contains: query } }, { steamId: { contains: query, mode: 'insensitive' } },
+        { steamDisplayName: { contains: query, mode: 'insensitive' } }, { chatName: { contains: query, mode: 'insensitive' } },
+        { username: { contains: query, mode: 'insensitive' } }, { discordUsername: { contains: query, mode: 'insensitive' } },
+        { discordDisplayName: { contains: query, mode: 'insensitive' } },
+      ] } : {},
+      orderBy: { updatedAt: 'desc' }, take: 25,
+      select: { id: true, chatName: true, username: true, discordDisplayName: true, discordUsername: true, discordId: true, steamId: true, steamDisplayName: true },
+    });
+    await interaction.respond(users.map((user) => ({ name: moderationTargetLabel(user), value: user.id })));
+  } catch (err) {
+    logger.warn({ err, discordUserId: interaction.user.id }, '[discord-overlay-commands] report target autocomplete failed');
+    await interaction.respond([]).catch(() => {});
+  }
+}
+
+async function handleReportCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  const reporter = await requireLinkedUser(interaction);
+  if (!reporter) return;
+  const type = interaction.options.getSubcommand(true) as 'bug' | 'player';
+  const description = interaction.options.getString('description', true).trim();
+  const target = type === 'player' ? await getUserById(interaction.options.getString('user', true)) : null;
+  if (type === 'player' && !target) {
+    await interaction.reply({ content: 'Choose a valid FCM player from the search results.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const involvedPlayers = target ? (target.chatName ?? target.discordDisplayName ?? target.discordUsername ?? target.username) : null;
+  const content = target ? `${involvedPlayers}: ${description}` : description;
+  const report = await prisma.playerReport.create({ data: { userId: reporter.id, content, reportType: type, involvedPlayers } });
+  try {
+    // Lazy import avoids the discordService -> command service initialization cycle.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { postModAlert } = require('./discordService') as { postModAlert: (data: unknown) => Promise<unknown> };
+    void postModAlert({ title: `${type === 'bug' ? 'Bug' : 'Player'} Report Submitted`, color: '#FF8C00', fields: [{ name: 'Reporter', value: reporter.chatName ?? reporter.username, inline: true }, { name: 'Content', value: content.slice(0, 1500) }], footerText: `Report ID: ${report.id}`, timestamp: true });
+  } catch { /* bot alert is best-effort; the report is persisted first */ }
+  await interaction.reply({ content: type === 'bug' ? 'Bug report submitted. Thank you.' : 'Player report submitted to the moderation team.', flags: MessageFlags.Ephemeral });
+}
+
 async function handleModeration(interaction: ChatInputCommandInteraction): Promise<void> {
   const actor = await requireModerator(interaction);
   if (!actor) return;
@@ -355,10 +427,17 @@ function buildOverlayCommand() {
     .toJSON();
 }
 
-function buildSpecialCommand(name: string, description: string, option?: { name: string; description: string }) {
+function buildSpecialCommand(name: string, description: string, option?: { name: string; description: string; autocomplete?: boolean }) {
   const command = new SlashCommandBuilder().setName(name).setDescription(description).setDMPermission(false);
-  if (option) command.addStringOption((input) => input.setName(option.name).setDescription(option.description).setRequired(true));
+  if (option) command.addStringOption((input) => input.setName(option.name).setDescription(option.description).setRequired(true).setAutocomplete(option.autocomplete ?? false));
   return command.toJSON();
+}
+
+function buildReportCommand() {
+  return new SlashCommandBuilder().setName('report').setDescription('Submit a bug or player report').setDMPermission(false)
+    .addSubcommand((sub) => sub.setName('bug').setDescription('Report a bug').addStringOption((option) => option.setName('description').setDescription('What happened, steps, and expected result').setRequired(true)))
+    .addSubcommand((sub) => sub.setName('player').setDescription('Report a player').addStringOption((option) => option.setName('user').setDescription('Search by FCM, Discord, Steam name, or ID').setAutocomplete(true).setRequired(true)).addStringOption((option) => option.setName('description').setDescription('Reason and details').setRequired(true)))
+    .toJSON();
 }
 
 function buildEventsCommand() {
@@ -389,15 +468,17 @@ async function registerCommands(client: Client): Promise<void> {
   if (!env.DISCORD_SERVER_ID) return;
   const commands = [
     buildOverlayCommand(),
-    buildSpecialCommand('wiki', 'Look up Fallout 76 wiki data', { name: 'query', description: 'Item, creature, weapon, perk, or location' }),
-    buildSpecialCommand('camp', 'Look up a CAMP item', { name: 'item', description: 'CAMP item name' }),
+    buildSpecialCommand('wiki', 'Look up Fallout 76 wiki data', { name: 'query', description: 'Item, creature, weapon, perk, or location', autocomplete: true }),
+    buildSpecialCommand('camp', 'Look up a CAMP item', { name: 'item', description: 'CAMP item name', autocomplete: true }),
     buildSpecialCommand('minerva', "Show Minerva's current or next sale"),
     buildSpecialCommand('nukecodes', 'Show current nuke launch codes'),
     buildSpecialCommand('newcodes', 'Alias for current nuke launch codes'),
     buildSpecialCommand('serverstatus', 'Show Fallout 76 server status'),
     buildSpecialCommand('help', 'Show the private FCM quick command guide'),
     buildSpecialCommand('appearance', 'Show chat-name and appearance commands'),
+    buildSpecialCommand('apply', 'Open the Fallout Chat Mod staff application'),
     buildSpecialCommand('giveaway', 'Run a Fallout Chat Mod giveaway command', { name: 'command', description: 'For example: list, join <id>, or start <item>' }),
+    buildReportCommand(),
     buildEventsCommand(),
     buildModerationCommand(),
   ];
@@ -416,12 +497,15 @@ async function registerCommands(client: Client): Promise<void> {
 
 async function onInteraction(interaction: Interaction): Promise<void> {
   if (interaction.isAutocomplete()) {
-    await handleModerationAutocomplete(interaction);
+    if (interaction.commandName === MODERATION_COMMAND) await handleModerationAutocomplete(interaction);
+    else if (interaction.commandName === 'wiki' || interaction.commandName === 'camp') await handleLookupAutocomplete(interaction);
+    else if (interaction.commandName === 'report') await handleReportAutocomplete(interaction);
     return;
   }
   if (!interaction.isChatInputCommand()) return;
   try {
     if (interaction.commandName === MODERATION_COMMAND) await handleModeration(interaction);
+    else if (interaction.commandName === 'report') await handleReportCommand(interaction);
     else if (interaction.commandName === COMMAND_NAME || SPECIAL_COMMANDS.has(interaction.commandName)) await handleOverlayCommand(interaction);
   } catch (err) {
     logger.error({ err, command: interaction.commandName }, '[discord-overlay-commands] interaction failed');

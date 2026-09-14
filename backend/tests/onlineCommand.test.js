@@ -92,4 +92,11 @@ describe('/online command', () => {
     expect(help).not.toContain('/recent');
     expect(help).toContain('/ss — Announce Sinkhole Solutions');
   });
+
+  test('includes Discord argument syntax when requested', () => {
+    const help = buildHelpResponse([], { includeParty: false, discordUsage: true });
+
+    expect(help).toContain('/wiki query:<item>');
+    expect(help).toContain('/report player user:<player> description:<details>');
+  });
 });

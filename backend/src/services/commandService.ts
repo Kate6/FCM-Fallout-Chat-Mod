@@ -119,8 +119,16 @@ function substituteTemplate(
 
 // ── /help Response Builder ────────────────────────────────────────────────────
 
-export function buildHelpResponse(commands: ChatCommand[], options: { includeParty?: boolean } = {}): string {
+export function buildHelpResponse(commands: ChatCommand[], options: { includeParty?: boolean; discordUsage?: boolean } = {}): string {
   const lines: string[] = ['◈ VAULT-TEC COMMAND REFERENCE'];
+
+  if (options.discordUsage) {
+    lines.push('', '— DISCORD ARGUMENTS —');
+    lines.push('/wiki query:<item> · /camp item:<item>');
+    lines.push('/report bug description:<details> · /report player user:<player> description:<details>');
+    lines.push('/giveaway command:<list | join <id> | start <item>> · /events command:</ss>');
+    lines.push('/fcm command:"/g <message>" — run another overlay command');
+  }
 
   // PUBLIC channels — these also relay to Discord. Never describe one as a party
   // command; the private party shortcuts are listed separately below.
