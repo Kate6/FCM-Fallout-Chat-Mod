@@ -291,6 +291,7 @@ export async function buildMinervaResponse(): Promise<{ text: string; metadata: 
     `LOCATION — ${sale.location}`,
     `LIST     — #${sale.listNumber}`,
     `${active ? 'ENDS' : 'STARTS'}    — ${fmt(active ? sale.endUtc : sale.startUtc)}`,
+    ...(inventory.length ? ['', 'FOR SALE', ...inventory.slice(0, 10).map((item) => `• ${item}`)] : []),
     '',
     `More info at ${MINERVA_SOURCE_URL.replace(/^https?:\/\/(www\.)?/, '')}`,
   ];

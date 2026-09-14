@@ -294,6 +294,8 @@ export async function finalizeMessage(opts: {
   mentions?: Array<{ name: string; discordId: string }>;
   relaySeq?: number;      // relay path only — monotonic cursor assigned by nextRelaySeq()
   waitForPersistence?: boolean;
+  /** The message already exists in Discord (for example an interaction reply). */
+  suppressDiscordRelay?: boolean;
 }): Promise<{ messageId: string; createdAt: string }> {
   const messageId   = opts.messageId ?? uuidv4();
   const createdAt   = opts.createdAt ?? new Date().toISOString();
@@ -360,19 +362,21 @@ export async function finalizeMessage(opts: {
 
   // Discord relay — fire-and-forget. Carry the generated source ID so a
   // successful bot send can be linked for later bidirectional edits.
-  const relayPromise = relayToDiscord(
-    opts.channelId,
-    opts.displayName,
-    opts.content,
-    channelName ?? undefined,
-    opts.mentions,
-    hasMetadata ? (effectiveMetadata ?? undefined) : undefined,
-    messageId,
-    Array.isArray(payload.badges)
-      ? { badges: payload.badges as RelayAuthorCosmetics['badges'] }
-      : undefined,
-  );
-  relayPromise.catch((err) => logger.warn({ err }, '[finalizeMessage] Discord relay failed (non-fatal)'));
+  if (!opts.suppressDiscordRelay) {
+    const relayPromise = relayToDiscord(
+      opts.channelId,
+      opts.displayName,
+      opts.content,
+      channelName ?? undefined,
+      opts.mentions,
+      hasMetadata ? (effectiveMetadata ?? undefined) : undefined,
+      messageId,
+      Array.isArray(payload.badges)
+        ? { badges: payload.badges as RelayAuthorCosmetics['badges'] }
+        : undefined,
+    );
+    relayPromise.catch((err) => logger.warn({ err }, '[finalizeMessage] Discord relay failed (non-fatal)'));
+  }
 
   return { messageId, createdAt };
 }

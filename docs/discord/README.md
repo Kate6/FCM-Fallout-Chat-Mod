@@ -21,7 +21,7 @@ so a new enabled overlay command does not require a separate Discord command
 registration change.
 
 The card-bearing Fallout lookups also have first-class public commands:
-`/wiki query:`, `/camp item:`, `/minerva`, `/nukecodes` (and `/newcodes`), and
+`/wiki query:`, `/camp item:`, `/minerva`, `/nukecodes`, and
 `/serverstatus`.
 They call `commandService` and convert its returned metadata—not a second lookup
 or duplicate data model—into a public Discord embed. This keeps Discord fields,
@@ -56,6 +56,10 @@ bot can send messages; the invoking channel does not need an FCM relay mapping.
 `/g`, `/t`, `/e`, `/r`, and `/i` still deliver to their named FCM channels.
 Normal lookup cards and `/help` are public in the invoking channel, while
 moderation actions, `/apply`, and `/report` remain private to the invoker.
+Public lookup cards never include an invocation mention. Their typed card metadata
+is also finalized into the mapped FCM channel (or General for an unmapped command
+channel) without sending a second Discord copy, so the overlay and HUD receive the
+same normalized card once.
 
 `/keybinds` posts the default Electron-overlay and optional HUD-mod controls as
 a public embed. Starting a giveaway posts the confirmation in the invoking
@@ -146,7 +150,9 @@ in-game `channel_id` to a Discord channel snowflake.
 
 Handled by the `messageCreate` listener at `discordService.ts:348`.
 
-1. Bot and webhook messages are ignored (echo-loop prevention).
+1. Messages from the FCM bot itself are ignored (echo-loop prevention). Compatible
+   FCM card embeds from other bots or webhooks are instead normalized into bounded
+   `wiki_share`, `camp_item`, `minerva`, `nuke_codes`, or `server_status` metadata.
 2. Messages carrying the zero-width-space watermark (`​`) are dropped
    (defense-in-depth — these are our own outbound relay messages bouncing back).
 3. The relay mapping is looked up; if no explicit mapping exists for the Discord
@@ -163,7 +169,10 @@ Handled by the `messageCreate` listener at `discordService.ts:348`.
    `backend/src/utils/overLengthDm.ts`, unit-tested in
    `backend/src/services/__tests__/overLengthDm.test.ts`.
 5. Images are never relayed to main channels. GIFs are allowed only if the
-   destination channel has `allowGifs = true`.
+   destination channel has `allowGifs = true`. The five recognized FCM cards are
+   the narrow exception: their public HTTPS image URL is preserved as card metadata
+   (wiki maps remain the large image; other card art remains a thumbnail) rather
+   than being relayed as free-form media.
 6. User (`<@id>`) and channel (`<#id>`) mentions are normalized to readable
    `@name` / `#channel` text. Their Discord snowflakes are retained in
    `metadata.entities`; channel entities also carry a canonical Discord URL.
@@ -204,6 +213,12 @@ has `discord_relay` enabled.
   arbitrary badge text is never accepted. The HUD send acknowledgement and live
   event use the same server-resolved identity, so a supporter message typed in-game
   is marked consistently in the HUD, overlay, and Discord relay.
+- Structured `wiki_share`, `camp_item`, `minerva`, `nuke_codes`, and
+  `server_status` metadata is sent as a native Discord embed instead of the text
+  prefix. The card has no actor mention, maps are clickable full-size images, and
+  other images are clickable thumbnails. The FCM wire still carries compact text
+  plus the metadata, so the HUD can display a readable line while the overlay
+  renders its native rich-card treatment.
 
 ---
 

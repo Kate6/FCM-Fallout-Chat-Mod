@@ -26,6 +26,8 @@ import {
 } from '../utils/releaseAnnouncement';
 import type { HudModDownload } from '../utils/releaseAnnouncement';
 import { normalizeDiscordReferences, type DiscordMessageEntity } from '../utils/discordReferences';
+import { normalizeDiscordRelayCard, type DiscordRelayEmbed } from './discordRelayCard';
+import { buildDiscordOverlayCard } from './discordOverlayCommandEmbeds';
 
 let discordClient: Client | null = null;
 let broadcastFn: ((payload: any, excludeWs?: any) => void) | null = null; // Injected from WS handler to avoid circular deps
@@ -518,13 +520,13 @@ async function saveDiscordMessageLink(link: DiscordRelayLink): Promise<void> {
 
 function queueDiscordSend(
   discordChannel: TextChannel,
-  formatted: string,
+  message: string | MessageCreateOptions,
   link?: Omit<DiscordRelayLink, 'discordMessageId'>,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     outboundQueue.push(async () => {
       try {
-        const sent = await discordChannel.send(formatted) as Message;
+        const sent = await discordChannel.send(message) as Message;
         if (link) {
           await saveDiscordMessageLink({ ...link, discordMessageId: sent.id });
         }
@@ -536,6 +538,27 @@ function queueDiscordSend(
     });
     startDrain();
   });
+}
+
+/** Convert typed FCM card metadata into Discord's public embed transport. */
+function discordCardMessage(metadata: Record<string, unknown> | null | undefined): MessageCreateOptions | null {
+  if (!metadata) return null;
+  const card = buildDiscordOverlayCard(metadata);
+  if (!card) return null;
+
+  const embed = new EmbedBuilder()
+    .setTitle(card.title)
+    .setColor(card.color)
+    .setFooter({ text: card.footerText })
+    .addFields(card.fields.slice(0, 25));
+  if (card.description) embed.setDescription(card.description);
+  if (card.url) embed.setURL(card.url);
+  if (card.thumbnailUrl) embed.setThumbnail(card.thumbnailUrl);
+  if (card.imageUrl) embed.setImage(card.imageUrl);
+  return {
+    embeds: [embed],
+    allowedMentions: { parse: [] },
+  } satisfies MessageCreateOptions;
 }
 
 const DISCORD_LINK_RETRY_DELAYS_MS = [0, 100, 250, 500, 1000] as const;
@@ -725,8 +748,14 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
   });
 
   discordClient.on('messageCreate', async (msg) => {
-    // Ignore bots and webhooks to prevent infinite relay loops
-    if (msg.author.bot || msg.webhookId) return;
+    // Ignore only OUR bot. Compatible Fallout cards sent by another bot or a
+    // webhook still need to cross into FCM as typed card metadata. The outbound
+    // FCM bot is also marked with a ZWS watermark for plain-text echo defense.
+    if (msg.author.id === discordClient?.user?.id) return;
+    const embeddedCard = normalizeDiscordRelayCard(msg.embeds as readonly DiscordRelayEmbed[]);
+    // Do not broaden the ordinary bridge to third-party bot chatter. The only
+    // bot/webhook messages admitted are recognized, bounded FCM card embeds.
+    if ((msg.author.bot || msg.webhookId) && !embeddedCard) return;
 
     // Defense-in-depth: reject messages carrying our ZWS watermark (own relay echo)
     if (msg.content && hasZwsWatermark(msg.content)) return;
@@ -812,6 +841,12 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
       return false;
     };
 
+    // Typed Fallout cards are intentionally exempt from the public-channel
+    // image ban: their images are presentation data stored in FCM metadata, not
+    // arbitrary in-game media. This check occurs before media trimming so a
+    // map-bearing wiki card is not deleted before it can be normalized.
+    const inboundCard = embeddedCard;
+
     // -------------------------------------------------------------------------
     // Feed-channel trim: when the incoming Discord message was posted in the
     // bridged feed channel AND it carries image/GIF attachments or media embeds,
@@ -825,7 +860,7 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
     const hasBlockedAttachment = [...msg.attachments.values()].some(
       att => att.url && isBlockedMediaUrl(att.url, att.contentType),
     );
-    const hasBlockedEmbed = msg.embeds.some(emb => {
+    const hasBlockedEmbed = !inboundCard && msg.embeds.some(emb => {
       const candidate = emb.image?.url || emb.thumbnail?.url || emb.video?.url || emb.url;
       return candidate ? isBlockedMediaUrl(candidate) : false;
     });
@@ -860,7 +895,7 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
     // them as truncated clickable hyperlinks. Append attachment URLs (images /
     // files) and embed URLs (link previews) that the user shared, so each
     // attached file/link still reaches the chat as a real URL.
-    let content = msg.content;
+    let content = inboundCard?.content ?? msg.content;
     for (const att of msg.attachments.values()) {
       if (!att.url) continue;
       if (isBlockedMediaUrl(att.url, att.contentType)) continue; // drop image/GIF attachment
@@ -884,6 +919,7 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
     }
 
     for (const emb of embeds) {
+      if (inboundCard) break;
       // Pick a URL the overlay can ACTUALLY render. Tenor embeds usually have:
       //   image: null
       //   video: media\d*.tenor.com/{TOKEN}/file.mp4    (SkiaSharp can't decode)
@@ -1048,31 +1084,33 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
     // fallout.wiki/w/<page>) URL, resolve it against our wiki catalog.  On a hit,
     // attach metadata = { type:'wiki_share', ... } and rewrite the content to
     // "[WIKI] <name>" so the overlay renders the wiki card. Never breaks relay.
-    let inboundMetadata: Record<string, unknown> | null = normalizedReferences.entities.length > 0
+    let inboundMetadata: Record<string, unknown> | null = inboundCard?.metadata ?? (normalizedReferences.entities.length > 0
       ? { type: 'chat_entities', entities: normalizedReferences.entities }
-      : null;
-    let broadcastContent = content;
-    try {
-      const wikiResolved = await resolveWikiUrlFromContent(content);
-      if (wikiResolved) {
-        const { entry, rawUrl } = wikiResolved;
-        inboundMetadata = {
-          type: 'wiki_share',
-          wikiEntryId: entry.id,
-          name: entry.name,
-          kind: entry.kind,
-          wikiTitle: entry.wikiTitle,
-        };
-        // Replace the raw URL in content with the "[WIKI] name" token so the
-        // overlay card renderer takes over and the bare link isn't shown twice.
-        broadcastContent = content.replace(rawUrl, '').replace(/\s{2,}/g, ' ').trim();
-        broadcastContent = broadcastContent
-          ? `[WIKI] ${entry.name} — ${broadcastContent}`
-          : `[WIKI] ${entry.name}`;
+      : null);
+    let broadcastContent = inboundCard?.content ?? content;
+    if (!inboundCard) {
+      try {
+        const wikiResolved = await resolveWikiUrlFromContent(content);
+        if (wikiResolved) {
+          const { entry, rawUrl } = wikiResolved;
+          inboundMetadata = {
+            type: 'wiki_share',
+            wikiEntryId: entry.id,
+            name: entry.name,
+            kind: entry.kind,
+            wikiTitle: entry.wikiTitle,
+          };
+          // Replace the raw URL in content with the "[WIKI] name" token so the
+          // overlay card renderer takes over and the bare link isn't shown twice.
+          broadcastContent = content.replace(rawUrl, '').replace(/\s{2,}/g, ' ').trim();
+          broadcastContent = broadcastContent
+            ? `[WIKI] ${entry.name} — ${broadcastContent}`
+            : `[WIKI] ${entry.name}`;
+        }
+      } catch (err) {
+        // Non-fatal — relay message normally without wiki metadata
+        logger.debug({ err }, '[discord-relay] wiki URL resolution error (non-fatal)');
       }
-    } catch (err) {
-      // Non-fatal — relay message normally without wiki metadata
-      logger.debug({ err }, '[discord-relay] wiki URL resolution error (non-fatal)');
     }
 
     // Discord-originated messages are part of the native relay stream too. Allocate
@@ -1216,14 +1254,6 @@ function applyExplicitMentions(text: string, mentions?: Array<{ name: string; di
 
 // ── Wiki URL helpers ──────────────────────────────────────────────────────────
 
-const WIKI_FANDOM_BASE = 'https://fallout.fandom.com/wiki/';
-const WIKI_FANDOM_ALT_BASE = 'https://fallout.wiki/w/';
-
-/** Build the canonical fandom URL for a wikiTitle (spaces → underscores). */
-function wikiUrl(wikiTitle: string): string {
-  return WIKI_FANDOM_BASE + encodeURIComponent(wikiTitle.replace(/ /g, '_'));
-}
-
 /**
  * Parse a fallout.fandom.com/wiki/<page> or fallout.wiki/w/<page> URL and
  * return the decoded page title (underscores → spaces). Returns null when the
@@ -1297,23 +1327,11 @@ async function relayToDiscord(channelId: string, username: string, content: stri
   }
 
   try {
-    // ── Wiki share: post the article URL so Discord auto-embeds a card ────────
-    // When the overlay sends a wiki_share, the plain-text content is "[WIKI] Name"
-    // with no URL — Discord can't embed that. Replace it with the article URL
-    // (optionally labelled) so Discord's unfurler generates the preview card.
-    let relayContent = content;
-    if (metadata?.type === 'wiki_share') {
-      try {
-        const wikiTitle = metadata.wikiTitle as string | undefined;
-        const name = metadata.name as string | undefined;
-        if (wikiTitle) {
-          const articleUrl = wikiUrl(wikiTitle);
-          relayContent = name ? `${name}: ${articleUrl}` : articleUrl;
-        }
-      } catch {
-        // Fall through to normal content relay if anything goes wrong
-      }
-    }
+    // Structured cards use native Discord embeds with no user prefix. This
+    // mirrors the visual FCM card rather than emitting a loose URL preview, and
+    // keeps all card types on the same bidirectional transport contract.
+    const cardMessage = discordCardMessage(metadata);
+    const relayContent = content;
 
     // Sanitise: strip raw Discord mention syntax (abuse guard), then convert
     // legitimate in-app @name tokens into real Discord mentions for linked users.
@@ -1325,8 +1343,9 @@ async function relayToDiscord(channelId: string, username: string, content: stri
     const withExplicit = applyExplicitMentions(stripped, mentions);
     const safeContent = markdownifyLinks(await resolveAppMentions(withExplicit));
     const watermarked = safeContent.length > 0 ? safeContent + ZWS : safeContent;
-    const discordPrefix = buildDiscordRelayPrefix(channelName, username, authorCosmetics?.badges);
+    const discordPrefix = cardMessage ? '' : buildDiscordRelayPrefix(channelName, username, authorCosmetics?.badges);
     const formatted = `${discordPrefix}${watermarked}`;
+    const outboundMessage = cardMessage ?? formatted;
 
     const mappings = await loadRelayMappings();
     let sent = false;
@@ -1338,7 +1357,7 @@ async function relayToDiscord(channelId: string, username: string, content: stri
         if (!discordChannel?.isTextBased()) {
           logger.warn({ discordChannelId }, 'Discord relay channel is not a text channel -- skipping');
         } else {
-          await queueDiscordSend(discordChannel as TextChannel, formatted, sourceMessageId ? {
+          await queueDiscordSend(discordChannel as TextChannel, outboundMessage, sourceMessageId ? {
             messageId: sourceMessageId,
             discordChannelId,
             discordPrefix,
@@ -1356,7 +1375,7 @@ async function relayToDiscord(channelId: string, username: string, content: stri
     if (!sent && env.DISCORD_CHANNEL_ID) {
       const discordChannel = await discordClient.channels.fetch(env.DISCORD_CHANNEL_ID);
       if (discordChannel?.isTextBased()) {
-        await queueDiscordSend(discordChannel as TextChannel, formatted, sourceMessageId ? {
+        await queueDiscordSend(discordChannel as TextChannel, outboundMessage, sourceMessageId ? {
           messageId: sourceMessageId,
           discordChannelId: env.DISCORD_CHANNEL_ID,
           discordPrefix,

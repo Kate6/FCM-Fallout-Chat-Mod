@@ -1479,6 +1479,7 @@ interface MinervaMetadata {
   nextStartUtc: string | null;
   sourceName?: string;
   sourceUrl?: string;
+  inventory?: string[];
 }
 export const MINERVA_SOURCE_URL = 'https://www.falloutbuilds.com/fo76/minerva';
 interface CardShareMetadata {
@@ -8573,9 +8574,15 @@ export default function ChatOverlay() {
                   const mvAccent = '#F1C40F';
                   const minervaSourceUrl = mv.sourceUrl || MINERVA_SOURCE_URL;
                   const minervaSourceName = mv.sourceName || 'Fallout Builds';
-                  const fmtDate = (iso: string) => new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                  const fmtDate = (iso: string) => {
+                    const date = new Date(iso);
+                    return Number.isNaN(date.getTime())
+                      ? 'Unknown'
+                      : date.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                  };
                   const fmtDuration = (iso: string) => {
                     const diffMs = new Date(iso).getTime() - Date.now();
+                    if (Number.isNaN(diffMs)) return 'Unknown';
                     if (diffMs <= 0) return 'ending soon';
                     const totalMins = Math.floor(diffMs / 60000);
                     const days = Math.floor(totalMins / 1440);
@@ -8597,6 +8604,9 @@ export default function ChatOverlay() {
                       { label: 'NEXT', value: `${mv.nextLocation}${mv.nextIsSuperSale ? ' ★' : ''} — List #${mv.nextListNumber}` },
                       { label: 'NEXT STARTS', value: fmtDate(mv.nextStartUtc!) },
                     ] : []),
+                    ...(Array.isArray(mv.inventory) && mv.inventory.length > 0
+                      ? [{ label: 'FOR SALE', value: mv.inventory.slice(0, 10).join('\n') }]
+                      : []),
                   ];
                   return (
                     <div key={msg.id} style={{ padding: '2px 8px' }}>

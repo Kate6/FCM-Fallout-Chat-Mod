@@ -66,15 +66,27 @@ async function resolveContext(discordChannelId: string): Promise<CommandContext 
     where: { discordChannelId },
     select: { inGameChannelId: true },
   });
-  const channel = explicit
+  let channel = explicit
     ? await prisma.channel.findUnique({
       where: { id: explicit.inGameChannelId },
       select: { id: true, name: true, parentId: true },
     })
-    : await prisma.channel.findFirst({
-      where: { OR: [{ discordChannelId }, ...(discordChannelId === env.DISCORD_CHANNEL_ID ? [{ name: 'General' }] : [])] },
+    : null;
+  if (!channel) {
+    channel = await prisma.channel.findFirst({
+      where: { discordChannelId },
       select: { id: true, name: true, parentId: true },
     });
+  }
+  if (!channel) {
+    // First-class slash commands are allowed in every Discord channel where
+    // the bot can respond. Unmapped command cards use General as their
+    // FCM/HUD destination while mapped channels retain their own target.
+    channel = await prisma.channel.findFirst({
+      where: { name: 'General' },
+      select: { id: true, name: true, parentId: true },
+    });
+  }
   return channel ? { channelId: channel.id, channelName: channel.name, parentChannelId: channel.parentId } : null;
 }
 
@@ -131,7 +143,6 @@ async function replyForCommand(interaction: ChatInputCommandInteraction, result:
     if (card.thumbnailUrl) embed.setThumbnail(card.thumbnailUrl);
     if (card.imageUrl) embed.setImage(card.imageUrl);
     await interaction.reply({
-      content: `${interaction.user} ran /${interaction.commandName}.`,
       embeds: [embed],
       allowedMentions: { parse: [] },
     });
@@ -185,6 +196,24 @@ async function handleOverlayCommand(interaction: ChatInputCommandInteraction): P
     await finalizeMessage({ userId: user.id, channelId: '00000000-0000-0000-0000-000000000005', content: result.botMessage, displayName, source: 'discord', waitForPersistence: true });
   }
   await replyForCommand(interaction, result);
+  const metadata = result.handled && (result.actionType === 'private' || result.actionType === 'message')
+    ? result.metadata
+    : null;
+  if (result.handled && (result.actionType === 'private' || result.actionType === 'message') && metadata && buildDiscordOverlayCard(metadata)) {
+    // The interaction reply is already the one public Discord copy. Mirror its
+    // typed metadata into the overlay/HUD once, under the bot name, without
+    // re-sending another Discord message or exposing the invoking user.
+    await finalizeMessage({
+      userId: user.id,
+      channelId: result.targetChannelId,
+      content: result.botMessage,
+      displayName: 'FCM',
+      source: 'discord',
+      metadata,
+      suppressDiscordRelay: true,
+      waitForPersistence: true,
+    });
+  }
 }
 
 async function handleEventsCommand(interaction: ChatInputCommandInteraction): Promise<void> {

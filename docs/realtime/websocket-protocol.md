@@ -163,7 +163,7 @@ Validation rules:
 - `content` max 500 characters
 - `clientCreatedAt` must be within ±5 minutes of server time
 - `channelId` must be a UUID or start with `server:`
-- `metadata` capped at 2 KB serialized (oversized → dropped to `null`); rendered as plain text nodes client-side (no HTML injection)
+- `metadata` capped at 2 KB serialized (oversized → dropped to `null`); rendered as plain text nodes client-side (no HTML injection). The Discord bridge normalizes compatible public FCM embeds into the same bounded `wiki_share`, `camp_item`, `minerva`, `nuke_codes`, and `server_status` metadata, while the HUD receives the compact text fallback.
 - Shared-card title actions re-run only supported card commands (`/nukecodes`, `/serverstatus`, `/camp`, `/minerva`) against the clicked message's `channelId`. This preserves delivery in aggregate feeds where the selected parent channel differs from the message's child channel.
 - Rate-limited to 5 msg/s
 
