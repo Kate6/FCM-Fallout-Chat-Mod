@@ -158,6 +158,9 @@ Windows self-hosted runner labeled `fcm-laptop-dev`. The job builds the same
 `backend/Dockerfile`, updates only the laptop backend image, leaves Postgres,
 Redis, MinIO, and the tunnel running, checks localhost health, and restores the
 previous image automatically if validation fails.
+If candidate health validation fails, the workflow records the candidate backend
+status and its last 200 log lines before restoring the previous image. This keeps
+startup failures diagnosable without weakening the automatic rollback.
 
 Two independent gates must both be enabled:
 

@@ -80,6 +80,13 @@ try {
   $checkpoint | ConvertTo-Json | Set-Content -LiteralPath $checkpointFile -Encoding utf8
   Write-Host "Laptop Dev deployed commit $CommitSha and passed health validation."
 } catch {
+  Write-Warning 'Laptop Dev candidate failed; capturing backend diagnostics before rollback.'
+  try {
+    docker compose --profile edge ps backend
+    docker compose --profile edge logs --no-color --tail 200 backend
+  } catch {
+    Write-Warning "Unable to capture candidate backend diagnostics: $($_.Exception.Message)"
+  }
   for ($i = 0; $i -lt $envLines.Count; $i++) {
     if ($envLines[$i] -match '^FCM_BACKEND_IMAGE=') {
       $envLines[$i] = "FCM_BACKEND_IMAGE=$previousImage"
