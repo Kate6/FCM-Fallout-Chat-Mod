@@ -46,7 +46,7 @@ off the build server until the diff is reviewed. `pr-gate-delabel.yml` strips th
 every new push (TOCTOU guard), so re-review is forced. To run a PR's CI: review it, then add
 `ci-approved`. Jobs were consolidated (matrix `unit-vitest`; the Linux overlay job is now
 `overlay-launch-smoke-linux` and the Windows job `overlay-build-windows-nsis` after auto-update was
-retired) = 8 jobs total;
+retired), plus the required `hud-ruffle` provider harness = 9 required jobs total;
 actions are SHA-pinned with a `permissions: contents: read` default. Full detail:
 [docs/testing/ci-cd-pipeline.md](docs/testing/ci-cd-pipeline.md).
 
@@ -110,6 +110,14 @@ These are non-negotiable. Each links to the doc with the full context.
   the required `CI Summary` gate. Prefer extracting pure functions to keep logic testable. Follow the
   [testing strategy](docs/testing/README.md) and the prioritized backlog in
   [docs/testing/overlay-test-plan.md](docs/testing/overlay-test-plan.md).
+- **EULA §4(F) — two tracks, kept strictly separate.** The product ships in two forms:
+- **Every HUD-mod change runs through the Ruffle harness (HARD RULE).** For any change under
+  `game-mods/FCMBridge/hudmodloader-chat/`, run the pure Haxe/source/package checks and the complete
+  `simulator/` Playwright suite before packaging or local installation. Add or update a simulator
+  scenario for every behavior Ruffle can exercise, retain automatic teardown, and document anything
+  that remains GFx/game-only. A passing harness is required regression evidence, not a substitute
+  for the bounded in-game acceptance matrix. Follow
+  [docs/testing/hud-automation-plan.md](docs/testing/hud-automation-plan.md).
 - **EULA §4(F) — two tracks, kept strictly separate.** The product ships in two forms:
   1. **Default overlay (EULA-safe).** The transparent desktop overlay is the default, EULA-safe path.
      It only checks whether the `Fallout76` process is running (to show/hide the overlay) — it never

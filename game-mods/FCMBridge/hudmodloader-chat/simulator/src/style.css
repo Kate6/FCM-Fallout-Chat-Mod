@@ -1,0 +1,30 @@
+:root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; background: #090806; color: #faf4da; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 20% 0, #282111, #090806 55%); }
+main { padding: 24px; }
+header { display: flex; justify-content: space-between; align-items: end; max-width: 1600px; margin: 0 auto 18px; }
+h1 { margin: 4px 0 0; color: #f5cb5b; font-size: 26px; }
+h2 { margin: 18px 0 8px; color: #f5cb5b; font-size: 15px; }
+.eyebrow { color: #ff9b6a; font-size: 11px; letter-spacing: .12em; }
+#status { padding: 7px 10px; border: 1px solid #ac9043; color: #ac9043; }
+#status[data-state="ready"] { border-color: #6ad46a; color: #6ad46a; }
+#status[data-state="error"] { border-color: #ff6a6a; color: #ff6a6a; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); gap: 20px; max-width: 1600px; margin: auto; }
+.stage-shell, aside { border: 1px solid #66562c; background: rgba(8, 7, 5, .92); box-shadow: 0 16px 60px #0008; }
+.stage-shell { min-width: 0; display: grid; place-items: center; overflow: hidden; }
+#player { width: 100%; aspect-ratio: 16 / 9; min-width: 0; }
+aside { padding: 14px; min-width: 0; }
+dl { display: grid; gap: 6px; }
+dl div { display: grid; grid-template-columns: 110px 1fr; gap: 8px; }
+dt { color: #ac9043; } dd { margin: 0; overflow-wrap: anywhere; }
+p { color: #c9bf9f; line-height: 1.45; font-family: system-ui, sans-serif; font-size: 13px; }
+button { background: #211c0f; border: 1px solid #f5cb5b; color: #f5cb5b; padding: 7px 10px; margin: 0 6px 10px 0; cursor: pointer; }
+label { display: block; color: #ac9043; font-size: 12px; margin-bottom: 5px; }
+select { width: 100%; margin: 0 0 12px; padding: 7px; color: #f5cb5b; background: #211c0f; border: 1px solid #ac9043; }
+details { border: 1px solid #342c19; padding: 8px; margin: 0 0 12px; }
+summary { color: #f5cb5b; cursor: pointer; margin-bottom: 8px; }
+#keybind-fields { display: grid; grid-template-columns: 1fr 130px; gap: 6px 8px; align-items: center; }
+#keybind-fields label, #keybind-fields select { margin: 0; }
+#keybind-error { color: #ff8a78; min-height: 18px; margin: 4px 0; }
+#log { height: 280px; overflow: auto; border: 1px solid #342c19; padding: 8px; color: #b8cf81; font-size: 11px; white-space: pre-wrap; }
+@media (max-width: 1050px) { .workspace { grid-template-columns: 1fr; } }

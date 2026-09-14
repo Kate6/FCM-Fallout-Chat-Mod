@@ -20,6 +20,7 @@ import {
   shouldPlayNotifySound,
   NOTIFY_SOUND_MIN_GAP_MS,
   messageTriggersNotify,
+  hudOpenUrlFromFrame,
   backoffDelay,
   nextTicketRetryDelay,
   isAuthTerminal,
@@ -46,6 +47,16 @@ import {
   canEditOwnMessage,
   resolveSharedCardChannelId,
 } from '../ChatOverlay';
+
+describe('hudOpenUrlFromFrame', () => {
+  it('accepts HTTP links only for the Electron overlay shell', () => {
+    const frame = { type: 'hud:open-url', payload: { url: 'https://example.com/path' } };
+    expect(hudOpenUrlFromFrame(frame, true)).toBe('https://example.com/path');
+    expect(hudOpenUrlFromFrame(frame, false)).toBeNull();
+    expect(hudOpenUrlFromFrame({ type: 'hud:open-url', payload: { url: 'javascript:alert(1)' } }, true)).toBeNull();
+    expect(hudOpenUrlFromFrame({ type: 'hud:open-url', payload: { url: 'https://user:pass@example.com' } }, true)).toBeNull();
+  });
+});
 
 describe('resolveSharedCardChannelId', () => {
   it('reopens a shared card in the channel that owns the clicked message', () => {
@@ -399,6 +410,18 @@ describe('classifyMedia', () => {
 
 // ── splitParts / splitMentions ──────────────────────────────────────────────
 describe('splitParts', () => {
+  it('uses Discord-ID entities for multi-word user mentions and clickable channels', () => {
+    expect(splitParts('Ask @Vault Dweller in #events', [
+      { type: 'user', discordId: '123456789012345678', label: 'Vault Dweller' },
+      { type: 'channel', discordId: '234567890123456789', label: 'events', url: 'https://discord.com/channels/1/234567890123456789' },
+    ])).toEqual([
+      { text: 'Ask ', kind: 'plain' },
+      { text: '@Vault Dweller', kind: 'mention', url: undefined, emojiName: undefined, discordId: '123456789012345678' },
+      { text: ' in ', kind: 'plain' },
+      { text: '#events', kind: 'channel', url: 'https://discord.com/channels/1/234567890123456789', emojiName: undefined, discordId: '234567890123456789' },
+    ]);
+  });
+
   it('returns a single plain part for plain text', () => {
     expect(splitParts('hello world')).toEqual([{ text: 'hello world', kind: 'plain' }]);
   });
@@ -1125,6 +1148,15 @@ describe('contentMatchesKeyword', () => {
 });
 
 describe('messageTriggersNotify', () => {
+  it('matches an ID-backed Discord mention even when the display label changed', () => {
+    expect(messageTriggersNotify('@Old Name hello', [], [], [
+      { type: 'user', discordId: '123456789012345678', label: 'Old Name' },
+    ], '123456789012345678')).toBe(true);
+    expect(messageTriggersNotify('@Old Name hello', [], [], [
+      { type: 'user', discordId: '123456789012345678', label: 'Old Name' },
+    ], '999999999999999999')).toBe(false);
+  });
+
   it('still triggers on an @mention of one of my names', () => {
     expect(messageTriggersNotify('hey @devotek look', ['devotek'], [])).toBe(true);
   });

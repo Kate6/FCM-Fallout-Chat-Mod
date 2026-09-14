@@ -824,9 +824,9 @@ if widget_src:
           and '_rosterBoundaryPending' in widget_src,
           "FCMChatWidget refreshes cached rosters and detects provider session boundaries")
     check('if (_needsLink || _authState != "authenticated") return;' in widget_src
-          and 'ROSTER_RETRY_MS' in widget_src
-          and 'now - _lastRosterSentAt' in widget_src,
-          "FCMChatWidget suppresses unlinked and rapid retry roster sends")
+          and 'if (_api.provider == FcmNativeApi.ZFE) return;' in widget_src
+          and 'FcmCommand.shouldSendRoster(true, _inputOpen' in widget_src,
+          "FCMChatWidget suppresses unsafe ZFE and editor-owned roster sends")
     check('NUL:String      = ctrlChar(0)' in widget_src
           and 'UNIT_SEP:String = ctrlChar(31)' in widget_src,
           "FCMChatWidget builds compatibility control bytes at runtime, not in the SWF string pool")

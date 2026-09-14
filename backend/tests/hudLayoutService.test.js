@@ -49,7 +49,7 @@ test('persists optional HUD sizing settings and supports legacy geometry records
 
 test('appearance payloads persist only allowed finite colors and opacity', async () => {
   const colors = ['bgColor', 'tabRowColor', 'inputBgColor', 'borderColor', 'textColor',
-    'inputTextColor', 'senderColor', 'tabActiveColor', 'tabInactiveColor', 'promptColor'];
+    'inputTextColor', 'senderColor', 'tabActiveColor', 'tabInactiveColor', 'selectedRowColor', 'promptColor'];
   const appearance = { ...layout, fontSize: 18, inputHeight: 48, inputFontSize: 24,
     autoHideEnabled: false, autoHideSec: 95, bgAlpha: 0.3,
     ...Object.fromEntries(colors.map(key => [key, 0x123456])) };

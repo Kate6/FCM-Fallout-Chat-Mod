@@ -10,6 +10,8 @@ import ticketService from './ticketService';
 import supporterSyncService from './supporterSyncService';
 import cosmeticsCommandService from './cosmeticsCommandService';
 import chatNameCommandService from './chatNameCommandService';
+import discordOverlayCommandService from './discordOverlayCommandService';
+import discordCommandHelpService from './discordCommandHelpService';
 import * as discordEventService from './discordEventService';
 import { attachCosmetics } from './cosmetics/cosmeticsService';
 import { nextRelaySeq } from './relay/relaySeq';
@@ -677,6 +679,8 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
   supporterSyncService.register(discordClient);
   cosmeticsCommandService.register(discordClient);
   chatNameCommandService.register(discordClient);
+  discordOverlayCommandService.register(discordClient);
+  discordCommandHelpService.register(discordClient);
   discordEventService.register(
     discordClient,
     (payload) => { broadcastFn?.(payload); },

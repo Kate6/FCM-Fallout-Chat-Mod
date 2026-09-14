@@ -47,6 +47,7 @@ import { attachCosmetics } from './cosmetics/cosmeticsService';
 import { shadowMute } from './autoModService';
 import { getActiveBlock } from './hudIdentityService';
 import { shouldWaitForPersistence } from './messagePersistencePolicy';
+import { projectionForSharedEvent } from './discordEventService';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -296,7 +297,12 @@ export async function finalizeMessage(opts: {
 }): Promise<{ messageId: string; createdAt: string }> {
   const messageId   = opts.messageId ?? uuidv4();
   const createdAt   = opts.createdAt ?? new Date().toISOString();
-  const hasMetadata = 'metadata' in opts;
+  const sharedEvent = await projectionForSharedEvent(opts.content).catch((err) => {
+    logger.debug({ err }, '[finalizeMessage] shared Discord event lookup failed (non-fatal)');
+    return null;
+  });
+  const effectiveMetadata = sharedEvent ? { ...sharedEvent } : opts.metadata;
+  const hasMetadata = sharedEvent !== null || 'metadata' in opts;
   // Ordinary chat gets a cursor when Redis is healthy so it can flow through
   // the in-game relay. During a Redis incident, omit the optional cursor rather
   // than turning the dashboard/HUD send path into a hard dependency.
@@ -314,7 +320,7 @@ export async function finalizeMessage(opts: {
     timestamp: createdAt,
   };
   if (opts.avatarUrl !== undefined) payload.avatarUrl = opts.avatarUrl;
-  if (hasMetadata) payload.metadata = opts.metadata ?? null;
+  if (hasMetadata) payload.metadata = effectiveMetadata ?? null;
   if (relaySeq !== undefined) payload.relaySeq = relaySeq;
 
   // Resolve the author's cosmetics (colour, effect, tag, badges) onto the
@@ -336,7 +342,7 @@ export async function finalizeMessage(opts: {
     source: opts.source,
     createdAt,
   };
-  if (hasMetadata) record.metadata = opts.metadata ?? null;
+  if (hasMetadata) record.metadata = effectiveMetadata ?? null;
   if (relaySeq !== undefined) record.relaySeq = relaySeq;
 
   try {
@@ -360,7 +366,7 @@ export async function finalizeMessage(opts: {
     opts.content,
     channelName ?? undefined,
     opts.mentions,
-    hasMetadata ? (opts.metadata ?? undefined) : undefined,
+    hasMetadata ? (effectiveMetadata ?? undefined) : undefined,
     messageId,
     Array.isArray(payload.badges)
       ? { badges: payload.badges as RelayAuthorCosmetics['badges'] }

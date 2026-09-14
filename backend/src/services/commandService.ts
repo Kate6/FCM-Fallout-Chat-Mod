@@ -8,6 +8,8 @@ import { getServerPlayersForUser } from './playerListService';
 import * as giveawayService from './giveawayService';
 import { GiveawayError } from './giveawayService';
 import { getMinervaStatus } from './minervaService';
+import { bestMatch, getEntry } from './wikiCatalogService';
+import { validateSearchQuery } from '../lib/wikiValidation';
 
 export const MINERVA_SOURCE_NAME = 'Fallout Builds';
 export const MINERVA_SOURCE_URL = 'https://www.falloutbuilds.com/fo76/minerva';
@@ -298,6 +300,51 @@ export function buildMinervaResponse(): { text: string; metadata: Record<string,
       sourceUrl: MINERVA_SOURCE_URL,
     },
   };
+}
+
+// ── /wiki Response Builder ────────────────────────────────────────────────────
+
+/**
+ * Resolve the same catalog entry used by the overlay WikiPanel.  The dashboard
+ * intercepts `/wiki` to open that panel locally; Discord commands need a server
+ * response, so they use this builder and retain the complete card payload.
+ */
+async function buildWikiResponse(query: string): Promise<{ text: string; metadata: Record<string, unknown> | null }> {
+  let term: string;
+  try {
+    term = validateSearchQuery(query);
+  } catch {
+    return { text: 'Usage: /wiki <name> — enter 1–100 characters.', metadata: null };
+  }
+
+  try {
+    let entry;
+    try {
+      entry = await getEntry(term);
+    } catch {
+      const match = await bestMatch(term);
+      if (!match) {
+        return { text: `No wiki entry found for "${term}".`, metadata: null };
+      }
+      entry = await getEntry(match.name);
+    }
+    return {
+      text: `◈ FALLOUT WIKI — ${entry.name}`,
+      metadata: {
+        type: 'wiki_share',
+        wikiEntryId: entry.id,
+        name: entry.name,
+        kind: entry.kind,
+        wikiTitle: entry.wikiTitle,
+        articleUrl: entry.articleUrl,
+        imageUrl: entry.imageUrl,
+        fields: entry.fields,
+        attribution: entry.attribution,
+      },
+    };
+  } catch {
+    return { text: 'Wiki lookup is unavailable right now. Try again in a moment.', metadata: null };
+  }
 }
 
 // ── /giveaway Sub-Command Handler ────────────────────────────────────────────
@@ -678,6 +725,27 @@ export async function tryHandleCommand(
       actionType: 'private',
       botMessage: r.text,
       metadata: r.metadata,
+      targetChannelId: channelId,
+    };
+  }
+
+  // Built-in /wiki — the overlay opens its WikiPanel locally, while Discord
+  // receives this same structured catalog payload as a public embed.
+  if (trigger === '/wiki') {
+    if (!args) {
+      return {
+        handled: true,
+        actionType: 'private',
+        botMessage: 'Usage: /wiki <name> — Look up a Fallout 76 item, weapon, creature, perk, or location.',
+        targetChannelId: channelId,
+      };
+    }
+    const response = await buildWikiResponse(args);
+    return {
+      handled: true,
+      actionType: 'private',
+      botMessage: response.text,
+      metadata: response.metadata,
       targetChannelId: channelId,
     };
   }

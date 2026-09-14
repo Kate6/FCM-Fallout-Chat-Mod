@@ -15,6 +15,18 @@ import { relayToDiscord, editDiscordRelayMessage, invalidateRelayMappingsCache }
 import { persistMessage } from '../services/messageService';
 import { finalizeMessage } from '../services/ingestMessage';
 import { mapDiscordEventLifecycle, type DiscordEventSourceState } from '../services/discordEventProjection';
+
+function withMentionEntities(
+  metadata: Record<string, unknown> | null,
+  mentions: Array<{ name: string; discordId: string }>,
+): Record<string, unknown> | null {
+  if (mentions.length === 0) return metadata;
+  return {
+    ...(metadata ?? {}),
+    type: metadata?.type ?? 'chat_entities',
+    entities: mentions.map(({ name, discordId }) => ({ type: 'user', discordId, label: name })),
+  };
+}
 import { attachCosmetics, attachCosmeticsToHistory } from '../services/cosmetics/cosmeticsService';
 import messageQueue from '../queues/messagePersist';
 import logger from '../config/logger';
@@ -1181,6 +1193,7 @@ async function handleAdminObserver(ws: WebSocket, identity: AdminIdentity = {}):
             channelId,
             source: 'web',
             timestamp: createdAt,
+            metadata: withMentionEntities(null, inMentions),
           };
           await attachCosmetics(adminMessagePayload);
           broadcast({
@@ -1202,6 +1215,7 @@ async function handleAdminObserver(ws: WebSocket, identity: AdminIdentity = {}):
               parentChannelId: adminMsgParent,
               source: 'web',
               createdAt,
+              metadata: withMentionEntities(null, inMentions),
             });
           } catch (queueErr) {
             logger.warn({ err: queueErr, messageId }, 'Admin observer queue failed — falling back to direct persist');
@@ -2373,6 +2387,7 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
         // rendered as plain text nodes client-side (no HTML injection).
         let wsMetadata: Record<string, unknown> | null = (frame.payload as any)?.metadata ?? null;
         try { if (wsMetadata && JSON.stringify(wsMetadata).length > 2000) wsMetadata = null; } catch { wsMetadata = null; }
+        wsMetadata = withMentionEntities(wsMetadata, inMentions2);
 
         // Query remaining rate tokens for the sender's ack
         let rateRemaining = 0;

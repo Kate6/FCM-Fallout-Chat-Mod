@@ -28,6 +28,7 @@ private typedef ChatRecord = {
     var localSendId:String;
     var pendingAt:Float;
     var sendAccepted:Bool;
+    @:optional var linkUrl:String;
 }
 
 private typedef FeedRowView = {
@@ -36,6 +37,7 @@ private typedef FeedRowView = {
     var view:Sprite;
     var contentY:Float;
     var height:Float;
+    @:optional var linkUrl:String;
 }
 
 private typedef ModerationTargetResolution = {
@@ -75,7 +77,7 @@ class FCMChatWidget extends MovieClip {
     // 2.10.0 is the first build that reports clientVersion to the relay. The relay
     // treats "no version reported" as "oldest possible client" and gates any new wire
     // field on this, so the version bump IS the capability signal.
-    static inline var VERSION:String  = "2.10.85"; // Delete edits while typing and hides while idle (local candidate)
+    static inline var VERSION:String  = "2.10.93"; // Terminal history marker + 16-event ZFE startup drain
     static inline var SETTINGS_PATH:String = "settings.ini";
     // This is a top-level ZFE command, not a relay operation. ZFE owns the DPAPI/local auth file
     // and must clear it; the SWF is not allowed to write arbitrary files from the HUD domain.
@@ -96,8 +98,15 @@ class FCMChatWidget extends MovieClip {
     // "$MAIN_Font_Light"; HUDButton.as label TextFields use "$MAIN_Font_Bold").
     // They resolve in child widget SWFs (ApplicationDomain.currentDomain) with
     // embedFonts=true — no @:font embed needed (GFx ignores child-SWF embedded TTFs).
+    #if fcm_harness
+    // The game resolves the aliases below through fontconfig_en.txt. Ruffle does not process
+    // Bethesda's font config, so the harness addresses the same game font faces directly.
+    static inline var FONT_BODY:String = "Roboto Condensed Light";
+    static inline var FONT_BOLD:String = "Roboto Condensed Bold";
+    #else
     static inline var FONT_BODY:String = "$MAIN_Font_Light";  // body / feed / messages / prompts / notices
     static inline var FONT_BOLD:String = "$MAIN_Font_Bold";   // tab labels / headers / sender names / active-tab
+    #end
     // FALLBACK (do NOT ship unless aliases tofu in-game): re-add the @:font embed and
     // set TextFormat.font / the FormatTextEdit font arg to the TTF's DefineFont FAMILY
     // name "DejaVu Sans" (with the space) — NOT the postscript "DejaVuSans". GFx matches
@@ -222,7 +231,6 @@ class FCMChatWidget extends MovieClip {
     // Server controls use the synchronous native RPC surface. Do not retry a rejected or
     // timed-out control on every 5s world tick; older ZFE builds can block the HUD for the
     // full socket timeout while the relay is unavailable or the account is still unlinked.
-    static inline var ROSTER_RETRY_MS:Float = 10000;
 
     // ── Config (FcmConfig — parsed from Data/FCMChat.ini; see FcmConfig.hx) ─────
     var _cfg:FcmConfig = new FcmConfig();
@@ -253,6 +261,7 @@ class FCMChatWidget extends MovieClip {
     var _feedContentHeight:Float = 0;
     var _feedScrollY:Float = 0;
     var _feedMaxScrollY:Float = 0;
+    var _selectedRowIndex:Int = -1;
     var _nextSendSequence:Int = 1;
     var _lastEchoMatchMode:String = "";
     var _newWhileScrolled:Int    = 0;
@@ -325,6 +334,7 @@ class FCMChatWidget extends MovieClip {
     var _zfeInitialDrainAttempts:Int = 0;
     static inline var ZFE_INITIAL_DRAIN_MS:Int = 250;
     static inline var ZFE_INITIAL_DRAIN_MAX:Int = 4;
+    static inline var NATIVE_POLL_BATCH:Int = 16;
     var _connectTimer:Timer      = null;
     var _worldTimer:Timer        = null;
     var _serverHistoryDrainTimer:Timer = null;
@@ -548,6 +558,7 @@ class FCMChatWidget extends MovieClip {
             runAfterConfigSafely();
         }
     }
+
 
     function onRemovedFromStage(e:Event):Void {
         // REMOVED_FROM_STAGE is itself a Scaleform callback boundary. Keep a
@@ -986,12 +997,24 @@ class FCMChatWidget extends MovieClip {
         // "FALLOUT 76" main tab): active channel = tabActiveColor (bright), inactive =
         // tabInactiveColor (dim). Per-channel colors (chat_rooms.color) are applied only to the
         // [Channel] message tags, NOT this tab row. Slash /g /t /e /i /r still switch channels.
-        var html:Array<String> = [];
+        var labels:Array<String> = [];
+        var ranges:Array<{start:Int, end:Int, active:Bool}> = [];
+        var offset:Int = 0;
         for (si in tabOrder()) {
-            var color:String = (si == _chanIdx) ? hx(_cfg.tabActiveColor) : hx(_cfg.tabInactiveColor);
-            html.push('<font face="' + FONT_BOLD + '" size="12" color="' + color + '"><b>' + CHAN_NAMES[si] + '</b></font>');
+            if (labels.length > 0) { labels.push("  "); offset += 2; }
+            var label = CHAN_NAMES[si];
+            labels.push(label);
+            ranges.push({start:offset, end:offset + label.length, active:si == _chanIdx});
+            offset += label.length;
         }
-        _subTf.htmlText = html.join('<font face="' + FONT_BODY + '" size="12" color="' + hx(_cfg.tabInactiveColor) + '">  </font>');
+        // Fallout GFx has produced field-wide color inheritance for adjacent htmlText tags.
+        // Explicit character ranges keep each tab's focus color independent.
+        _subTf.text = labels.join("");
+        for (range in ranges) {
+            var format = new TextFormat(FONT_BOLD, 12,
+                range.active ? _cfg.tabActiveColor : _cfg.tabInactiveColor, true);
+            _subTf.setTextFormat(format, range.start, range.end);
+        }
     }
 
     function idlePrompt():String {
@@ -1040,6 +1063,7 @@ class FCMChatWidget extends MovieClip {
         _bScrolling = false;
         _newWhileScrolled = 0;
         applyFeedScroll();
+        applySelectedRowStyle();
     }
 
     // =========================================================================
@@ -1382,6 +1406,12 @@ class FCMChatWidget extends MovieClip {
             return true;
         }
 
+        if (FcmCommand.linkActivationEnabled(action, _cfg.activateLinkKey,
+                _inputOpen, selectedRowHasLink())) {
+            if (isDown) activateSelectedLinkFromOpenInput();
+            return true;
+        }
+
         // Navigation is a set of one-shot commands, never a persistent "channel selection"
         // mode. This matters because the same stage also hosts the SharedHUDTools editor: an
         // ordinary character or an Unmapped action must never be routed into channel handling.
@@ -1471,7 +1501,7 @@ class FCMChatWidget extends MovieClip {
         // Keep ALL channels' messages in _records (from the history backfill + live); renderRecords
         // filters by the active channel. Do NOT clear here, or switching a channel would blank its
         // history (the backfilled messages for that channel would be discarded).
-        _bScrolling = false; _newWhileScrolled = 0;
+        _bScrolling = false; _newWhileScrolled = 0; _selectedRowIndex = -1;
         setSelectedTab(idx);
         renderRecords();             // re-render (filters to the newly-selected channel)
         bumpAutoHide();              // channel switch = activity
@@ -2080,6 +2110,7 @@ class FCMChatWidget extends MovieClip {
         var t:Array<Int> = THEMES[_themeIdx];
         _cfg.borderColor = t[0]; _cfg.textColor = t[1]; _cfg.senderColor = t[2];
         _cfg.tabActiveColor = t[3]; _cfg.tabInactiveColor = t[4];
+        _cfg.selectedRowColor = t[3];
     }
 
     function doCustomize(id:String):Void {
@@ -2163,15 +2194,13 @@ class FCMChatWidget extends MovieClip {
     /** Apply persisted Customize values over the packaged environment config. */
     function loadPersistedConfig():Void {
         if (_api == null || _api.provider == FcmNativeApi.XSCAL) return;
-        var environmentLinkUrl:String = _cfg.linkUrl;
         try {
             var payload:String = '{"vendor":"' + VENDOR + '","path":"' + SETTINGS_PATH + '"}';
             var raw:String = callTop("readStorage", payload);
             if (raw.indexOf('"success":true') < 0 || raw.indexOf('"found":true') < 0) return;
             var stored:String = FcmConfig.decodeJsonText(extractJsonString(raw, "text"));
             if (stored.indexOf("[FCMChat]") < 0) return;
-            _cfg = FcmConfig.parse(stored);
-            _cfg.linkUrl = environmentLinkUrl;
+            _cfg = FcmConfig.mergePersistedCustomization(_cfg, stored);
             _autoHideOn = _cfg.autoHideActive();
             rebuildPanel();
             zfeLog("info", "customize", "persisted settings loaded");
@@ -2350,6 +2379,9 @@ class FCMChatWidget extends MovieClip {
     function openInput():Void {
         if (_disposed) return;
         if (_inputOpen) return;
+        // Provider hotkeys are global. Never take text ownership while Fallout owns a
+        // blacklisted UI such as ContainerMode, where T may mean Deposit All.
+        if (!isValidHUDMode()) return;
         if (pipboyOwnsInput()) return;
         // A navigation key may have been held across the Insert edge. Start each edit with a
         // clean latch so its key-up cannot select a channel or steal the first typed character.
@@ -2753,6 +2785,17 @@ class FCMChatWidget extends MovieClip {
 
     function onSharedInputKeyDown(e:KeyboardEvent):Void {
         if (_disposed || !_inputOpen || _nativeInput || _sharedInputField == null) return;
+        var keyCode:Int = Std.int(e.keyCode);
+        if (keyCode != 13 && FcmCommand.linkActivationEnabled(
+                FcmCommand.physicalKeyAction(keyCode).length > 0
+                    ? FcmCommand.physicalKeyAction(keyCode) : _cfg.activateLinkKey,
+                _cfg.activateLinkKey, _inputOpen, selectedRowHasLink())
+                && FcmCommand.virtualKeyCode(_cfg.activateLinkKey) == keyCode) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            activateSelectedLinkFromOpenInput();
+            return;
+        }
         // Keep the draft only in memory so an observed HUDTools callback loss cannot discard an
         // Enter submission. Neither the characters nor derived content are written to the log.
         _sharedInputDraft = _sharedInputField.text;
@@ -2834,7 +2877,12 @@ class FCMChatWidget extends MovieClip {
     function handleSubmittedText(text:String):Void {
         var s:String = (text == null) ? "" : Std.string(text);
         s = StringTools.trim(s);
-        if (s.length == 0) return;
+        if (s.length == 0) {
+            if (FcmCommand.linkActivationEnabled("ENTER", _cfg.activateLinkKey, true, selectedRowHasLink())) {
+                activateSelectedLink();
+            }
+            return;
+        }
 
         // /relink is local and standalone. It must be consumed before auth-gated sending and
         // before the channel parser; when the game strips a leading slash, bare "relink" is
@@ -2888,6 +2936,36 @@ class FCMChatWidget extends MovieClip {
             s = emojiCommand.body;
         }
         sendMessage(s);
+    }
+
+    function activateSelectedLink():Void {
+        if (_selectedRowIndex < 0 || _selectedRowIndex >= _feedRows.length) return;
+        var url:String = _feedRows[_selectedRowIndex].linkUrl;
+        if (!FcmLink.validHttpUrl(url)) {
+            setPrompt("Selected message has no link");
+            return;
+        }
+        try {
+            // GFx owns this user-initiated navigation. Never synchronously send a
+            // relay control from Fallout's UI thread: a stalled TLS connection
+            // freezes the game and incorrectly requires a desktop client.
+            flash.Lib.getURL(new URLRequest(url), "_blank");
+            setPrompt("Opening " + FcmLink.displayUrl(url) + " in your browser...");
+        } catch (_:Dynamic) {
+            setPrompt("Could not open link in your browser");
+        }
+    }
+
+    function selectedRowHasLink():Bool {
+        return _selectedRowIndex >= 0 && _selectedRowIndex < _feedRows.length
+            && FcmLink.validHttpUrl(_feedRows[_selectedRowIndex].linkUrl);
+    }
+
+    function activateSelectedLinkFromOpenInput():Void {
+        if (!_inputOpen || !selectedRowHasLink()) return;
+        if (_nativeInput) closeInputNative();
+        else closeInputSharedHudTools("selected link activation");
+        activateSelectedLink();
     }
 
     // =========================================================================
@@ -3469,6 +3547,7 @@ class FCMChatWidget extends MovieClip {
                 : "HUDMod::UserEvent stage listener unavailable; physical input fallback required");
 
         loadPersistedConfig();
+        syncConfiguredZfeHotkey();
         // Physical Page/arrow polling is provider-level input, not relay state: start it as
         // soon as the extender is known so channel switching works before (and without) auth.
         startPhysicalNavigation();
@@ -3476,6 +3555,18 @@ class FCMChatWidget extends MovieClip {
         // 24-30s GetDataFromClient polls retry forever; resolves on first live push.
         try { subscribeIdentityUpdates(); } catch (_:Dynamic) {}
         startConnect();
+    }
+
+    /** Keep ZFE's process-level watcher aligned with the active environment config. */
+    function syncConfiguredZfeHotkey():Void {
+        if (_api == null || _api.provider != FcmNativeApi.ZFE || _cfg == null) return;
+        try {
+            var raw = callTop("updateChatHotkey", _cfg.openKey);
+            zfeLog("info", "input", "ZFE OpenChatKey synchronized key=" + _cfg.openKey
+                + " raw=" + clip200(raw));
+        } catch (e:Dynamic) {
+            zfeLog("warn", "input", "ZFE OpenChatKey synchronization failed: " + clip200(Std.string(e)));
+        }
     }
 
     // =========================================================================
@@ -3677,6 +3768,11 @@ class FCMChatWidget extends MovieClip {
         // ZFE's pollEvents does not call refreshAuthState each tick, so without this
         // the HUD can stay "limited" for one more poll interval after a live link.
         try { refreshAuthState(); } catch (_:Dynamic) {}
+        // A RESYNC attempted while the identity was still limited is rejected by
+        // the relay. Re-arm the bounded recovery state and schedule a fresh request
+        // now that LINK COMPLETE proves the account transition.
+        _history.authenticationChanged();
+        scheduleHistoryResyncFallback();
         // Re-render to drop the link screen immediately.
         try { renderRecords(); } catch (_:Dynamic) {}
     }
@@ -3902,7 +3998,8 @@ class FCMChatWidget extends MovieClip {
         // configured below; scroll-to-bottom is intentionally absent unless the user
         // selected a physical token in FCMChat.ini.
         var keyCodes:Array<Int> = [VK_PAGEUP, VK_PAGEDOWN, VK_UP, VK_DOWN];
-        for (token in [_cfg.scrollUpKey, _cfg.scrollDownKey, _cfg.scrollBottomKey, _cfg.hideKey]) {
+        for (token in [_cfg.scrollUpKey, _cfg.scrollDownKey, _cfg.scrollBottomKey,
+                _cfg.activateLinkKey, _cfg.hideKey]) {
             var configuredCode:Int = FcmCommand.virtualKeyCode(token);
             if (configuredCode > 0 && keyCodes.indexOf(configuredCode) < 0) keyCodes.push(configuredCode);
         }
@@ -3941,6 +4038,7 @@ class FCMChatWidget extends MovieClip {
             + _physicalNavRegistered.join(",") + " openKey=" + _physicalOpenKey
             + " scrollUp=" + _cfg.scrollUpKey + " scrollDown=" + _cfg.scrollDownKey
             + " scrollBottom=" + (_cfg.scrollBottomKey.length > 0 ? _cfg.scrollBottomKey : "<unset>")
+            + " activateLink=" + _cfg.activateLinkKey
             + " hideKey=" + (_cfg.hideKey.length > 0 ? _cfg.hideKey : "<unset>"));
     }
 
@@ -3983,7 +4081,8 @@ class FCMChatWidget extends MovieClip {
             // Page keys switch channels in either state. Configured feed keys remain ordinary
             // game controls until the player has opened the editor with Insert.
             var isPhysicalHide:Bool = FcmCommand.virtualKeyCode(_cfg.hideKey) == keyCode;
-            var action:String = isPhysicalHide ? _cfg.hideKey : FcmCommand.physicalNavigationAction(keyCode,
+            var isPhysicalLink:Bool = FcmCommand.virtualKeyCode(_cfg.activateLinkKey) == keyCode;
+            var action:String = isPhysicalHide ? _cfg.hideKey : isPhysicalLink ? _cfg.activateLinkKey : FcmCommand.physicalNavigationAction(keyCode,
                 _cfg.scrollUpKey, _cfg.scrollDownKey, _cfg.scrollBottomKey);
             if (action.length == 0) continue;
             var command:String = FcmCommand.navigationAction(action,
@@ -4005,9 +4104,9 @@ class FCMChatWidget extends MovieClip {
             if (isDown) {
                 _physicalNavStep = "dispatch-key-" + keyCode;
                 var handled:Bool = handleUserEvent(action, true);
-                if (command.length > 0 || isPhysicalHide) {
+                if (command.length > 0 || isPhysicalHide || isPhysicalLink) {
                     zfeLog("info", "input", "physical key=" + keyCode + " action=" + action
-                        + " edge=down command=" + (isPhysicalHide ? "hide" : command)
+                        + " edge=down command=" + (isPhysicalHide ? "hide" : isPhysicalLink ? "activate-link" : command)
                         + " handled=" + (handled ? "true" : "false"));
                 }
                 _physicalNavigationDown.set(keyCode, true);
@@ -4051,6 +4150,12 @@ class FCMChatWidget extends MovieClip {
             // On its rising edge, open chat when closed. Slash (/g /t /e /i /r) covers direct
             // jumps + reverse. (Hidden: openInput() un-hides first.)
             var kp:Bool = nativeTruthy(callTop("isChatKeyPressed", "{}"));
+            if (!isValidHUDMode()) {
+                // Preserve the edge state while blocked so a key held in ContainerMode cannot
+                // open chat immediately after Fallout returns to the ordinary HUD.
+                _lastChatKey = kp;
+                return;
+            }
             if (kp && !_lastChatKey) {
                 if (!_inputOpen) {
                     zfeLog("info", "nativein", "OpenChatKey edge; opening input");
@@ -4077,7 +4182,7 @@ class FCMChatWidget extends MovieClip {
         _pollTimer.addEventListener(TimerEvent.TIMER, function(_) { runEventPollSafely(); });
         _pollTimer.start();
         var initialCount:Int = runEventPollSafely(); // immediate first poll for history
-        if (_api != null && _api.provider == FcmNativeApi.ZFE && initialCount >= 64) {
+        if (_api != null && _api.provider == FcmNativeApi.ZFE && initialCount >= NATIVE_POLL_BATCH) {
             // ZFE exposes the queue synchronously. A full first batch proves that a second
             // native poll is needed; drain it promptly instead of waiting for pollMs.
             startZfeInitialHistoryDrain();
@@ -4161,8 +4266,8 @@ class FCMChatWidget extends MovieClip {
             _zfeInitialDrainAttempts++;
             var count:Int = runEventPollSafely();
             // A short batch means the bounded cursor-zero snapshot is drained. Continue only
-            // while the provider returns full 64-event batches, with a hard attempt cap.
-            if (count >= 64 && _zfeInitialDrainAttempts < ZFE_INITIAL_DRAIN_MAX) {
+            // while the provider returns full 16-event batches, with a hard attempt cap.
+            if (count >= NATIVE_POLL_BATCH && _zfeInitialDrainAttempts < ZFE_INITIAL_DRAIN_MAX) {
                 scheduleZfeInitialHistoryDrain();
             } else {
                 stopZfeInitialHistoryDrain();
@@ -4323,7 +4428,7 @@ class FCMChatWidget extends MovieClip {
         _eventPollPhase = "poll-call";
         // Mitigation C: chunk xScal drain to avoid ~1s UI stalls — request 16 per tick,
         // chain immediate next-tick polls while full batches arrive (covers 64 snapshot over 4 turns)
-        var payload:String = '{"max":16,"cursor":' + _cursor + '}';
+        var payload:String = '{"max":' + NATIVE_POLL_BATCH + ',"cursor":' + _cursor + '}';
         var tPollStart:Float = flash.Lib.getTimer();
         var result:Dynamic = null;
         try {
@@ -4451,6 +4556,8 @@ class FCMChatWidget extends MovieClip {
             var transportTag:String = FcmConfig.hudTransportTag(hudTransport);
             var transportStarColor:String = FcmConfig.hudTransportStarColor(hudTransport);
             var transportNameColor = FcmConfig.hudTransportNameColor(hudTransport);
+            var transportLinkUrl:String = FcmConfig.hudTransportValue(hudTransport, "u");
+            if (!FcmLink.validHttpUrl(transportLinkUrl)) transportLinkUrl = "";
             if (transportNameColor.length > 0) { nameColor = transportNameColor; carrierNameColorCount++; }
             if (FcmConfig.parseHexColor(nameColor, -1) >= 0) wireNameColorCount++;
             if (transportTag.length > 0) tag = transportTag;
@@ -4592,7 +4699,7 @@ class FCMChatWidget extends MovieClip {
                 color: FcmConfig.parseHexColor(nameColor, -1) >= 0 ? nameColor : "", channel: channel, user: displayName,
                 tag: tag, supporterStar: supporterStar, starColor: starColor, body: displayBody,
                 messageId: messageId, senderUserId: senderUserId, pending: false,
-                localSendId: "", pendingAt: 0, sendAccepted: false,
+                localSendId: "", pendingAt: 0, sendAccepted: false, linkUrl: transportLinkUrl,
             });
             while (_records.length > _cfg.maxMessages) _records.shift();
             if (_bScrolling && FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], channel)) _newWhileScrolled++;
@@ -4617,10 +4724,6 @@ class FCMChatWidget extends MovieClip {
         if (droppedCount > 0) {
             zfeLog("warn", "recv", "provider reported dropped events; cursor advanced without replay");
             scheduleHistoryResyncFallback();
-        } else if (_history.staticEventsSeen && !_history.dropped && !_history.resyncSent) {
-            // A fresh subscribe snapshot has arrived. Do not issue an immediate recovery replay;
-            // the duplicate would consume the remaining native queue capacity.
-            stopHistoryResyncFallback();
         }
         seedOwnCosmeticsFromHistory();
         if (newRecords) {
@@ -5032,6 +5135,12 @@ class FCMChatWidget extends MovieClip {
      *  driven by the relay acknowledgement, not by this local observation. */
     function tickRoster():Void {
         if (_api == null || !_connected || _relayUserId.length == 0) return;
+        // ZFE executes chat.v1.sendMessage synchronously on Fallout's Scaleform thread.
+        // When TLS/relay connectivity is degraded, each automatic roster or leave control
+        // can block that thread for the native timeout (observed at roughly 15 seconds).
+        // Keep ordinary ZFE chat available, but fail closed on automatic Server-room traffic
+        // until ZFE exposes a non-blocking request primitive.
+        if (_api.provider == FcmNativeApi.ZFE) return;
         // An unlinked account cannot be admitted to the server room. In particular, do not
         // keep issuing synchronous roster calls while the one-shot link notice is being shown.
         if (_needsLink || _authState != "authenticated") return;
@@ -5069,11 +5178,9 @@ class FCMChatWidget extends MovieClip {
                 resetRosterObservation("roster boundary");
                 return;
             }
-            var retrySuppressed:Bool = !_serverSessionReady && _lastRosterSentAt > 0
-                && (now - _lastRosterSentAt) < ROSTER_RETRY_MS;
-            if (!retrySuppressed && (!_serverSessionReady
-                    || (now - _lastRosterSentAt) >= ROSTER_SEND_MS
-                    || namesField != _lastRosterSent)) {
+            var hasSentRoster:Bool = _lastRosterSentAt > 0;
+            if (FcmCommand.shouldSendRoster(true, _inputOpen, _serverSessionReady,
+                    now - _lastRosterSentAt, hasSentRoster, namesField != _lastRosterSent)) {
                 _lastRosterSentAt = now;
                 _lastRosterSent = namesField;
                 var body:String = WORLD_ROSTER_PREFIX + namesField;
@@ -5255,7 +5362,11 @@ class FCMChatWidget extends MovieClip {
         var row:Sprite = new Sprite();
         var fs:Int = _cfg.fontSize;
         var rawUser:String = rec.user == null ? "" : rec.user;
-        var rawBody:String = displayBody != null ? displayBody : FcmConfig.normalizeDiscordEmojiMarkup(rec.body == null ? "" : rec.body);
+        var sourceBody:String = rec.body == null ? "" : rec.body;
+        var rawBody:String = displayBody != null ? displayBody
+            : FcmLink.abbreviateBody(FcmConfig.normalizeDiscordEmojiMarkup(sourceBody));
+        var rowLink:String = rec.linkUrl != null && FcmLink.validHttpUrl(rec.linkUrl)
+            ? rec.linkUrl : FcmLink.firstUrl(sourceBody);
         var queuedSend = rec.pending ? _outbox.get(rec.localSendId) : null;
         var deliveryStatus:String = queuedSend == null ? ""
             : " [" + (queuedSend.attempts > 0 ? "sending" : "queued") + "]";
@@ -5323,7 +5434,8 @@ class FCMChatWidget extends MovieClip {
         }
         row.mouseEnabled = false;
         row.mouseChildren = false;
-        return { view: row, contentY: 0, height: Math.max(contentHeight, lineHeight), textField: contentTf, bodyOffset: runs.nameEnd + 2 };
+        return { view: row, contentY: 0, height: Math.max(contentHeight, lineHeight), textField: contentTf,
+            bodyOffset: runs.nameEnd + 2, linkUrl: rowLink };
     }
 
     // Called only after a complete styled baseline exists. Optional class verification,
@@ -5331,8 +5443,9 @@ class FCMChatWidget extends MovieClip {
     function buildEmojiFeedRow(rec:ChatRecord, viewportWidth:Float):FeedRowView {
         _renderStep = "emoji-plan";
         var plan:FcmEmoji.FcmEmojiPlan;
+        var linkSafeBody:String = FcmLink.abbreviateBody(rec.body == null ? "" : rec.body);
         try {
-            plan = FcmEmoji.plan(rec.body == null ? "" : rec.body, true, rec.user + rec.tag);
+            plan = FcmEmoji.plan(linkSafeBody, true, rec.user + rec.tag);
         } catch (error:Dynamic) {
             reportEmojiStatus("planner failed at " + FcmEmoji.stage + ": " + clip200(Std.string(error)));
             return null;
@@ -5341,7 +5454,7 @@ class FCMChatWidget extends MovieClip {
         var emoji = FcmEmojiLayout.prepare(plan);
         if (emoji.slots.length == 0) return null;
         // A decoration failure should show a readable name, not missing font glyphs.
-        var fallback = FcmEmoji.plan(rec.body == null ? "" : rec.body, false).text;
+        var fallback = FcmEmoji.plan(linkSafeBody, false).text;
         try {
             _renderStep = "emoji-styled-row";
             var candidate = buildFeedMessageRow(rec, viewportWidth, emoji.text);
@@ -5403,6 +5516,7 @@ class FCMChatWidget extends MovieClip {
         _renderPending = false;
         _pendingVisibleRecords = null;
         _pendingContentY = 0;
+        applySelectedRowStyle();
     }
 
     /** Commit one completed snapshot without exposing partially positioned rows. */
@@ -5415,6 +5529,7 @@ class FCMChatWidget extends MovieClip {
         _feedContentLayer = layer;
         _pendingFeedContentLayer = null;
         _feedRows = rows;
+        if (_selectedRowIndex >= _feedRows.length) _selectedRowIndex = _feedRows.length - 1;
         _feedContentHeight = contentHeight;
         _feedMaxScrollY = Math.max(0, _feedContentHeight - _logTf.height);
         if (!_bScrolling) {
@@ -5657,6 +5772,7 @@ class FCMChatWidget extends MovieClip {
         _feedRows = [];
         _feedContentHeight = 0;
         _feedMaxScrollY = 0;
+        _selectedRowIndex = -1;
     }
 
     /** Apply the current content offset to every row inside the clipped feed layer. */
@@ -5666,14 +5782,38 @@ class FCMChatWidget extends MovieClip {
         _feedContentLayer.y = -_feedScrollY;
     }
 
+    function applySelectedRowStyle():Void {
+        for (i in 0..._feedRows.length) {
+            var row = _feedRows[i];
+            row.view.graphics.clear();
+            if (i != _selectedRowIndex) continue;
+            row.view.graphics.lineStyle(1, _cfg.selectedRowColor, 0.85);
+            row.view.graphics.beginFill(_cfg.selectedRowColor, 0.14);
+            row.view.graphics.drawRect(-3, -1, Math.max(1, _logTf.width + 6), row.height + 2);
+            row.view.graphics.endFill();
+        }
+    }
+
+    function moveRowSelection(direction:Int):Void {
+        if (_feedRows.length == 0) return;
+        if (_selectedRowIndex < 0) _selectedRowIndex = direction < 0 ? _feedRows.length - 1 : 0;
+        else _selectedRowIndex = Std.int(Math.max(0, Math.min(_feedRows.length - 1, _selectedRowIndex + direction)));
+        var selected = _feedRows[_selectedRowIndex];
+        if (selected.contentY < _feedScrollY) _feedScrollY = selected.contentY;
+        var bottom:Float = selected.contentY + selected.height;
+        if (bottom > _feedScrollY + _logTf.height) _feedScrollY = bottom - _logTf.height;
+        _bScrolling = _feedScrollY < _feedMaxScrollY;
+        applyFeedScroll();
+        applySelectedRowStyle();
+        setPrompt(selected.linkUrl != null && FcmLink.validHttpUrl(selected.linkUrl)
+            ? "Selected link - press Enter to open " + FcmLink.displayUrl(selected.linkUrl)
+            : "Selected message - no link");
+    }
+
     public function scrollUp():Void {
         if (_feedLayer == null) return;
         try {
-            if (_feedMaxScrollY <= 0) return;
-            var before:Float = _feedScrollY;
-            _feedScrollY = Math.max(0, _feedScrollY - Math.max(8, _cfg.fontSize + 2));
-            if (_feedScrollY != before) _bScrolling = true;
-            applyFeedScroll();
+            moveRowSelection(-1);
         } catch (e:Dynamic) {
             zfeLog("warn", "scroll", "scrollUp threw: " + Std.string(e));
         }
@@ -5682,16 +5822,7 @@ class FCMChatWidget extends MovieClip {
     public function scrollDown():Void {
         if (_feedLayer == null) return;
         try {
-            if (_feedMaxScrollY <= 0) {
-                _bScrolling = false; _newWhileScrolled = 0;
-            } else {
-                _feedScrollY = Math.min(_feedMaxScrollY,
-                    _feedScrollY + Math.max(8, _cfg.fontSize + 2));
-                if (_feedScrollY >= _feedMaxScrollY) {
-                    _bScrolling = false; _newWhileScrolled = 0;
-                }
-            }
-            applyFeedScroll();
+            moveRowSelection(1);
         } catch (e:Dynamic) {
             zfeLog("warn", "scroll", "scrollDown threw: " + Std.string(e));
         }
@@ -5699,7 +5830,9 @@ class FCMChatWidget extends MovieClip {
 
     public function scrollToBottom():Void {
         if (_feedLayer == null) return;
+        _selectedRowIndex = -1;
         snapLogToBottom();
+        applySelectedRowStyle();
     }
 
     /** Mouse-wheel over the log: wheel up scrolls back, wheel down toward newest (CAP-008). */

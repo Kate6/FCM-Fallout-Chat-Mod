@@ -11,6 +11,65 @@ Production OAuth MCP clients reuse these same embed, channel/role/emoji context,
 and reaction-role services; see [embeds](./embeds.md),
 [reaction roles](./reaction-roles.md), and [MCP OAuth](../backend/mcp-oauth.md).
 
+## Overlay and moderation slash commands
+
+`discordOverlayCommandService` registers guild-scoped application commands for
+every environment configured with `DISCORD_SERVER_ID` (Dev, Ant, and Production).
+It provides `/fcm command:<overlay command>` as the compatibility surface for
+the full server-side overlay command catalog, including configured custom commands,
+so a new enabled overlay command does not require a separate Discord command
+registration change.
+
+The card-bearing Fallout lookups also have first-class public commands:
+`/wiki query:`, `/camp item:`, `/minerva`, `/nukecodes` (and `/newcodes`), and
+`/serverstatus`.
+They call `commandService` and convert its returned metadata—not a second lookup
+or duplicate data model—into a public Discord embed. This keeps Discord fields,
+attribution, image URL, sale dates, codes, and status in step with the overlay
+card data. Other command results are ephemeral to avoid flooding the relay
+channel. `/fcm` accepts only slash-prefixed input, for example
+`/fcm command:"/g hello"` or `/fcm command:"/help"`.
+
+`/help` is an ephemeral quick guide for `/camp`, `/wiki`, `/minerva`,
+`/nukecodes`, `/appearance`, and other common commands. `/appearance` explains
+the private `/name` and `/cosmetics` controls. `/events` without an option lists
+every currently enabled overlay command whose action is an event announcement;
+`/events command:"/ss"` runs one. The event message is finalized through the
+same relay path as the overlay, so it appears in the mapped event channel and
+in FCM history rather than merely as a Discord interaction response.
+
+### Optional bot-commands channel
+
+Set `DISCORD_BOT_COMMANDS_CHANNEL_ID` to designate a Discord channel as the
+bot-command entry point. On startup, and after each human message in that
+channel, the bot removes its previous help card and posts a fresh compact embed
+that directs users to `/help` and `/events`. User messages are retained. The bot
+needs **Read Message History** and **Manage Messages** there. Leave the setting
+blank to disable the sticky help card.
+
+`/moderate` is a separate command group: `kick`, `mute`, `unmute`, `ban`,
+`unban`, and `delete-message`. Discord's Moderate Members permission is only an
+initial UI gate. Each invocation also requires a linked FCM account whose
+effective FCM role is `moderator`, `admin`, or `owner`; otherwise it is rejected
+ephemerally. Actions call the same `moderationActionsService` methods used by the
+dashboard, retaining target protection, session eviction, Discord propagation,
+audit logging, public FCM announcement, and ban-evidence requirements. `/moderate
+ban` therefore requires an evidence summary and `/moderate unban` requires the
+FCM ban ID. The Discord slash variants also enforce the equivalent Discord
+action: `kick` removes the linked member from the guild, `mute` applies a native
+Discord timeout, and `ban` creates a guild ban even when the FCM ban has an
+expiry (the FCM unban/expiry flow removes that guild ban again). If Discord
+rejects an action because of bot permissions or role hierarchy, the response is
+explicitly marked as FCM-only rather than claiming success.
+
+The `user` box for `/moderate kick`, `/moderate mute`, `/moderate unmute`, and
+`/moderate ban` is an FCM-backed autocomplete. Moderators can search by FCM chat
+name, Discord display name or ID, Steam name, or SteamID, then choose the linked
+account from the resulting list. Interaction confirmations are ephemeral; FCM
+does not broadcast a public General-channel moderation message. Every moderation
+action instead writes its audit record and posts a staff-only embed through the
+configured `mod_log_channel_id` (the Vault Security channel by default).
+
 ---
 
 ## Required gateway intents
@@ -39,9 +98,13 @@ stop working after a redeploy.
 | Permission | Needed for |
 |------------|-----------|
 | Read Messages / View Channels | All features |
+| Read Message History | Bot-commands sticky help card |
 | Send Messages | Chat bridge outbound, embed builder |
 | Embed Links | Embed builder |
 | Manage Messages | Chat bridge — deleting over-length or media-only messages |
+| Moderate Members | `/moderate mute` Discord timeout |
+| Kick Members | `/moderate kick` guild removal |
+| Ban Members | `/moderate ban` guild ban |
 | Manage Channels | Temp voice — creating/deleting channels |
 | Move Members | Temp voice — moving members into their channel |
 | Manage Roles | Temp voice channel overrides, reaction roles |
@@ -127,6 +190,8 @@ has `discord_relay` enabled.
 discordClient created (intents + partials)
   └─ voiceService.register(client)         ← temp voice channels
   └─ reactionRoleService.register(client)  ← reaction roles
+  └─ discordOverlayCommandService.register(client) ← /fcm, lookup cards, /moderate
+  └─ discordCommandHelpService.register(client) ← bot-commands sticky /help card
   └─ emoji cache-invalidation listeners
   └─ ready handler (presence, logging)
   └─ messageCreate handler (chat bridge)
@@ -143,6 +208,7 @@ discordClient created (intents + partials)
 | `DISCORD_TOKEN` | Bot token — if unset, the bridge is disabled entirely |
 | `DISCORD_SERVER_ID` | Guild snowflake (assignable-roles, nickname sync) |
 | `DISCORD_CHANNEL_ID` | Default relay channel fallback |
+| `DISCORD_BOT_COMMANDS_CHANNEL_ID` | Optional channel that maintains the compact `/help` and `/events` sticky card |
 | `DISCORD_EVENTS_CHANNEL_ID` | Existing Discord text-channel snowflake for event announcements; must belong to `DISCORD_SERVER_ID` |
 | `DISCORD_UPDATES_CHANNEL_ID` | Release announcement channel (default `1479531502567166066`) |
 | `DOWNLOAD_PAGE_URL` | Release embed/download-page URL; dev overrides this to `https://dev.falloutchatmod.com` |

@@ -30,6 +30,8 @@ export interface Environment {
   MESSAGE_RETENTION_DAYS: number;
   DISCORD_TOKEN: string;
   DISCORD_CHANNEL_ID: string;
+  /** Optional command-only Discord channel where the bot maintains a sticky help embed. */
+  DISCORD_BOT_COMMANDS_CHANNEL_ID: string;
   DISCORD_CLIENT_ID: string;
   DISCORD_CLIENT_SECRET: string;
   DISCORD_SERVER_ID: string;
@@ -237,6 +239,7 @@ const env: Environment = {
   // Discord bridge
   DISCORD_TOKEN: process.env.DISCORD_TOKEN || '',
   DISCORD_CHANNEL_ID: process.env.DISCORD_CHANNEL_ID || '',
+  DISCORD_BOT_COMMANDS_CHANNEL_ID: process.env.DISCORD_BOT_COMMANDS_CHANNEL_ID || '',
 
   // Discord OAuth2
   DISCORD_CLIENT_ID: process.env.DISCORD_CLIENT_ID || '',

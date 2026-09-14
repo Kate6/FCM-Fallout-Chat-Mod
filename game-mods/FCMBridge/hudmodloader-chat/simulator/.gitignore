@@ -1,0 +1,13 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+public/FCMChatWidget.swf
+public/FCMChat.ini
+public/FCMHarness.swf
+public/sim-manifest.json
+public/installed-xscal-0.1.15.json
+public/hosted-dev-snapshot.json
+public/fonts_programs.swf
+public/ruffle/
+artifacts/

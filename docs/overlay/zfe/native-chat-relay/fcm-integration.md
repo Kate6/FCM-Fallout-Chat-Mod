@@ -55,13 +55,13 @@ The optional generic xScal `__SFCodeObj.call` is used separately for diagnostics
 objects or no arguments according to the method, not ZFE JSON strings.
 
 Fresh subscribe-time history is the initial-history source for both providers. The relay sends up
-to 15 recent rows for each static channel and up to 50 rows for the current world room: 125 events
-total. The native poll limit is 64, so both widgets drain the ordered bounded snapshot over
-multiple polls. xScal's widget runs a bounded 250 ms warm-up for up to 20 polls after an accepted
+to 15 recent rows for each static channel and up to 50 rows for the current world room, followed by
+one terminal `FCMCTL/1/HISTORY-DONE` system frame. The widget requests 16 events per poll and drains
+the ordered bounded snapshot over multiple polls. xScal's widget runs a bounded 250 ms warm-up for up to 20 polls after an accepted
 connect so asynchronous subscriber history is drained promptly. Both providers use the same
-1.5-second authenticated `FCMCTL/1/RESYNC` fallback when no static-channel history has arrived or
-the native queue reports loss. SERVER and link notices do not count as static history. A normal
-snapshot suppresses replay; an accepted recovery restarts the bounded drain and forces the next
+1.5-second authenticated `FCMCTL/1/RESYNC` fallback until the terminal marker arrives or when the
+native queue reports loss. SERVER, link notices, and partial static history do not complete the
+snapshot. An accepted recovery restarts the bounded drain and forces the next
 roster/world bind so deferred SERVER history is released even for an unchanged roster.
 
 

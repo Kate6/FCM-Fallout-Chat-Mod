@@ -65,8 +65,9 @@ Scorched Earth, Neurological Warfare, A Colossal Problem, Seismic Activity,
 Encryptid, Eviction Notice, Moonshine Jamboree.
 
 SAVING AND RELOADING
-F11 changes apply immediately. ZFE saves in vendor-scoped
-FCMChatWidget/settings.ini; saved values take priority over Data/FCMChat.ini.
+F11 changes apply immediately. ZFE saves appearance in vendor-scoped
+FCMChatWidget/settings.ini. Saved appearance takes priority over Data/FCMChat.ini, but environment
+settings (`linkUrl`, all keybinds, and `hideInHUDModes`) always come from the active file.
 If you already customized with F11, use F11 for further changes, or update the
 corresponding saved settings through your extender's storage location before
 reloading. xScal saves appearance per linked device through the matching relay
@@ -83,19 +84,15 @@ ignored. You can still switch channels normally. There are no input-width or
 input-alignment settings.
 OPEN-CHAT KEY (ZFE)
 -------------------
-The shipped ZFE values are Insert in both locations. To use another supported key, keep these
-two values identical (the example changes both to Delete):
+The shipped ZFE values are Insert in both locations. To use another supported key, change
+`Data/FCMChat.ini`; the widget synchronizes ZFE's active watcher after discovery:
 
   Data/FCMChat.ini
   [FCMChat]
   openKey=DELETE
 
-  Data/configuration/zfe.ini
-  [TextChat]
-  OpenChatKey=DELETE
-
-ZFE's global zfe.ini value overrides the packaged widget fragment. See KEYBINDS.txt for
-accepted values, precedence, conflicts, and the separate xScal limitations.
+The extender config still supplies its startup default before the widget loads. See KEYBINDS.txt
+for accepted values, precedence, conflicts, and the separate xScal limitations.
 
 For xScal, do not add OpenChatKey to xscal.ini. Change FCMChat.ini openKey; the widget maps
 it to xScal's physical Input.* polling API and retains the named-action fallback. See KEYBINDS.txt
@@ -112,13 +109,16 @@ shipped values are explicit, including the two intentional blank defaults:
   scrollUpKey=Up
   scrollDownKey=Down
   scrollBottomKey=
+  activateLinkKey=ENTER
   hideKey=DELETE
 
 Up/Down are the packaged arrow-scroll bindings; their ArrowUp/ArrowDown, Cursor, and Dpad
 spellings are treated as aliases. Set either direction to a forwarded HUD action (for example
 Console) or a physical xScal/ZFE token (for example F12) to rebind it. An empty value disables
-that direction. `scrollBottomKey` is intentionally blank by default, so Home and End remain
-game controls until one is explicitly selected. The F11 **Scroll to newest** menu action is
+that direction. `activateLinkKey` opens a selected link directly in the operating system browser
+through GFx only during an OpenChat-owned edit and defaults to Enter; it is inert while chat is
+closed and does not require the desktop overlay. `scrollBottomKey` is intentionally blank by
+default, so Home and End remain game controls until one is explicitly selected. The F11 **Scroll to newest** menu action is
 always available. Feed keys are consumed only while the open-chat key owns the visible input
 session. The default `hideKey=DELETE` hides only while idle; a blank value disables the keyboard
 hide binding while keeping `/hide` and the F11 **Hide chat** menu action available. See

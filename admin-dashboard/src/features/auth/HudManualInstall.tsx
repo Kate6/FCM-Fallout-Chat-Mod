@@ -82,8 +82,8 @@ export default function HudManualInstall({ linkUrl, bodyStyle, stepStyle, noteSt
         Create the folders if needed and remove the <code>.example</code> suffix.
         Back up any existing fragment and compare its settings before replacing it.
         The example contains <code>{`Endpoint=${relayUrl.href}`}</code>; copy the entire example,
-        not just that line. Keep its <code>OpenChatKey</code> aligned with <code>openKey</code> in
-        {' '}<code>Data/FCMChat.ini</code> and any override in <code>Data/configuration/zfe.ini</code>.
+        not just that line. <code>Data/FCMChat.ini</code> <code>openKey</code> is authoritative after
+        widget discovery; the fragment's <code>OpenChatKey</code> is ZFE's startup default.
         <strong>Important:</strong> ZFE applies <code>Data/configuration/zfe.ini</code> after the
         fragment, so its <code>[TextChat]</code> values override the fragment. Check that file even
         when the fragment contains the correct endpoint. If you use a global override, it must be:
