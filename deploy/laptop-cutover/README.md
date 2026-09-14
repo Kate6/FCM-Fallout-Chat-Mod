@@ -161,6 +161,9 @@ previous image automatically if validation fails.
 If candidate health validation fails, the workflow records the candidate backend
 status and its last 200 log lines before restoring the previous image. This keeps
 startup failures diagnosable without weakening the automatic rollback.
+The backend image also normalizes `baseline-migrations.sh` to LF during its Docker
+build. Windows Git checkouts may otherwise preserve a CRLF shebang that Alpine
+reports misleadingly as `baseline-migrations.sh: not found` during startup.
 
 Two independent gates must both be enabled:
 
