@@ -11,9 +11,10 @@ export function buildBotCommandsHelpEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setTitle(HELP_TITLE)
     .setColor(0xf1c40f)
+    .setDescription('All of these commands work in the overlay. Some also work in the HUD mod, but not all.')
     .addFields({
       name: 'Common Commands',
-      value: '`/help` · `/camp` · `/wiki` · `/minerva` · `/nukecodes` · `/giveaway` · `/appearance` · `/apply` · `/report` · `/events`',
+      value: '`/help` · `/camp` · `/wiki` · `/minerva` · `/nukecodes` · `/giveaway` · `/keybinds` · `/appearance` · `/apply` · `/report` · `/events`',
       inline: false,
     });
 }

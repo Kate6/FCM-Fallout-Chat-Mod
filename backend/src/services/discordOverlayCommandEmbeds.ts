@@ -12,6 +12,7 @@ export interface DiscordCommandEmbedData {
   url?: string;
   color: number;
   thumbnailUrl?: string;
+  imageUrl?: string;
   footerText: string;
   fields: Array<{ name: string; value: string; inline?: boolean }>;
 }
@@ -67,14 +68,18 @@ export function buildDiscordOverlayCard(metadata: CardMetadata): DiscordCommandE
     case 'wiki_share': {
       const articleUrl = publicUrl(metadata.articleUrl)
         ?? `https://fallout.fandom.com/wiki/${encodeURIComponent(asText(metadata.wikiTitle).replace(/ /g, '_'))}`;
+      const imageUrl = publicUrl(metadata.imageUrl);
+      const isMap = metadata.imageIsMap === true;
       return {
         title: `Fallout Wiki — ${asText(metadata.name)}`,
         url: articleUrl,
         color: CARD_COLORS.wiki_share,
-        thumbnailUrl: publicUrl(metadata.imageUrl),
+        thumbnailUrl: isMap ? undefined : imageUrl,
+        imageUrl: isMap ? imageUrl : undefined,
         footerText: asText(metadata.attribution, 'Fallout Wiki · CC-BY-SA 3.0'),
         fields: [
           { name: 'Type', value: asText(metadata.kind), inline: true },
+          ...(isMap && imageUrl ? [{ name: 'Map', value: `[Open full-size map](${imageUrl})`, inline: true }] : []),
           ...objectFields(metadata.fields),
         ],
       };

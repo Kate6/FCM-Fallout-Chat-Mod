@@ -159,6 +159,7 @@ export function buildHelpResponse(commands: ChatCommand[], options: { includePar
   lines.push('/minerva — Show Minerva\'s current or next Big Sale (location, list number, dates)');
   lines.push('/wiki <name> — Look up a Fallout 76 item, weapon, creature, perk, or location');
   lines.push('/camp <item name> — Look up a CAMP item (budget cost, required plan, category)');
+  lines.push('/keybinds — Show default overlay and HUD-mod keybinds');
 
   lines.push('', '— GIVEAWAYS —');
   lines.push('/giveaway start <item> [<minutes>] - Start a giveaway (1-60 min, default 5)');
@@ -348,6 +349,7 @@ async function buildWikiResponse(query: string): Promise<{ text: string; metadat
         wikiTitle: entry.wikiTitle,
         articleUrl: entry.articleUrl,
         imageUrl: entry.imageUrl,
+        imageIsMap: entry.images?.[0]?.isMap === true,
         fields: entry.fields,
         attribution: entry.attribution,
       },

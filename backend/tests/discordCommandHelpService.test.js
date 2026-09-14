@@ -15,7 +15,7 @@ describe('Discord bot-commands sticky help', () => {
       title: 'Fallout Chat Mod Commands',
     });
     expect(embed.data.footer).toBeUndefined();
-    expect(embed.data.description).toBeUndefined();
+    expect(embed.data.description).toContain('All of these commands work in the overlay');
     expect(embed.data.fields).toEqual([{
       name: 'Common Commands',
       value: expect.stringContaining('/help'),
@@ -25,6 +25,7 @@ describe('Discord bot-commands sticky help', () => {
     expect(embed.data.fields[0].value).toContain('/giveaway');
     expect(embed.data.fields[0].value).toContain('/apply');
     expect(embed.data.fields[0].value).toContain('/report');
+    expect(embed.data.fields[0].value).toContain('/keybinds');
     expect(embed.data.fields[0].value).toContain('/events');
   });
 

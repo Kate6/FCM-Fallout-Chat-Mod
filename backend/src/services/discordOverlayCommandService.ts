@@ -39,7 +39,7 @@ import {
 
 const COMMAND_NAME = 'fcm';
 const MODERATION_COMMAND = 'moderate';
-const SPECIAL_COMMANDS = new Set(['wiki', 'camp', 'minerva', 'nukecodes', 'newcodes', 'serverstatus', 'help', 'appearance', 'events', 'giveaway', 'apply']);
+const SPECIAL_COMMANDS = new Set(['wiki', 'camp', 'minerva', 'nukecodes', 'serverstatus', 'help', 'appearance', 'events', 'giveaway', 'apply', 'keybinds']);
 const CATEGORY_CHOICES = REASON_CATEGORIES.map((name) => ({ name, value: name }));
 
 type CommandContext = { channelId: string; channelName: string; parentChannelId: string | null };
@@ -53,12 +53,10 @@ async function replyWithPrivatePages(interaction: ChatInputCommandInteraction, v
   const [first, ...rest] = splitDiscordResponse(body.join('\n').trim(), 4_000);
   await interaction.reply({
     embeds: [new EmbedBuilder().setTitle(heading.replace(/^◈\s*/, '')).setColor(0xf1c40f).setDescription(first)],
-    flags: MessageFlags.Ephemeral,
   });
   for (const page of rest) {
     await interaction.followUp({
       embeds: [new EmbedBuilder().setTitle(`${heading.replace(/^◈\s*/, '')} (continued)`).setColor(0xf1c40f).setDescription(page)],
-      flags: MessageFlags.Ephemeral,
     });
   }
 }
@@ -99,8 +97,7 @@ function commandText(interaction: ChatInputCommandInteraction): string | null {
     case 'wiki': return `/wiki ${interaction.options.getString('query', true)}`;
     case 'camp': return `/camp ${interaction.options.getString('item', true)}`;
     case 'minerva': return '/minerva';
-    case 'nukecodes':
-    case 'newcodes': return '/nukecodes';
+    case 'nukecodes': return '/nukecodes';
     case 'serverstatus': return '/serverstatus';
     case 'giveaway': return `/giveaway ${interaction.options.getString('command', true)}`;
     case 'apply': return '/apply';
@@ -132,6 +129,7 @@ async function replyForCommand(interaction: ChatInputCommandInteraction, result:
     if (card.description) embed.setDescription(card.description);
     if (card.url) embed.setURL(card.url);
     if (card.thumbnailUrl) embed.setThumbnail(card.thumbnailUrl);
+    if (card.imageUrl) embed.setImage(card.imageUrl);
     await interaction.reply({
       content: `${interaction.user} ran /${interaction.commandName}.`,
       embeds: [embed],
@@ -139,7 +137,14 @@ async function replyForCommand(interaction: ChatInputCommandInteraction, result:
     });
     return;
   }
-  await interaction.reply({ content: clip(result.botMessage), flags: MessageFlags.Ephemeral });
+  await interaction.reply({ content: clip(result.botMessage), ...(interaction.commandName === 'apply' ? { flags: MessageFlags.Ephemeral } : {}) });
+}
+
+function buildKeybindsEmbed(): EmbedBuilder {
+  return new EmbedBuilder().setTitle('Fallout Chat Mod Default Keybinds').setColor(0xf1c40f).addFields(
+    { name: 'Overlay', value: '`Insert` Focus chat · `Delete` Show/hide · `End` Click-through\n`PageUp/PageDown` Previous/next channel · `Home` Settings\n`\\` Recent party · `/` Fallout 76 / General tab', inline: false },
+    { name: 'HUD Mod (optional .ba2)', value: '`Insert` Open chat · `Enter` Send · `Escape` / `Tab` Cancel\n`PageUp/PageDown` Change FCM channel · `ArrowUp/ArrowDown` Scroll feed\n`F11` HUDModLoader menu', inline: false },
+  ).setFooter({ text: 'All overlay binds can be changed in Settings.' });
 }
 
 async function handleOverlayCommand(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -148,7 +153,11 @@ async function handleOverlayCommand(interaction: ChatInputCommandInteraction): P
     return;
   }
   if (interaction.commandName === 'appearance') {
-    await interaction.reply({ content: 'Use `/name` to set your chat name and `/cosmetics` to manage your appearance.', flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: 'Use `/name` to set your chat name and `/cosmetics` to manage your appearance.' });
+    return;
+  }
+  if (interaction.commandName === 'keybinds') {
+    await interaction.reply({ embeds: [buildKeybindsEmbed()] });
     return;
   }
   if (interaction.commandName === 'events') {
@@ -157,12 +166,9 @@ async function handleOverlayCommand(interaction: ChatInputCommandInteraction): P
   }
   const raw = commandText(interaction);
   if (!raw?.startsWith('/')) return;
-  const [user, context] = await Promise.all([requireLinkedUser(interaction), resolveContext(interaction.channelId)]);
+  const [user, mappedContext] = await Promise.all([requireLinkedUser(interaction), resolveContext(interaction.channelId)]);
   if (!user) return;
-  if (!context) {
-    await interaction.reply({ content: 'This Discord channel is not mapped to an FCM chat channel.', flags: MessageFlags.Ephemeral });
-    return;
-  }
+  const context = mappedContext ?? { channelId: interaction.channelId, channelName: 'Discord', parentChannelId: null };
   const displayName = user.chatName ?? user.discordDisplayName ?? user.discordUsername ?? user.username;
   const result = await tryHandleCommand(raw, user.id, displayName, context.channelId, context.channelName, null, 0, context.parentChannelId);
   if (result.handled && result.actionType === 'relay') {
@@ -174,6 +180,9 @@ async function handleOverlayCommand(interaction: ChatInputCommandInteraction): P
       source: 'discord',
       waitForPersistence: true,
     });
+  }
+  if (raw.startsWith('/giveaway start ') && result.handled && result.actionType === 'private') {
+    await finalizeMessage({ userId: user.id, channelId: '00000000-0000-0000-0000-000000000005', content: result.botMessage, displayName, source: 'discord', waitForPersistence: true });
   }
   await replyForCommand(interaction, result);
 }
@@ -195,12 +204,9 @@ async function handleEventsCommand(interaction: ChatInputCommandInteraction): Pr
     await interaction.reply({ content: 'That is not an available event command. Run `/events` to see the list.', flags: MessageFlags.Ephemeral });
     return;
   }
-  const [user, context] = await Promise.all([requireLinkedUser(interaction), resolveContext(interaction.channelId)]);
+  const [user, mappedContext] = await Promise.all([requireLinkedUser(interaction), resolveContext(interaction.channelId)]);
   if (!user) return;
-  if (!context) {
-    await interaction.reply({ content: 'This Discord channel is not mapped to an FCM chat channel.', flags: MessageFlags.Ephemeral });
-    return;
-  }
+  const context = mappedContext ?? { channelId: interaction.channelId, channelName: 'Discord', parentChannelId: null };
   const displayName = user.chatName ?? user.discordDisplayName ?? user.discordUsername ?? user.username;
   const result = await tryHandleCommand(requested.trim(), user.id, displayName, context.channelId, context.channelName, null, 0, context.parentChannelId);
   if (!result.handled || result.actionType !== 'relay') {
@@ -472,11 +478,11 @@ async function registerCommands(client: Client): Promise<void> {
     buildSpecialCommand('camp', 'Look up a CAMP item', { name: 'item', description: 'CAMP item name', autocomplete: true }),
     buildSpecialCommand('minerva', "Show Minerva's current or next sale"),
     buildSpecialCommand('nukecodes', 'Show current nuke launch codes'),
-    buildSpecialCommand('newcodes', 'Alias for current nuke launch codes'),
     buildSpecialCommand('serverstatus', 'Show Fallout 76 server status'),
     buildSpecialCommand('help', 'Show the private FCM quick command guide'),
     buildSpecialCommand('appearance', 'Show chat-name and appearance commands'),
     buildSpecialCommand('apply', 'Open the Fallout Chat Mod staff application'),
+    buildSpecialCommand('keybinds', 'Show default overlay and HUD-mod keybinds'),
     buildSpecialCommand('giveaway', 'Run a Fallout Chat Mod giveaway command', { name: 'command', description: 'For example: list, join <id>, or start <item>' }),
     buildReportCommand(),
     buildEventsCommand(),
@@ -492,6 +498,10 @@ async function registerCommands(client: Client): Promise<void> {
     if (current) await current.edit(command as unknown as Parameters<typeof current.edit>[0]);
     else await manager.create(command, env.DISCORD_SERVER_ID);
   }
+  // `/newcodes` was an accidental public alias. Remove it from existing guilds
+  // as registration otherwise only creates/edits commands.
+  const staleNewCodes = existing.find((registered) => registered.name === 'newcodes');
+  if (staleNewCodes) await staleNewCodes.delete();
   logger.info({ count: commands.length, guildId: env.DISCORD_SERVER_ID }, '[discord-overlay-commands] registered');
 }
 

@@ -51,6 +51,16 @@ every currently enabled overlay command whose action is an event announcement;
 same relay path as the overlay, so it appears in the mapped event channel and
 in FCM history rather than merely as a Discord interaction response.
 
+First-class FCM slash commands can be invoked from any Discord channel where the
+bot can send messages; the invoking channel does not need an FCM relay mapping.
+`/g`, `/t`, `/e`, `/r`, and `/i` still deliver to their named FCM channels.
+Normal lookup cards and `/help` are public in the invoking channel, while
+moderation actions, `/apply`, and `/report` remain private to the invoker.
+
+`/keybinds` posts the default Electron-overlay and optional HUD-mod controls as
+a public embed. Starting a giveaway posts the confirmation in the invoking
+Discord channel and relays the announcement to FCM General.
+
 ### Optional bot-commands channel
 
 Set `DISCORD_BOT_COMMANDS_CHANNEL_ID` to designate a Discord channel as the
