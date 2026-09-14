@@ -10,8 +10,14 @@ test('post-push patch set is static, ordered, and complete', () => {
       'default-targeted-automod-policy',
       'ai-moderation-safe-defaults',
       'remove-legacy-broad-chat-profanity-filters',
-      'embed-assets-state-constraints',
-      'mcp-oauth-constraints',
+      'embed-assets-normalize-status',
+      'embed-assets-remove-invalid-pending',
+      'embed-assets-clear-ready-leases',
+      'embed-assets-status-constraint',
+      'embed-assets-pending-lease-constraint',
+      'mcp-oauth-s256-constraint',
+      'mcp-oauth-code-scopes-constraint',
+      'mcp-oauth-grant-scopes-constraint',
     ],
   );
 
@@ -28,14 +34,14 @@ test('post-push patch set is static, ordered, and complete', () => {
     'embed_assets_status_check',
     'embed_assets_pending_lease_check',
   ]) {
-    assert.match(POST_PUSH_PATCHES[4].sql, new RegExp(constraint));
+    assert.ok(POST_PUSH_PATCHES.some((patch) => new RegExp(constraint).test(patch.sql)));
   }
   for (const constraint of [
     'mcp_oauth_codes_s256_check',
     'mcp_oauth_codes_scopes_check',
     'mcp_oauth_grants_scopes_check',
   ]) {
-    assert.match(POST_PUSH_PATCHES[5].sql, new RegExp(constraint));
+    assert.ok(POST_PUSH_PATCHES.some((patch) => new RegExp(constraint).test(patch.sql)));
   }
 });
 
