@@ -1,6 +1,14 @@
 # FCM MCP — Codex
 
-Add to `~/.codex/config.toml`:
+For production, add the hosted OAuth server to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.fcm]
+url = "https://falloutchatmod.com/mcp"
+oauth_resource = "https://falloutchatmod.com/mcp"
+```
+
+Then run `codex mcp login fcm`. For local development only:
 
 ```toml
 [mcp_servers.fcm-dev]
@@ -9,7 +17,7 @@ args = ["mcp/dist/dev/index.js"]
 env = { FCM_MCP_TOKEN = "<your-token>" }
 ```
 
-Mint a token at https://dev.falloutchatmod.com → Profile → API Tokens.
+Mint only a development token at https://dev.falloutchatmod.com → Profile → API Tokens.
 
 ## Cloudflare API MCP (OAuth)
 

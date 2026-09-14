@@ -2,6 +2,8 @@
 
 Node.js + Express + raw WebSockets + Prisma ORM + Discord.js.
 
+Production remote-MCP authorization, client registration, Discord consent, and deployment configuration are documented in [MCP OAuth](mcp-oauth.md). Enablement, canary, legacy-retirement, and rollback procedures live in the [production MCP rollout runbook](../deployment/mcp-rollout.md).
+
 Source root: `backend/src/`
 
 ## Folder Map

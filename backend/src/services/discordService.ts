@@ -23,6 +23,7 @@ import {
   nexusEndorseFieldValue,
 } from '../utils/releaseAnnouncement';
 import type { HudModDownload } from '../utils/releaseAnnouncement';
+import { normalizeDiscordReferences, type DiscordMessageEntity } from '../utils/discordReferences';
 
 let discordClient: Client | null = null;
 let broadcastFn: ((payload: any, excludeWs?: any) => void) | null = null; // Injected from WS handler to avoid circular deps
@@ -130,13 +131,13 @@ export function buildDiscordRelayPrefix(
 async function resolveInboundUserMentions(
   content: string,
   msg: import('discord.js').Message,
-): Promise<string> {
+): Promise<{ content: string; entities: DiscordMessageEntity[] }> {
   // Collect every unique user-mention id present in the content string.
   const idSet = new Set<string>();
   for (const m of content.matchAll(/<@!?(\d+)>/g)) {
     idSet.add(m[1]);
   }
-  if (idSet.size === 0) return content;
+  for (const m of content.matchAll(/<#(\d{16,22})>/g)) idSet.add(m[1]);
 
   const ids = [...idSet];
 
@@ -164,23 +165,24 @@ async function resolveInboundUserMentions(
     if (isReal) fo76Map.set(row.discordId, u);
   }
 
-  // Replace each <@id> / <@!id> token with the best available display name.
-  return content.replace(/<@!?(\d+)>/g, (_match, id: string) => {
-    // Priority 1: real FO76 name from our DB.
-    const fo76Name = fo76Map.get(id);
-    if (fo76Name) return `@${fo76Name}`;
-
-    // Priority 2: Discord member server display name / global name / username.
-    const mentionedUser = msg.mentions.users.get(id);
-    const memberName =
-      msg.mentions.members?.get(id)?.displayName ??
-      (mentionedUser as { globalName?: string } | undefined)?.globalName ??
-      mentionedUser?.username;
-    if (memberName) return `@${memberName}`;
-
-    // Fallback: leave a neutral token (shouldn't normally reach here).
-    return `@[user]`;
+  // Discord.js supplies `mentions` on real Message instances, but older relay
+  // callers and persisted/minimal message projections may omit it (or omit one
+  // of its resolved collections). Keep normalization tolerant at that boundary.
+  const mentions = msg.mentions as typeof msg.mentions | undefined;
+  const users = new Map<string, string>();
+  for (const id of ids) {
+    const mentionedUser = mentions?.users?.get(id);
+    const label = fo76Map.get(id)
+      ?? mentions?.members?.get(id)?.displayName
+      ?? (mentionedUser as { globalName?: string } | undefined)?.globalName
+      ?? mentionedUser?.username;
+    if (label) users.set(id, label);
+  }
+  const channels = new Map<string, string>();
+  mentions?.channels?.forEach((channel, id) => {
+    if ('name' in channel && typeof channel.name === 'string') channels.set(id, channel.name);
   });
+  return normalizeDiscordReferences(content, { users, channels, guildId: msg.guildId });
 }
 
 /**
@@ -598,7 +600,7 @@ async function syncDiscordMessageUpdate(rawMessage: Message | any): Promise<bool
 
   let content = typeof msg.content === 'string' ? msg.content : '';
   if (!content.trim() || content.length > 255) return false;
-  content = await resolveInboundUserMentions(content, msg);
+  content = (await resolveInboundUserMentions(content, msg)).content;
 
   const existing = await prisma.message.findFirst({
     where: { id: link.messageId, isDeleted: false },
@@ -681,17 +683,17 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
     (payload, userIds) => broadcastUsersFn?.(payload, userIds) ?? Promise.resolve(0),
   );
 
-  // Invalidate the emoji cache whenever the guild's emoji set changes.
-  // Lazy-require to avoid circular deps (discordEmojisController imports us too).
+  // Invalidate the shared Discord-context emoji cache whenever the guild's emoji
+  // set changes. Lazy-require avoids a module-load cycle with discordService.
   const invalidate = (): void => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { invalidateEmojiCache } = require('../controllers/discordEmojisController') as {
+      const { invalidateEmojiCache } = require('./discordContextService') as {
         invalidateEmojiCache: () => void;
       };
       invalidateEmojiCache();
     } catch {
-      // Controller not loaded yet — nothing to invalidate
+      // Context service not loaded yet — nothing to invalidate.
     }
     // Push a refresh signal to every connected client so their emoji picker
     // re-fetches almost immediately when an emoji is added/removed/renamed —
@@ -914,7 +916,8 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
     // Resolve Discord user-mention tokens (<@id>) to readable names BEFORE
     // automod / broadcast, so the overlay sees "@FO76Name" or "@DiscordName"
     // instead of the raw snowflake token.
-    content = await resolveInboundUserMentions(content, msg);
+    const normalizedReferences = await resolveInboundUserMentions(content, msg);
+    content = normalizedReferences.content;
 
     if (content.length > 500) content = content.slice(0, 497) + '...';
 
@@ -1041,25 +1044,33 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
     // fallout.wiki/w/<page>) URL, resolve it against our wiki catalog.  On a hit,
     // attach metadata = { type:'wiki_share', ... } and rewrite the content to
     // "[WIKI] <name>" so the overlay renders the wiki card. Never breaks relay.
-    let inboundMetadata: Record<string, unknown> | null = null;
+    let inboundMetadata: Record<string, unknown> | null = normalizedReferences.entities.length > 0
+      ? { type: 'chat_entities', entities: normalizedReferences.entities }
+      : null;
     let broadcastContent = content;
     try {
-      const wikiResolved = await resolveWikiUrlFromContent(content);
-      if (wikiResolved) {
-        const { entry, rawUrl } = wikiResolved;
-        inboundMetadata = {
-          type: 'wiki_share',
-          wikiEntryId: entry.id,
-          name: entry.name,
-          kind: entry.kind,
-          wikiTitle: entry.wikiTitle,
-        };
-        // Replace the raw URL in content with the "[WIKI] name" token so the
-        // overlay card renderer takes over and the bare link isn't shown twice.
-        broadcastContent = content.replace(rawUrl, '').replace(/\s{2,}/g, ' ').trim();
-        broadcastContent = broadcastContent
-          ? `[WIKI] ${entry.name} — ${broadcastContent}`
-          : `[WIKI] ${entry.name}`;
+      const eventProjection = await discordEventService.projectionForSharedEvent(content);
+      if (eventProjection) {
+        inboundMetadata = { ...eventProjection };
+        broadcastContent = `[EVENT] ${eventProjection.name}`;
+      } else {
+        const wikiResolved = await resolveWikiUrlFromContent(content);
+        if (wikiResolved) {
+          const { entry, rawUrl } = wikiResolved;
+          inboundMetadata = {
+            type: 'wiki_share',
+            wikiEntryId: entry.id,
+            name: entry.name,
+            kind: entry.kind,
+            wikiTitle: entry.wikiTitle,
+          };
+          // Replace the raw URL in content with the "[WIKI] name" token so the
+          // overlay card renderer takes over and the bare link isn't shown twice.
+          broadcastContent = content.replace(rawUrl, '').replace(/\s{2,}/g, ' ').trim();
+          broadcastContent = broadcastContent
+            ? `[WIKI] ${entry.name} — ${broadcastContent}`
+            : `[WIKI] ${entry.name}`;
+        }
       }
     } catch (err) {
       // Non-fatal — relay message normally without wiki metadata

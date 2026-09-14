@@ -114,6 +114,17 @@ See [`docs/realtime/websocket-protocol.md`](../realtime/websocket-protocol.md) â
 
 See [reports-and-evidence.md](./reports-and-evidence.md) for player reports, ban evidence, audit logs, and name blacklist.
 
+## OAuth MCP coverage
+
+Production MCP exposes every moderation capability either as a dedicated Discord/embed tool or through
+the bounded `fcm_actions_search` + `fcm_action_read`/`fcm_action_write` catalog. The catalog covers
+users and aliases, message search/delete/scrub, reports, kicks/mutes/bans, evidence, audit history,
+word filters, name blacklist, moderation/voice settings, Discord relay mappings, and AutoMod rules and
+violations. Mutation schemas require `confirm: true` and `fcm:moderation:write`; reads require
+`fcm:read`. Ban-evidence bodies are further restricted to owner/admin actors, while developers receive
+metadata only. Discord embeds, managed uploads, custom emojis, and reaction-role panels remain
+dedicated tools with `fcm:discord:write`.
+
 ## REST API Endpoints
 
 Key moderation REST routes (all require `requireDiscordRole` middleware):

@@ -5,9 +5,52 @@ save them as reusable templates, and post them to any guild text channel via
 the bot. Embeds can also configure reaction roles at send time.
 
 **Source files:**
-- Service: [`backend/src/services/discordService.ts`](../../backend/src/services/discordService.ts) — `postEmbed`, `listTextChannels`, `buildEmbed`
+- Domain service: [`backend/src/services/discordEmbedService.ts`](../../backend/src/services/discordEmbedService.ts) — validation, preview, template CRUD, send/reaction-role orchestration, and audit
+- Discord context service: [`backend/src/services/discordContextService.ts`](../../backend/src/services/discordContextService.ts) — text channels, assignable roles, and cached custom emoji metadata
+- Discord transport: [`backend/src/services/discordService.ts`](../../backend/src/services/discordService.ts) — canonical `postEmbed` and `buildEmbed` implementation
 - Controller: [`backend/src/controllers/moderationController.ts`](../../backend/src/controllers/moderationController.ts)
 - Routes: [`backend/src/routes/moderation.ts`](../../backend/src/routes/moderation.ts)
+- Managed image service: [`backend/src/services/embedAssetService.ts`](../../backend/src/services/embedAssetService.ts)
+
+---
+
+## Managed embed images
+
+`POST /api/moderation/discord-embed-assets/import` lets owners and admins import an HTTPS image URL.
+Its request body is `{ "sourceUrl": "https://…", "confirm": true }`; the explicit confirmation is
+required and rejected before any network fetch or object-store write when it is absent or false.
+The backend rejects URL credentials, non-default ports, private/reserved DNS answers, DNS rebinding,
+more than three redirects, compressed responses, downloads over 10 MiB, and content that does not
+sniff as PNG, JPEG, WebP, or GIF. Fetches have a 15-second total deadline. Accepted bytes are SHA-256
+deduplicated in object storage and returned as an immutable same-origin URL under
+`/embed-assets/:id/:digest.:ext`; request paths are never translated directly into object keys.
+
+The OAuth MCP also provides `fcm_asset_upload` for direct base64 uploads. It accepts the four embed
+image formats plus PDF, UTF-8 text, CSV, and JSON up to 10 MiB. Images use the same immutable public
+URL and can be placed in embeds. Non-image files are served with forced-download, `nosniff`, and
+sandbox headers; HTML, SVG, arbitrary binaries, MIME mismatches, and invalid text/JSON are rejected.
+Object creation uses `If-None-Match: *`, so concurrent imports converge on one physical object. If
+the digest is new, the importer first claims its unique metadata row as `pending`. Other importers
+never adopt or serve that pending claim: they return an in-progress conflict until its owner marks it
+`ready`. On failure, the owner atomically removes only its pending row and deletes storage only when
+its request created the object. Public serving filters to `ready`, eliminating publication and cleanup
+timing windows.
+Pending claims carry a two-minute lease and an unguessable ownership token. After expiry, one caller
+can atomically take over by matching the previous token and expiry. Every publish and cleanup query
+also matches the current token, so a stale worker cannot mutate the replacement claim. A takeover
+uses the same conditional object PUT, allowing recovery when the crashed owner already uploaded bytes.
+
+The original host is retained for attribution and auditing, but URL paths, queries, credentials, and
+image bodies are not persisted in metadata.
+
+In the dashboard embed editor, each author-icon, thumbnail, main-image, and footer-icon URL field
+keeps accepting a URL directly for previewing. Selecting **Import** sends that field's URL to the
+managed-image endpoint for validation and storage, then replaces only that field with the returned
+FCM public URL. Each field reports its own import progress or a safe, actionable error; errors never
+display source URL credentials or query strings. A rejected import can be retried without clearing
+the editor or changing the other image fields. Send and save actions remain disabled while an import
+is active. Editing its field, selecting **New Embed**, or loading a template invalidates the pending
+result, so a late response cannot overwrite newer editor state.
 
 ---
 
@@ -56,10 +99,37 @@ interface EmbedData {
 | `fields[].value` | 1024 chars |
 | `fields` count | 25 max |
 | `content` (plain text) | 2000 chars |
+| All embed text combined (excluding `content`) | 6000 chars |
+| URL fields | 2048 chars; absolute `http` or `https` only |
+
+Known `EmbedData` properties are validated by type as well as size: text and URL
+fields must be strings, `timestamp` and `fields[].inline` must be booleans, and a
+numeric color must be an integer between `0` and `0xFFFFFF`. Unknown properties
+are retained when a valid template is stored for forward compatibility, but are
+not included in the canonical preview or Discord payload.
 
 ---
 
 ## Service functions
+
+### `discordEmbedService`
+
+This is the shared domain boundary for dashboard and MCP callers. Its CRUD
+operations validate templates but preserve the submitted JSON exactly, including
+omitted optional values and forward-compatible properties. `preview(data)` is a
+separate, pure operation that returns a canonical `EmbedData` projection plus
+warnings without writing to the database or Discord. `send(...)` delegates final
+rendering to the single `discordService` embed builder and optional panel creation
+to `reactionRoleService`.
+
+### `discordContextService`
+
+Provides the bot-visible text channels, assignable roles, and custom guild emoji.
+Internal/MCP emoji records contain `id`, `name`, `animated`, Discord `tag` (for
+example `<:vaultboy:123...>`), and the Discord CDN `url`. The public
+`GET /api/discord-emojis` contract intentionally omits `tag` and continues to
+return only `id`, `name`, `animated`, and `url`, with `stale: true` when the bot
+cache is unavailable.
 
 ### `postEmbed(channelId, data)` — `discordService.ts:938`
 
@@ -110,7 +180,7 @@ The `discord_embeds` table stores named templates.
 
 | Column | Type | Notes |
 |--------|------|-------|
-| `id` | UUID PK | |
+| `id` | Integer PK | |
 | `name` | `String` | Display name in the dashboard |
 | `data` | JSON | Serialised `EmbedData` |
 | `createdAt` | DateTime | |
@@ -131,6 +201,7 @@ Declared in `backend/src/routes/moderation.ts:53-58`.
 | `DELETE` | `/api/moderation/discord-embeds/:id` | Delete a template |
 | `POST` | `/api/moderation/discord-embeds/send` | Post an embed to a channel |
 | `GET` | `/api/moderation/discord-channels` | List bot's text channels (for picker) |
+| `POST` | `/api/moderation/discord-embed-assets/import` | Confirm, validate, and store an external image URL |
 
 ### `POST /api/moderation/discord-embeds/send` request body
 
@@ -149,3 +220,10 @@ reactions to the posted message and registers a reaction-role panel. See
 [reaction-roles.md](./reaction-roles.md) for details.
 
 Response: `{ data: { sent: true, messageId: "<snowflake>", reactionRoles: <count> } }`
+## MCP management
+
+Authorized production MCP clients can list, inspect, preview, create, replace, and delete embed templates, import remote HTTPS images into the FCM object store, and send an embed with optional reaction-role mappings. Write operations require the `fcm:discord:write` OAuth scope and `confirm: true`; reads require `fcm:read`.
+
+Use `fcm_discord_context_get` immediately before composing reaction roles. It returns stable Discord channel, assignable-role, and custom-emoji IDs. Sending performs the same checks again and resolves custom emoji names/animation from the bot's current guild context, so stale or unassignable selections fail closed.
+
+Reaction-role panel creation is strict after the message is posted: Discord must accept every configured reaction. If any Unicode or custom emoji is rejected (including an emoji deleted during the send), the panel database/cache entry is removed and message reactions are cleared best-effort. The posted message remains, and MCP reports `mutation_partially_applied` with its message ID instead of claiming success or retrying the send.

@@ -41,6 +41,15 @@ interface PanelRecord {
   mappings: ReactionRoleMapping[];
 }
 
+export class ReactionRolePanelError extends Error {
+  readonly causeClass: string;
+  constructor(cause?: unknown) {
+    super('Reaction-role panel setup failed');
+    this.name = 'ReactionRolePanelError';
+    this.causeClass = cause instanceof Error ? cause.constructor.name : 'UnknownError';
+  }
+}
+
 const CUSTOM_RE = /^<a?:(\w+):(\d+)>$|^(\w+):(\d+)$/;
 
 /** Normalize a raw emoji string into a match key + a value usable by message.react(). */
@@ -99,6 +108,7 @@ let clientRef: Client | null = null;
  */
 export async function createPanel(message: Message, mappings: ReactionRoleMapping[]): Promise<void> {
   if (!message.guildId) throw new Error('Reaction-role panels must be in a guild channel');
+  if (mappings.length === 0) throw new ReactionRolePanelError(new TypeError('No reaction mappings'));
   const record: PanelRecord = { channelId: message.channelId, guildId: message.guildId, mappings };
 
   await prisma.reactionRolePanel.upsert({
@@ -108,10 +118,16 @@ export async function createPanel(message: Message, mappings: ReactionRoleMappin
   });
   panels.set(message.id, record);
 
-  for (const m of mappings) {
-    await message.react(m.reactValue).catch((err) =>
-      logger.warn({ err, emoji: m.emoji, messageId: message.id }, 'reaction-role: failed to add reaction'),
-    );
+  try {
+    // Discord's reaction endpoint is authoritative for Unicode validity and for
+    // custom emoji deletion/availability races after the context lookup.
+    for (const m of mappings) await message.react(m.reactValue);
+  } catch (error) {
+    panels.delete(message.id);
+    await prisma.reactionRolePanel.deleteMany({ where: { messageId: message.id } }).catch(() => undefined);
+    await message.reactions.removeAll().catch(() => undefined);
+    logger.warn({ messageId: message.id, causeClass: error instanceof Error ? error.constructor.name : 'UnknownError' }, 'reaction-role: strict panel creation rolled back');
+    throw new ReactionRolePanelError(error);
   }
   logger.info({ messageId: message.id, count: mappings.length }, 'reaction-role: panel created');
 }
@@ -234,4 +250,4 @@ export function register(client: Client): void {
 }
 
 export default { register, createPanel, listPanels, deletePanel, buildMappings, parseEmoji };
-module.exports = { register, createPanel, listPanels, deletePanel, buildMappings, parseEmoji };
+module.exports = { register, createPanel, listPanels, deletePanel, buildMappings, parseEmoji, ReactionRolePanelError };

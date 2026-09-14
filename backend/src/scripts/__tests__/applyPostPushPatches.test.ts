@@ -10,6 +10,8 @@ test('post-push patch set is static, ordered, and complete', () => {
       'default-targeted-automod-policy',
       'ai-moderation-safe-defaults',
       'remove-legacy-broad-chat-profanity-filters',
+      'embed-assets-state-constraints',
+      'mcp-oauth-constraints',
     ],
   );
 
@@ -22,6 +24,19 @@ test('post-push patch set is static, ordered, and complete', () => {
   assert.match(POST_PUSH_PATCHES[3].sql, /fuck/);
   assert.match(POST_PUSH_PATCHES[3].sql, /assh/);
   assert.match(POST_PUSH_PATCHES[3].sql, /chat_profanity_literal_cleanup_v1/);
+  for (const constraint of [
+    'embed_assets_status_check',
+    'embed_assets_pending_lease_check',
+  ]) {
+    assert.match(POST_PUSH_PATCHES[4].sql, new RegExp(constraint));
+  }
+  for (const constraint of [
+    'mcp_oauth_codes_s256_check',
+    'mcp_oauth_codes_scopes_check',
+    'mcp_oauth_grants_scopes_check',
+  ]) {
+    assert.match(POST_PUSH_PATCHES[5].sql, new RegExp(constraint));
+  }
 });
 
 test('applyPostPushPatches executes every patch exactly once', async () => {

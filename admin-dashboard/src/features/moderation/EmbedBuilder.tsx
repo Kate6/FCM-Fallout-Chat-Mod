@@ -82,6 +82,45 @@ interface ReactionRolePanel {
   createdAt: string;
 }
 
+type ImageUrlField = 'authorIconUrl' | 'thumbnailUrl' | 'imageUrl' | 'footerIconUrl';
+type ImageImportState =
+  | { status: 'idle' }
+  | { status: 'importing' }
+  | { status: 'success'; message: string }
+  | { status: 'error'; message: string };
+interface ImportedEmbedAsset {
+  publicUrl: string;
+}
+
+const IMAGE_URL_LABELS = {
+  authorIconUrl: 'AUTHOR ICON URL',
+  thumbnailUrl: 'THUMBNAIL URL',
+  imageUrl: 'IMAGE URL',
+  footerIconUrl: 'FOOTER ICON URL',
+} as const satisfies Record<ImageUrlField, string>;
+
+function initialImageImportStates(): Record<ImageUrlField, ImageImportState> {
+  return {
+    authorIconUrl: { status: 'idle' },
+    thumbnailUrl: { status: 'idle' },
+    imageUrl: { status: 'idle' },
+    footerIconUrl: { status: 'idle' },
+  };
+}
+
+function imageImportError(error: unknown): string {
+  const status = typeof error === 'object' && error !== null && 'status' in error
+    ? (error as { status?: unknown }).status
+    : undefined;
+  if (status === 400) return 'Enter a valid public HTTPS image URL and try again.';
+  if (status === 409) return 'That image is already being imported. Wait a moment, then retry.';
+  if (status === 413) return 'That image is too large. Choose an image smaller than 10 MiB.';
+  if (status === 415) return 'That URL must serve a PNG, JPEG, WebP, or GIF image.';
+  if (status === 422) return 'The image host or response is not permitted. Choose another public HTTPS image URL.';
+  if (status === 504) return 'The image host took too long to respond. Retry or choose another URL.';
+  return 'The image could not be imported. Check the public URL and try again.';
+}
+
 const DEFAULT_COLOR = '#18FF62';
 const emptyEmbed: EmbedData = { color: DEFAULT_COLOR, fields: [] };
 
@@ -106,6 +145,13 @@ export default function EmbedBuilder() {
   });
 
   const [embed, setEmbed] = useState<EmbedData>(emptyEmbed);
+  const embedRef = useRef<EmbedData>(emptyEmbed);
+  const imageImportGeneration = useRef<Record<ImageUrlField, number>>({
+    authorIconUrl: 0,
+    thumbnailUrl: 0,
+    imageUrl: 0,
+    footerIconUrl: 0,
+  });
   const [name, setName] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [channelId, setChannelId] = useState('');
@@ -149,6 +195,12 @@ export default function EmbedBuilder() {
   }), []);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
+  const [imageImports, setImageImports] = useState<Record<ImageUrlField, ImageImportState>>(initialImageImportStates);
+  const imageImportPending = Object.values(imageImports).some((state) => state.status === 'importing');
+
+  useEffect(() => {
+    embedRef.current = embed;
+  }, [embed]);
 
   useEffect(() => {
     if (channels && channels.length > 0 && !channelId) setChannelId(channels[0].id);
@@ -159,17 +211,104 @@ export default function EmbedBuilder() {
   }
 
   function loadTemplate(t: SavedEmbed) {
+    invalidateImageImports();
     setEmbed({ ...emptyEmbed, ...t.data, fields: t.data.fields ?? [] });
     setName(t.name);
     setEditingId(t.id);
     setFeedback(null);
+    setImageImports(initialImageImportStates());
   }
 
   function resetForm() {
+    invalidateImageImports();
     setEmbed(emptyEmbed);
     setName('');
     setEditingId(null);
     setFeedback(null);
+    setImageImports(initialImageImportStates());
+  }
+
+  function invalidateImageImports() {
+    for (const field of Object.keys(imageImportGeneration.current) as ImageUrlField[]) {
+      imageImportGeneration.current[field] += 1;
+    }
+  }
+
+  async function handleImportImage(field: ImageUrlField) {
+    const sourceUrl = embed[field]?.trim();
+    if (!sourceUrl) {
+      setImageImports((states) => ({
+        ...states,
+        [field]: { status: 'error', message: 'Enter a public HTTPS image URL first.' },
+      }));
+      return;
+    }
+    const generation = imageImportGeneration.current[field] + 1;
+    imageImportGeneration.current[field] = generation;
+    setImageImports((states) => ({ ...states, [field]: { status: 'importing' } }));
+    try {
+      const asset = await api.post<ImportedEmbedAsset>('/api/moderation/discord-embed-assets/import', {
+        sourceUrl,
+        confirm: true,
+      });
+      if (!asset?.publicUrl) throw new Error('Import response did not include a public URL');
+      if (imageImportGeneration.current[field] !== generation || embedRef.current[field]?.trim() !== sourceUrl) return;
+      set(field, asset.publicUrl);
+      setImageImports((states) => ({
+        ...states,
+        [field]: { status: 'success', message: 'Imported and replaced with the managed FCM URL.' },
+      }));
+    } catch (error: unknown) {
+      if (imageImportGeneration.current[field] !== generation || embedRef.current[field]?.trim() !== sourceUrl) return;
+      setImageImports((states) => ({
+        ...states,
+        [field]: { status: 'error', message: imageImportError(error) },
+      }));
+    }
+  }
+
+  function renderImageUrlField(field: ImageUrlField) {
+    const label = IMAGE_URL_LABELS[field];
+    const state = imageImports[field];
+    const statusId = `${field}-import-status`;
+    return (
+      <div style={{ ...fieldWrap, flex: 1 }}>
+        <label htmlFor={field} style={labelStyle}>{label}</label>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'stretch' }}>
+          <input
+            id={field}
+            value={embed[field] || ''}
+            onChange={(e) => {
+              imageImportGeneration.current[field] += 1;
+              set(field, e.target.value);
+              setImageImports((states) => ({ ...states, [field]: { status: 'idle' } }));
+            }}
+            placeholder="https://..."
+            style={{ width: '100%', minWidth: 0 }}
+            aria-describedby={state.status === 'idle' ? undefined : statusId}
+          />
+          <button
+            type="button"
+            onClick={() => handleImportImage(field)}
+            disabled={state.status === 'importing'}
+            aria-label={`Import ${label.toLowerCase()}`}
+            style={{ padding: '2px 10px', fontSize: '11px', minHeight: '34px', whiteSpace: 'nowrap' }}
+          >
+            {state.status === 'importing' ? 'IMPORTING…' : state.status === 'error' ? 'RETRY IMPORT' : 'IMPORT'}
+          </button>
+        </div>
+        {state.status !== 'idle' && (
+          <div
+            id={statusId}
+            role={state.status === 'error' ? 'alert' : 'status'}
+            aria-live="polite"
+            style={{ marginTop: '4px', fontSize: '11px', color: state.status === 'error' ? 'var(--error)' : 'var(--text-secondary)' }}
+          >
+            {state.status === 'importing' ? 'Fetching and validating image…' : state.message}
+          </div>
+        )}
+      </div>
+    );
   }
 
   // ── Field rows ────────────────────────────────────────────────────────────
@@ -332,21 +471,12 @@ export default function EmbedBuilder() {
               <label style={labelStyle}>AUTHOR NAME</label>
               <input value={embed.authorName || ''} onChange={(e) => set('authorName', e.target.value)} style={{ width: '100%' }} maxLength={256} />
             </div>
-            <div style={{ ...fieldWrap, flex: 1 }}>
-              <label style={labelStyle}>AUTHOR ICON URL</label>
-              <input value={embed.authorIconUrl || ''} onChange={(e) => set('authorIconUrl', e.target.value)} placeholder="https://..." style={{ width: '100%' }} />
-            </div>
+            {renderImageUrlField('authorIconUrl')}
           </div>
 
           <div style={{ display: 'flex', gap: '12px' }}>
-            <div style={{ ...fieldWrap, flex: 1 }}>
-              <label style={labelStyle}>THUMBNAIL URL</label>
-              <input value={embed.thumbnailUrl || ''} onChange={(e) => set('thumbnailUrl', e.target.value)} placeholder="https://..." style={{ width: '100%' }} />
-            </div>
-            <div style={{ ...fieldWrap, flex: 1 }}>
-              <label style={labelStyle}>IMAGE URL</label>
-              <input value={embed.imageUrl || ''} onChange={(e) => set('imageUrl', e.target.value)} placeholder="https://..." style={{ width: '100%' }} />
-            </div>
+            {renderImageUrlField('thumbnailUrl')}
+            {renderImageUrlField('imageUrl')}
           </div>
 
           {/* Fields */}
@@ -374,10 +504,7 @@ export default function EmbedBuilder() {
               <label style={labelStyle}>FOOTER TEXT</label>
               <input value={embed.footerText || ''} onChange={(e) => set('footerText', e.target.value)} style={{ width: '100%' }} maxLength={2048} />
             </div>
-            <div style={{ ...fieldWrap, flex: 1 }}>
-              <label style={labelStyle}>FOOTER ICON URL</label>
-              <input value={embed.footerIconUrl || ''} onChange={(e) => set('footerIconUrl', e.target.value)} placeholder="https://..." style={{ width: '100%' }} />
-            </div>
+            {renderImageUrlField('footerIconUrl')}
           </div>
 
           {/* Reaction roles */}
@@ -438,8 +565,8 @@ export default function EmbedBuilder() {
               {(!channels || channels.length === 0) && <option value="">No channels (bot offline?)</option>}
               {(channels ?? []).map((c) => <option key={c.id} value={c.id}>#{c.name}</option>)}
             </select>
-            <button onClick={handleSend} disabled={busy}>SEND TO DISCORD</button>
-            <button onClick={handleSaveTemplate} disabled={busy}>{editingId ? 'UPDATE TEMPLATE' : 'SAVE TEMPLATE'}</button>
+            <button onClick={handleSend} disabled={busy || imageImportPending}>SEND TO DISCORD</button>
+            <button onClick={handleSaveTemplate} disabled={busy || imageImportPending}>{editingId ? 'UPDATE TEMPLATE' : 'SAVE TEMPLATE'}</button>
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
               <input type="checkbox" checked={!!embed.timestamp} onChange={(e) => set('timestamp', e.target.checked)} />
               Include current timestamp

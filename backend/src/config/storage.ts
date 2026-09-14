@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, HeadBucketCommand, CreateBucketCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, HeadBucketCommand, CreateBucketCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import type { Readable } from 'stream';
 import env from './environment';
 import logger from './logger';
@@ -103,4 +103,46 @@ async function getPartyImageObject(
   }
 }
 
-export { s3, BUCKET, ensureBucket, uploadAvatar, getAvatarObject, uploadPartyImage, getPartyImageObject };
+async function uploadEmbedAsset(key: string, imageBuffer: Buffer, contentType: string): Promise<boolean> {
+  if (!/^embed-assets\/[a-f0-9]{64}\.(png|jpg|webp|gif|pdf|txt|csv|json)$/.test(key)) {
+    throw new Error('Invalid embed asset object key');
+  }
+  try {
+    await s3.send(new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      Body: imageBuffer,
+      ContentType: contentType,
+      CacheControl: 'public, max-age=31536000, immutable',
+      IfNoneMatch: '*',
+    }));
+    return true;
+  } catch (error: unknown) {
+    const status = typeof error === 'object' && error !== null && '$metadata' in error
+      ? (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode
+      : undefined;
+    const name = error instanceof Error ? error.name : '';
+    if (status === 412 || name === 'PreconditionFailed') return false;
+    throw error;
+  }
+}
+
+async function getEmbedAssetObject(key: string): Promise<{ body: Readable; contentLength?: number } | null> {
+  if (!/^embed-assets\/[a-f0-9]{64}\.(png|jpg|webp|gif|pdf|txt|csv|json)$/.test(key)) return null;
+  try {
+    const out = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
+    if (!out.Body) return null;
+    return { body: out.Body as Readable, contentLength: out.ContentLength };
+  } catch {
+    return null;
+  }
+}
+
+async function deleteEmbedAsset(key: string): Promise<void> {
+  if (!/^embed-assets\/[a-f0-9]{64}\.(png|jpg|webp|gif|pdf|txt|csv|json)$/.test(key)) {
+    throw new Error('Invalid embed asset object key');
+  }
+  await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
+}
+
+export { s3, BUCKET, ensureBucket, uploadAvatar, getAvatarObject, uploadPartyImage, getPartyImageObject, uploadEmbedAsset, getEmbedAssetObject, deleteEmbedAsset };

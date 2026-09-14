@@ -7,6 +7,10 @@ All bot features — the chat bridge, temp voice channels, embed builder, and
 reaction roles — attach their listeners to this shared client at startup; there
 is **no second login**.
 
+Production OAuth MCP clients reuse these same embed, channel/role/emoji context,
+and reaction-role services; see [embeds](./embeds.md),
+[reaction roles](./reaction-roles.md), and [MCP OAuth](../backend/mcp-oauth.md).
+
 ---
 
 ## Required gateway intents
@@ -74,8 +78,12 @@ Handled by the `messageCreate` listener at `discordService.ts:348`.
    `backend/src/services/__tests__/overLengthDm.test.ts`.
 5. Images are never relayed to main channels. GIFs are allowed only if the
    destination channel has `allowGifs = true`.
-6. User-mention tokens (`<@id>`) are resolved to readable names: FO76 name from
-   the DB if linked, otherwise the Discord server display name.
+6. User (`<@id>`) and channel (`<#id>`) mentions are normalized to readable
+   `@name` / `#channel` text. Their Discord snowflakes are retained in
+   `metadata.entities`; channel entities also carry a canonical Discord URL.
+   Identity is therefore paired by ID rather than inferred from a display name.
+   Sharing a known `discord.com/events/...` URL resolves to the existing
+   `scheduled_event` metadata and renders the standard event card in FCM.
 7. The automod engine is run on the content. Blocked messages are silently
    dropped (author is notified by DM).
 8. The message is decorated with the author's current supporter cosmetics using
@@ -100,8 +108,9 @@ has `discord_relay` enabled.
 - Outbound messages are rate-limited to 4 msg/sec through an in-memory queue
   drained by a 250 ms interval timer.
 - Raw Discord mention syntax is stripped (abuse guard).
-- In-app `@name` tokens are converted to real `<@discordId>` Discord mentions
-  for linked users.
+- In-app autocomplete selections carry `{name, discordId}` and are converted to
+  real `<@discordId>` Discord mentions. The same ID-backed entity is persisted
+  with the FCM message so every overlay client renders the same mention label.
 - A zero-width-space watermark is appended to prevent the inbound handler from
   re-relaying the message.
 - Format: `**[ChannelName]** **Username**: content`. When the server-resolved author

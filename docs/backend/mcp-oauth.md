@@ -1,0 +1,51 @@
+# Production MCP OAuth
+
+FCM exposes a production-only OAuth 2.1-style authorization-code flow for the remote MCP endpoint. `MCP_REMOTE_ENABLED=true` enables the surface; development and test environments remain denied by the authorization controller.
+
+The MCP resource endpoint is `POST /mcp`, using the official stateless Streamable HTTP transport. Every request is independently bearer-authenticated and revalidates the current staff role. `GET /mcp/health` is a separate JSON-only readiness endpoint and reports `503` while the kill switch is off. The protocol endpoint validates an explicit Origin allowlist (when an Origin is sent), JSON content type, supported `MCP-Protocol-Version`, a 14 MiB body cap (needed for a 10 MiB base64 upload plus its JSON envelope), and a per-grant request limit. Authentication and shared rate limiting happen before the large-body parser. Authentication failures include an RFC 6750 `WWW-Authenticate` challenge pointing clients to the protected-resource metadata document.
+
+Rate limits use an atomic, expiring Redis counter shared across backend replicas and fail closed if Redis is unavailable. Grant identifiers are hashed before being used in Redis keys. Because the endpoint is stateless, it cannot receive a separate MCP cancellation notification while another request is in flight; closing the in-flight HTTP connection does abort the SDK `extra.signal`, which tools must honor for long-running work. Unsupported `GET /mcp` and `DELETE /mcp` requests receive JSON `405` responses.
+
+Run `npm run test:mcp-inspector` in `backend/` for the real official Inspector CLI initialize, `tools/list`, and `tools/call` contract smoke. It starts an ephemeral loopback server with deterministic test authentication and requires no production secrets or network access. CI runs the same smoke after building the backend.
+
+## Discord content tools
+
+The remote server builds every stateless connection from one central registry. A deployed tool addition is therefore visible on the client's next `tools/list` (normally reconnect); there is no separately maintained allow-list or production catalog to synchronize. `MCP_CATALOG_VERSION` is a deterministic SHA-256 fingerprint derived from the registered tool names, descriptions, schemas, and annotations, so any definition change updates it automatically and clients/operators can confirm which deployment they reached.
+
+Read tools require `fcm:read`: `fcm_discord_context_get`, `fcm_embeds_list`, `fcm_embeds_get`, `fcm_embed_preview`, and `fcm_reaction_role_panels_list`. Mutation tools require `fcm:discord:write` and the literal input `confirm: true`: `fcm_embeds_create`, `fcm_embeds_update`, `fcm_embeds_delete`, `fcm_embed_asset_import`, `fcm_asset_upload`, `fcm_embeds_send`, and `fcm_reaction_role_panels_delete`.
+
+`fcm_asset_upload` accepts canonical base64 for PNG, JPEG, WebP, GIF, PDF, UTF-8 plain text, CSV, or JSON, with a decoded 10 MiB limit. Binary types are magic-byte checked against the declared MIME type; text must be valid UTF-8, JSON must parse, and NUL-bearing text is rejected. Assets use content-addressed object keys and stable FCM URLs. Images may render inline for Discord embeds. Every non-image response has `Content-Disposition: attachment`, `nosniff`, and a sandbox Content Security Policy so the public asset host cannot become a same-origin script host.
+
+The bounded action catalog exposes the rest of the moderation surface without flooding `tools/list`: user lookup/history, message search/delete/scrub, reports, bans and evidence, kick/mute/unmute, audit history, word filters, name blacklist, moderation and voice settings, Discord relay mappings, and AutoMod rules and violations. Discover exact schemas with `fcm_actions_search`, execute reads with `fcm_action_read`, and execute writes with `fcm_action_write`. Every write requires `fcm:moderation:write` and `confirm: true`. Private evidence bodies additionally require an owner/admin actor; developers can see only evidence metadata.
+
+`fcm_embeds_send` re-reads the live Discord context when it executes. The target must still be a text channel, every role must still be assignable by the bot, and every custom emoji ID must still exist. The server derives a custom emoji's name and animated flag from that live context; caller-supplied display metadata is never trusted. Before any mutation side effect, the MCP server must persist an attributable `attempt` audit row; if that write fails, the operation fails closed. The same row is finalized to success or failure with the created template, asset, or Discord message ID when available. Finalization is retried once. If both attempts fail after a side effect, the durable attempt remains and the tool returns `mutation_applied_audit_incomplete`, its audit correlation ID, and a warning not to blindly retry. The same explicit degraded response is used when an operation failure itself cannot be recorded, because its effect may be uncertain. Audit records exclude bearer tokens, fetched image bytes, source URL details, and upstream error details.
+
+Sending the Discord message and creating its reaction-role panel cross Discord and database boundaries and cannot be one physical transaction. Panel creation is nevertheless strict: every reaction must be accepted by Discord. If an invalid Unicode emoji or a custom emoji deletion race causes any reaction to fail, the service removes the persisted/cache panel and best-effort clears reactions. The already-posted message is preserved. MCP returns `mutation_partially_applied` with the message ID and audit correlation ID, finalizes the audit as `partial`, and warns the caller not to retry the send. A successful response's reaction-role count therefore includes only a completely registered panel.
+
+Remote tools are registered in the single server-side registry in `backend/src/mcp/server.ts`. Each stateless connection rebuilds `tools/list` from the deployed registry, so adding a tool requires only a server deployment and client reconnect—not a local package update. The initialize instructions and `fcm_context_get` expose the stable `catalogVersion`. Stateless mode does not advertise live `list_changed` pushes; reconnect to refresh the catalog.
+
+Discovery is published at `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`. Clients use authorization code plus PKCE S256. Public clients may register through `POST /oauth/register`; HTTPS client IDs can instead provide a Client ID Metadata Document (CIMD). CIMD URLs must include a path beyond `/`; documents require an exact `client_id`, a 1–100 character `client_name`, and redirect URIs. Fetches accept `application/json` and registered `application/*+json` media types, never follow redirects, and use a five-minute bounded cache. Redirect URIs are registered and compared as exact original strings. HTTPS is required except for HTTP loopback callbacks on `localhost`, `127.0.0.1`, or `[::1]`, including ephemeral ports used by Codex and Claude clients.
+
+The browser flow delegates identity to Discord using only `identify guilds.members.read`. FCM never persists the Discord access token. Before consent, the backend rechecks the account through `mcpRoleService`; only owners, admins, and dual-guild developers qualify. OAuth state and consent tokens are Redis-backed, short-lived, single-use, bound to the browser session, and authenticated with a dedicated HMAC secret. Authorization failures redirect only after the client and exact redirect string have been validated.
+
+Set these production variables:
+
+```dotenv
+MCP_REMOTE_ENABLED=false
+MCP_ISSUER_URL=https://falloutchatmod.com
+MCP_RESOURCE_URL=https://falloutchatmod.com/mcp
+MCP_ALLOWED_ORIGINS=https://claude.ai,https://chatgpt.com
+MCP_OAUTH_STATE_SECRET=replace-with-at-least-32-random-characters
+MCP_ACCESS_TOKEN_TTL_SECONDS=600
+MCP_REFRESH_TOKEN_TTL_SECONDS=259200
+```
+
+When remote MCP is enabled, issuer/resource URLs must be explicit HTTPS URLs and `MCP_ALLOWED_ORIGINS` must be a non-empty exact-origin list. Use the kill switch to disable new authorization and protected MCP access during an incident.
+
+Token, revocation, and consent endpoints accept only `application/x-www-form-urlencoded` requests and enforce an 8 KiB raw-wire limit, including chunked or percent-encoded bodies. A Discord denial consumes and verifies the bound state before returning `access_denied` to the trusted client callback. Access tokens are opaque, audience-bound, short-lived, and stored only as hashes. Refresh tokens grant a connection for at most 72 hours (minimum configurable lifetime: 24 hours), rotate on every use, and retain the original grant expiry during rotation; reuse revokes the token family.
+
+## Audit and operational monitoring
+
+Every MCP mutation creates a durable audit intent before any side effect and uses that row ID as its correlation ID. Final records include the bounded target, tool/action, client ID, actor Discord ID, grant, outcome (`success`, `failure`, or `partial`), and elapsed time. MCP responses expose `X-Correlation-ID`; a client-supplied value is accepted only when it is a valid UUID.
+
+MCP log data is recursively scrubbed before emission: credentials, authorization codes, tokens, secrets, request/content bytes, URL userinfo, query strings, and fragments are excluded. Denial targets are retained only when they match an expected positive numeric template ID, Discord snowflake, or UUID; every other caller-controlled value becomes `unknown`. Long strings and collections are bounded. Operational counters have fixed label sets and never use arbitrary client, actor, grant, target, URL, or denial strings as labels. A bounded `mcp_security_event` log is emitted for every refresh reuse, SSRF/media rejection, role-gate failure, and mutation failure; the log platform performs cross-replica aggregation. Per-process rolling alerts and counters are diagnostic only. `refresh.failure` is the umbrella count of unsuccessful refresh operations; `refresh.reuse` classifies the reuse subset, so a reuse intentionally increments both and the two series must never be summed. Configure the durable rate and count monitors in [MCP observability](../deployment/mcp-observability.md).

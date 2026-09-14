@@ -6,8 +6,10 @@ import { createError } from '../middleware/errorHandler';
 import { resetCache, invalidateSettingsCache } from '../services/autoModService';
 import { invalidateAiModerationCache } from '../services/aiModerationService';
 import { invalidateVoiceCache } from '../services/voiceService';
-import { postEmbed, listTextChannels, listAssignableRoles, invalidateModLogCache, type EmbedData } from '../services/discordService';
-import reactionRoleService, { type ReactionRoleInput } from '../services/reactionRoleService';
+import { invalidateModLogCache } from '../services/discordService';
+import reactionRoleService from '../services/reactionRoleService';
+import discordEmbedService from '../services/discordEmbedService';
+import { listTextChannels, listAssignableRoles } from '../services/discordContextService';
 import { resolveInternalActorId } from '../utils/resolveActorId';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -448,34 +450,10 @@ async function bulkImportWordFilters(req: Request, res: Response, next: NextFunc
 // =============================================================================
 // Discord embed builder
 // =============================================================================
-const HEX_RE = /^#?[0-9a-fA-F]{6}$/;
-
-/** Validate + normalize a posted embed payload. Returns an error string or null. */
-function validateEmbed(data: any): string | null {
-  if (!data || typeof data !== 'object') return 'embed payload is required';
-  const hasBody = data.title || data.description || (Array.isArray(data.fields) && data.fields.length > 0) || data.imageUrl;
-  if (!hasBody) return 'embed must have at least a title, description, image, or one field';
-  if (data.title && String(data.title).length > 256) return 'title must be 256 characters or fewer';
-  if (data.description && String(data.description).length > 4096) return 'description must be 4096 characters or fewer';
-  if (data.footerText && String(data.footerText).length > 2048) return 'footer must be 2048 characters or fewer';
-  if (data.authorName && String(data.authorName).length > 256) return 'author name must be 256 characters or fewer';
-  if (data.color && !HEX_RE.test(String(data.color))) return 'color must be a 6-digit hex value (e.g. #18FF62)';
-  if (data.fields !== undefined) {
-    if (!Array.isArray(data.fields)) return 'fields must be an array';
-    if (data.fields.length > 25) return 'an embed may have at most 25 fields';
-    for (const f of data.fields) {
-      if (!f || !f.name || !f.value) return 'each field needs a name and value';
-      if (String(f.name).length > 256) return 'field name must be 256 characters or fewer';
-      if (String(f.value).length > 1024) return 'field value must be 1024 characters or fewer';
-    }
-  }
-  return null;
-}
-
 /** GET /api/moderation/discord-embeds — list saved templates */
 async function listDiscordEmbeds(_req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const rows = await prisma.discordEmbed.findMany({ orderBy: { updatedAt: 'desc' } });
+    const rows = await discordEmbedService.list();
     res.json({ data: rows });
   } catch (err) { next(err); }
 }
@@ -484,10 +462,10 @@ async function listDiscordEmbeds(_req: Request, res: Response, next: NextFunctio
 async function createDiscordEmbed(req: Request, res: Response, next: NextFunction): Promise<void> {
   const { name, data } = req.body ?? {};
   if (!name || typeof name !== 'string' || !name.trim()) return next(createError(400, 'name is required'));
-  const err = validateEmbed(data);
+  const err = discordEmbedService.validateEmbed(data);
   if (err) return next(createError(422, err));
   try {
-    const row = await prisma.discordEmbed.create({ data: { name: name.trim().slice(0, 100), data } });
+    const row = await discordEmbedService.create(name, data);
     res.status(201).json({ data: row });
   } catch (e) { next(e); }
 }
@@ -497,13 +475,13 @@ async function updateDiscordEmbed(req: Request, res: Response, next: NextFunctio
   if (!validatePosInt(paramStr(req, 'id'))) return next(createError(400, 'Invalid embed ID'));
   const { name, data } = req.body ?? {};
   if (!name || typeof name !== 'string' || !name.trim()) return next(createError(400, 'name is required'));
-  const err = validateEmbed(data);
+  const err = discordEmbedService.validateEmbed(data);
   if (err) return next(createError(422, err));
   try {
     const id = parseInt(paramStr(req, 'id'), 10);
-    const existing = await prisma.discordEmbed.findUnique({ where: { id } });
+    const existing = await discordEmbedService.get(id);
     if (!existing) return next(createError(404, 'Embed not found'));
-    const row = await prisma.discordEmbed.update({ where: { id }, data: { name: name.trim().slice(0, 100), data } });
+    const row = await discordEmbedService.update(id, name, data);
     res.json({ data: row });
   } catch (e) { next(e); }
 }
@@ -513,9 +491,9 @@ async function deleteDiscordEmbed(req: Request, res: Response, next: NextFunctio
   if (!validatePosInt(paramStr(req, 'id'))) return next(createError(400, 'Invalid embed ID'));
   try {
     const id = parseInt(paramStr(req, 'id'), 10);
-    const existing = await prisma.discordEmbed.findUnique({ where: { id } });
+    const existing = await discordEmbedService.get(id);
     if (!existing) return next(createError(404, 'Embed not found'));
-    await prisma.discordEmbed.delete({ where: { id } });
+    await discordEmbedService.remove(id);
     res.json({ data: { deleted: true } });
   } catch (e) { next(e); }
 }
@@ -531,49 +509,21 @@ async function sendDiscordEmbed(req: Request, res: Response, next: NextFunction)
   if (typeof channelId !== 'string' || !/^\d{17,20}$/.test(channelId)) {
     return next(createError(400, 'channelId must be a valid Discord snowflake ID'));
   }
-  const err = validateEmbed(embed);
+  const err = discordEmbedService.validateEmbed(embed);
   if (err) return next(createError(422, err));
 
-  let rrInput: ReactionRoleInput[] = [];
-  if (reactionRoles !== undefined) {
-    if (!Array.isArray(reactionRoles)) return next(createError(422, 'reactionRoles must be an array'));
-    for (const m of reactionRoles) {
-      if (!m) return next(createError(422, 'each reaction role must be an object'));
-      // A row is valid when it has EITHER a non-empty unicode emoji string OR a
-      // valid custom-emoji snowflake (customEmojiId).
-      const hasUnicode = typeof m.emoji === 'string' && m.emoji.trim().length > 0;
-      const hasCustom = typeof m.customEmojiId === 'string' && /^\d{17,20}$/.test(m.customEmojiId);
-      if (!hasUnicode && !hasCustom) {
-        return next(createError(422, 'each reaction role needs either a unicode emoji or a valid customEmojiId snowflake'));
-      }
-      if (typeof m.roleId !== 'string' || !/^\d{17,20}$/.test(m.roleId)) return next(createError(422, 'each reaction role needs a valid role ID'));
-    }
-    if (reactionRoles.length > 20) return next(createError(422, 'at most 20 reaction roles per message'));
-    rrInput = reactionRoles;
-  }
+  const validatedRoles = discordEmbedService.validateReactionRoles(reactionRoles);
+  if (validatedRoles.error) return next(createError(422, validatedRoles.error));
 
   try {
-    const message = await postEmbed(channelId, embed as EmbedData);
-    if (rrInput.length > 0 && message.guildId) {
-      const mappings = reactionRoleService.buildMappings(message.client, message.guildId, rrInput);
-      await reactionRoleService.createPanel(message, mappings);
-    }
-    await prisma.auditLog.create({
-      data: {
-        actorId: await resolveActorId(req),
-        action: 'send_discord_embed',
-        targetType: 'discord_channel',
-        reason: `Sent embed to channel ${channelId}${rrInput.length ? ` (+${rrInput.length} reaction roles)` : ''}`,
-        metadata: { channelId, title: embed?.title ?? null, reactionRoles: rrInput.length },
-      },
-    }).catch(() => {});
-    res.json({ data: { sent: true, messageId: message.id, reactionRoles: rrInput.length } });
-  } catch (e: any) {
+    const result = await discordEmbedService.send({ channelId, embed, reactionRoles, actorId: await resolveActorId(req) });
+    res.json({ data: result });
+  } catch (e: unknown) {
     // Surface the real Discord failure to the admin instead of a generic 5xx
     // (production strips 5xx `detail` to "An unexpected error occurred", which
     // hides actionable causes like a missing channel permission). Map known
     // Discord/bot failures to 4xx with a helpful message that passes through.
-    const raw = String(e?.message || 'Failed to send embed to Discord');
+    const raw = e instanceof Error ? e.message : 'Failed to send embed to Discord';
     const lower = raw.toLowerCase();
     if (lower.includes('missing permissions') || lower.includes('missing access')) {
       return next(createError(422,

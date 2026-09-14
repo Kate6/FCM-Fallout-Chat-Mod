@@ -34,6 +34,7 @@ import {
   toggleAutoModRule,
   listAutoModViolations,
 } from '../controllers/autoModRulesController';
+import { importDiscordEmbedAsset } from '../controllers/embedAssetController';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1024 * 1024 } });
 const router = express.Router();
@@ -56,6 +57,7 @@ router.post('/discord-embeds', requireDiscordRole(env.OWNER_ROLE_ID, env.ADMIN_R
 router.post('/discord-embeds/send', requireDiscordRole(env.OWNER_ROLE_ID, env.ADMIN_ROLE_ID, env.MODERATOR_ROLE_ID), sendDiscordEmbed);
 router.put('/discord-embeds/:id', requireDiscordRole(env.OWNER_ROLE_ID, env.ADMIN_ROLE_ID, env.MODERATOR_ROLE_ID), updateDiscordEmbed);
 router.delete('/discord-embeds/:id', requireDiscordRole(env.OWNER_ROLE_ID, env.ADMIN_ROLE_ID, env.MODERATOR_ROLE_ID), deleteDiscordEmbed);
+router.post('/discord-embed-assets/import', requireDiscordRole(env.OWNER_ROLE_ID, env.ADMIN_ROLE_ID), importDiscordEmbedAsset);
 router.get('/discord-roles', requireDiscordRole(env.OWNER_ROLE_ID, env.ADMIN_ROLE_ID, env.MODERATOR_ROLE_ID), listDiscordRoles);
 router.get('/reaction-role-panels', requireDiscordRole(env.OWNER_ROLE_ID, env.ADMIN_ROLE_ID, env.MODERATOR_ROLE_ID), listReactionRolePanels);
 router.delete('/reaction-role-panels/:messageId', requireDiscordRole(env.OWNER_ROLE_ID, env.ADMIN_ROLE_ID, env.MODERATOR_ROLE_ID), deleteReactionRolePanel);
