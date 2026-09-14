@@ -52,7 +52,7 @@ export function register(client: Client): void {
   if (!env.DISCORD_BOT_COMMANDS_CHANNEL_ID) return;
   client.once('ready', () => scheduleRefresh(client));
   client.on('messageCreate', (message) => {
-    if (message.channelId !== env.DISCORD_BOT_COMMANDS_CHANNEL_ID || message.webhookId || isOurHelpMessage(message)) return;
+    if (message.channelId !== env.DISCORD_BOT_COMMANDS_CHANNEL_ID || isOurHelpMessage(message)) return;
     scheduleRefresh(client);
   });
 }
