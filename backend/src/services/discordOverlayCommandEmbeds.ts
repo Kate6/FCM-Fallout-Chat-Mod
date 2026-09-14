@@ -119,7 +119,7 @@ export function buildDiscordOverlayCard(metadata: CardMetadata): DiscordCommandE
         fields: [
           { name: 'Status', value: metadata.isActive === true ? 'Active now' : 'Next sale', inline: true },
           { name: 'Location', value: asText(metadata.location), inline: true },
-          { name: 'List', value: `#${asText(metadata.listNumber)}`, inline: true },
+          { name: 'List', value: `#${typeof metadata.listNumber === 'number' ? metadata.listNumber : asText(metadata.listNumber)}`, inline: true },
           { name: metadata.isActive === true ? 'Ends' : 'Starts', value: asText(metadata.isActive === true ? metadata.endUtc : metadata.startUtc), inline: false },
           ...(inventory.length ? [{ name: 'For sale', value: inventory.join('\n').slice(0, 1024), inline: false }] : []),
         ],
