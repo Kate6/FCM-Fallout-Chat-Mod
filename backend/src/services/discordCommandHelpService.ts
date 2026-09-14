@@ -3,19 +3,26 @@ import { Client, EmbedBuilder, type Message } from 'discord.js';
 import env from '../config/environment';
 import logger from '../config/logger';
 
-const HELP_FOOTER = 'FCM bot command help';
+const HELP_FOOTER = 'Fallout Chat Mod Command Center';
+const LEGACY_HELP_FOOTER = 'FCM bot command help';
 let refreshInFlight: Promise<void> | null = null;
 
 export function buildBotCommandsHelpEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setTitle('Fallout Chat Mod Commands')
     .setColor(0xf1c40f)
-    .setDescription('Use `/help` for the private quick guide. Use `/events` for event commands.')
+    .addFields({
+      name: 'Common Commands',
+      value: '`/help` · `/camp` · `/wiki` · `/minerva` · `/nukecodes` · `/appearance` · `/events`',
+      inline: false,
+    })
     .setFooter({ text: HELP_FOOTER });
 }
 
 function isOurHelpMessage(message: Message): boolean {
-  return message.author.bot && message.embeds.some((embed) => embed.footer?.text === HELP_FOOTER);
+  return message.author.bot && message.embeds.some((embed) =>
+    embed.footer?.text === HELP_FOOTER || embed.footer?.text === LEGACY_HELP_FOOTER,
+  );
 }
 
 export async function refreshStickyHelp(client: Client): Promise<void> {

@@ -13,10 +13,16 @@ describe('Discord bot-commands sticky help', () => {
     const embed = buildBotCommandsHelpEmbed();
     expect(embed.data).toMatchObject({
       title: 'Fallout Chat Mod Commands',
-      description: expect.stringContaining('/help'),
-      footer: { text: 'FCM bot command help' },
+      footer: { text: 'Fallout Chat Mod Command Center' },
     });
-    expect(embed.data.description).toContain('/events');
+    expect(embed.data.description).toBeUndefined();
+    expect(embed.data.fields).toEqual([{
+      name: 'Common Commands',
+      value: expect.stringContaining('/help'),
+      inline: false,
+    }]);
+    expect(embed.data.fields[0].value).toContain('/nukecodes');
+    expect(embed.data.fields[0].value).toContain('/events');
   });
 
   test('removes the prior help card before sending its replacement', async () => {
