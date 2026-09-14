@@ -109,6 +109,8 @@ export function buildDiscordOverlayCard(metadata: CardMetadata): DiscordCommandE
         ],
       };
     case 'minerva':
+      {
+      const inventory = Array.isArray(metadata.inventory) ? metadata.inventory.filter((item): item is string => typeof item === 'string').slice(0, 25) : [];
       return {
         title: `Minerva's Big Sale${metadata.isSuperSale === true ? ' — Super Sale' : ''}`,
         url: publicUrl(metadata.sourceUrl),
@@ -119,8 +121,10 @@ export function buildDiscordOverlayCard(metadata: CardMetadata): DiscordCommandE
           { name: 'Location', value: asText(metadata.location), inline: true },
           { name: 'List', value: `#${asText(metadata.listNumber)}`, inline: true },
           { name: metadata.isActive === true ? 'Ends' : 'Starts', value: asText(metadata.isActive === true ? metadata.endUtc : metadata.startUtc), inline: false },
+          ...(inventory.length ? [{ name: 'For sale', value: inventory.join('\n').slice(0, 1024), inline: false }] : []),
         ],
       };
+      }
     case 'nuke_codes':
       return {
         title: 'Fallout 76 Nuke Codes',

@@ -33,6 +33,25 @@ export interface MinervaStatus {
   next: MinervaWindow;
 }
 
+type MinervaInventoryItem = { name_en?: string; price_minerva?: number };
+const inventoryCache = new Map<number, string[]>();
+const INVENTORY_SOURCE = 'https://raw.githubusercontent.com/Grandpere/f76-tools/main/data/sources/nukaknights/minerva';
+
+/** Loads the versioned NukaKnights inventory list. List 1 maps to file 61. */
+export async function getMinervaInventory(listNumber: number): Promise<string[]> {
+  const cached = inventoryCache.get(listNumber);
+  if (cached) return cached;
+  const fileNumber = 60 + listNumber;
+  try {
+    const response = await fetch(`${INVENTORY_SOURCE}/minerva_${fileNumber}_en.json`, { signal: AbortSignal.timeout(8_000) });
+    if (!response.ok) return [];
+    const items = await response.json() as MinervaInventoryItem[];
+    const inventory = items.map((item) => item.name_en && `${item.name_en}${item.price_minerva != null ? ` — ${item.price_minerva} Gold` : ''}`).filter((item): item is string => Boolean(item));
+    inventoryCache.set(listNumber, inventory);
+    return inventory;
+  } catch { return []; }
+}
+
 const DAY_MS = 86_400_000;
 const BLOCK_DAYS = 35;
 

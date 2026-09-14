@@ -7,7 +7,7 @@ import { getGlobalOnlineCount } from './onlinePresenceService';
 import { getServerPlayersForUser } from './playerListService';
 import * as giveawayService from './giveawayService';
 import { GiveawayError } from './giveawayService';
-import { getMinervaStatus } from './minervaService';
+import { getMinervaInventory, getMinervaStatus } from './minervaService';
 import { bestMatch, getEntry } from './wikiCatalogService';
 import { validateSearchQuery } from '../lib/wikiValidation';
 
@@ -279,10 +279,11 @@ async function buildOnlineResponse(
 
 // ── /minerva Response Builder ─────────────────────────────────────────────────
 
-export function buildMinervaResponse(): { text: string; metadata: Record<string, unknown> } {
+export async function buildMinervaResponse(): Promise<{ text: string; metadata: Record<string, unknown> }> {
   const { active, next } = getMinervaStatus();
   const fmt = (d: Date) => d.toUTCString().replace(':00 GMT', ' UTC').replace(/:\d\d UTC/, ' UTC');
   const sale = active ?? next;
+  const inventory = await getMinervaInventory(sale.listNumber);
   const superTag = sale.isSuperSale ? ' ★ SUPER SALE' : '';
   const lines = [
     `◈ MINERVA'S BIG SALE${superTag}`,
@@ -309,6 +310,7 @@ export function buildMinervaResponse(): { text: string; metadata: Record<string,
       nextStartUtc: active ? next.startUtc.toISOString() : null,
       sourceName: MINERVA_SOURCE_NAME,
       sourceUrl: MINERVA_SOURCE_URL,
+      inventory,
     },
   };
 }
@@ -732,7 +734,7 @@ export async function tryHandleCommand(
 
   // Built-in /minerva — current or next Minerva Big Sale location and dates
   if (trigger === '/minerva') {
-    const r = buildMinervaResponse();
+    const r = await buildMinervaResponse();
     return {
       handled: true,
       actionType: 'private',
