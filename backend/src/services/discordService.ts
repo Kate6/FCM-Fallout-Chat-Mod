@@ -1049,28 +1049,22 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
       : null;
     let broadcastContent = content;
     try {
-      const eventProjection = await discordEventService.projectionForSharedEvent(content);
-      if (eventProjection) {
-        inboundMetadata = { ...eventProjection };
-        broadcastContent = `[EVENT] ${eventProjection.name}`;
-      } else {
-        const wikiResolved = await resolveWikiUrlFromContent(content);
-        if (wikiResolved) {
-          const { entry, rawUrl } = wikiResolved;
-          inboundMetadata = {
-            type: 'wiki_share',
-            wikiEntryId: entry.id,
-            name: entry.name,
-            kind: entry.kind,
-            wikiTitle: entry.wikiTitle,
-          };
-          // Replace the raw URL in content with the "[WIKI] name" token so the
-          // overlay card renderer takes over and the bare link isn't shown twice.
-          broadcastContent = content.replace(rawUrl, '').replace(/\s{2,}/g, ' ').trim();
-          broadcastContent = broadcastContent
-            ? `[WIKI] ${entry.name} — ${broadcastContent}`
-            : `[WIKI] ${entry.name}`;
-        }
+      const wikiResolved = await resolveWikiUrlFromContent(content);
+      if (wikiResolved) {
+        const { entry, rawUrl } = wikiResolved;
+        inboundMetadata = {
+          type: 'wiki_share',
+          wikiEntryId: entry.id,
+          name: entry.name,
+          kind: entry.kind,
+          wikiTitle: entry.wikiTitle,
+        };
+        // Replace the raw URL in content with the "[WIKI] name" token so the
+        // overlay card renderer takes over and the bare link isn't shown twice.
+        broadcastContent = content.replace(rawUrl, '').replace(/\s{2,}/g, ' ').trim();
+        broadcastContent = broadcastContent
+          ? `[WIKI] ${entry.name} — ${broadcastContent}`
+          : `[WIKI] ${entry.name}`;
       }
     } catch (err) {
       // Non-fatal — relay message normally without wiki metadata

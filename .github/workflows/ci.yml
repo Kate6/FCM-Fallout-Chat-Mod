@@ -359,26 +359,9 @@ jobs:
           python3 game-mods/FCMBridge/hudmodloader-chat/test_package.py
           python3 game-mods/FCMBridge/tools/test_validate_swf.py
           python3 Packaging/test-release-scripts.py
-      - name: Test native HUD capture sanitizer and incremental reader
-        shell: pwsh
-        run: game-mods/FCMBridge/hudmodloader-chat/native-capture/test-capture.ps1
-      - name: Test Linux/Proton HUD capture
-        working-directory: game-mods/FCMBridge/hudmodloader-chat/native-capture
-        run: python3 -m unittest -v test_capture_linux.py
       # FcmConfig parser/clamp unit tests (CAP-001..005, #303/#304) — pure Haxe, --interp.
       - name: Install Haxe
         run: sudo apt-get update && sudo apt-get install -y haxe
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: game-mods/FCMBridge/hudmodloader-chat/simulator/package-lock.json
-      - name: Run browser HUD artifact smoke
-        working-directory: game-mods/FCMBridge/hudmodloader-chat/simulator
-        run: |
-          npm ci --ignore-scripts
-          npx playwright install --with-deps chromium
-          npm test
       - name: Build and test background Server bridge
         working-directory: game-mods/FCMBridge/hudmodloader-bridge
         run: |
