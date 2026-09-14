@@ -43,16 +43,24 @@ function publicUrl(value: unknown): string | undefined {
   return `${env.FCM_PUBLIC_BASE_URL.replace(/\/$/, '')}${raw}`;
 }
 
-function objectFields(value: unknown, limit = 10): Array<{ name: string; value: string; inline?: boolean }> {
+function objectFields(value: unknown, limit = 10, omit = new Set<string>()): Array<{ name: string; value: string; inline?: boolean }> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
   return Object.entries(value)
-    .filter(([, fieldValue]) => fieldValue !== null && fieldValue !== undefined && String(fieldValue).trim())
+    .filter(([name, fieldValue]) => fieldValue !== null && fieldValue !== undefined && String(fieldValue).trim() && !omit.has(name.toLowerCase()))
     .slice(0, limit)
     .map(([name, fieldValue]) => ({
       name: name.slice(0, 256),
       value: String(fieldValue).slice(0, 1024),
       inline: true,
     }));
+}
+
+function locationField(value: unknown): { name: string; value: string; inline?: boolean }[] {
+  if (!Array.isArray(value)) return [];
+  const rows = value.map((row) => Array.isArray(row)
+    ? row.map((segment: any) => String(segment?.text ?? '')).join('').trim()
+    : String(row ?? '').trim()).filter(Boolean).slice(0, 5);
+  return rows.length ? [{ name: 'Where to find it', value: rows.join('\n').slice(0, 1024), inline: false }] : [];
 }
 
 /**
@@ -80,7 +88,8 @@ export function buildDiscordOverlayCard(metadata: CardMetadata): DiscordCommandE
         fields: [
           { name: 'Type', value: asText(metadata.kind), inline: true },
           ...(isMap && imageUrl ? [{ name: 'Map', value: `[Open full-size map](${imageUrl})`, inline: true }] : []),
-          ...objectFields(metadata.fields),
+          ...locationField(metadata.locations),
+          ...objectFields(metadata.fields, 10, new Set(['edid', 'formid', 'editor id', 'form id'])),
         ],
       };
     }
