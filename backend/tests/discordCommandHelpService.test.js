@@ -13,8 +13,8 @@ describe('Discord bot-commands sticky help', () => {
     const embed = buildBotCommandsHelpEmbed();
     expect(embed.data).toMatchObject({
       title: 'Fallout Chat Mod Commands',
-      footer: { text: 'Fallout Chat Mod Command Center' },
     });
+    expect(embed.data.footer).toBeUndefined();
     expect(embed.data.description).toBeUndefined();
     expect(embed.data.fields).toEqual([{
       name: 'Common Commands',
@@ -28,7 +28,7 @@ describe('Discord bot-commands sticky help', () => {
   test('removes the prior help card before sending its replacement', async () => {
     const oldHelp = {
       author: { bot: true },
-      embeds: [{ footer: { text: 'FCM bot command help' } }],
+      embeds: [{ title: 'Fallout Chat Mod Commands', fields: [{ name: 'Common Commands' }] }],
       delete: jest.fn().mockResolvedValue(undefined),
     };
     const otherMessage = { author: { bot: false }, embeds: [], delete: jest.fn() };

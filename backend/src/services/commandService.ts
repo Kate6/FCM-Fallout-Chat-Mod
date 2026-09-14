@@ -119,7 +119,7 @@ function substituteTemplate(
 
 // ── /help Response Builder ────────────────────────────────────────────────────
 
-function buildHelpResponse(commands: ChatCommand[]): string {
+export function buildHelpResponse(commands: ChatCommand[]): string {
   const lines: string[] = ['◈ VAULT-TEC COMMAND REFERENCE'];
 
   // PUBLIC channels — these also relay to Discord. Never describe one as a party

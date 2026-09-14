@@ -19,8 +19,9 @@ import {
 import env from '../config/environment';
 import logger from '../config/logger';
 import prisma from '../config/prisma';
-import { getCommands, tryHandleCommand, type CommandResult } from './commandService';
+import { buildHelpResponse, getCommands, tryHandleCommand, type CommandResult } from './commandService';
 import { buildDiscordOverlayCard } from './discordOverlayCommandEmbeds';
+import { splitDiscordResponse } from '../lib/discordResponsePagination';
 import { finalizeMessage } from './ingestMessage';
 import { getUserByDiscordId, getUserById } from './userLookup';
 import { getEffectiveRole, isPrivilegedRole } from './userRoleService';
@@ -43,6 +44,14 @@ type CommandContext = { channelId: string; channelName: string; parentChannelId:
 
 function clip(value: string, limit = 1_900): string {
   return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
+}
+
+async function replyWithPrivatePages(interaction: ChatInputCommandInteraction, value: string): Promise<void> {
+  const [first, ...rest] = splitDiscordResponse(value);
+  await interaction.reply({ content: first, flags: MessageFlags.Ephemeral });
+  for (const page of rest) {
+    await interaction.followUp({ content: page, flags: MessageFlags.Ephemeral });
+  }
 }
 
 async function resolveContext(discordChannelId: string): Promise<CommandContext | null> {
@@ -124,10 +133,7 @@ async function replyForCommand(interaction: ChatInputCommandInteraction, result:
 
 async function handleOverlayCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (interaction.commandName === 'help') {
-    await interaction.reply({
-      content: 'Try `/camp`, `/wiki`, `/minerva`, `/nukecodes`, `/appearance`, or `/events`. Use `/fcm command:/help` for the complete overlay reference.',
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithPrivatePages(interaction, buildHelpResponse(await getCommands()));
     return;
   }
   if (interaction.commandName === 'appearance') {
