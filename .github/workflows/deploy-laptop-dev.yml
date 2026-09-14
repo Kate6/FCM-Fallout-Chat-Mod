@@ -23,7 +23,10 @@ jobs:
           clean: true
 
       - name: Build, deploy, verify, or roll back laptop Dev
-        shell: powershell
+        # GitHub writes each step to a temporary .ps1. Use a process-scoped
+        # bypass so a hardened machine policy does not block that wrapper;
+        # this does not change the host's persisted execution policy.
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: >-
           & .github/scripts/deploy-laptop-dev.ps1
           -CommitSha '${{ github.sha }}'

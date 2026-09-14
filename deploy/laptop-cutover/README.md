@@ -177,6 +177,10 @@ The Windows service defaults to `NETWORK SERVICE`; the installer grants that
 identity only traversal on `C:\FCM`, modify access to the runner and Dev cutover
 trees, and membership in `docker-users`. Without those grants the registered
 runner exits because the hardened `C:\FCM` ACL denies directory traversal.
+The deployment workflow uses a process-scoped PowerShell execution-policy bypass
+for GitHub's temporary step wrapper. This leaves the machine's persisted policy
+unchanged while allowing the signed-in runner service to execute the checked-out
+deployment script.
 SSH Manager may time out while the runner archive downloads and configuration
 continues in the background. After a timeout, inspect `.runner`, the Windows
 service, GitHub's runner status, and the one-time token file before retrying.
