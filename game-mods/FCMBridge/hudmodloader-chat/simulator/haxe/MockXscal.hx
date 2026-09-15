@@ -9,6 +9,7 @@ class MockXscal {
     public static var pollCount(default, null):Int = 0;
     public static var historyDoneDeliveries(default, null):Int = 0;
     static var pressed:Map<Int, Bool> = new Map();
+    static var registered:Map<Int, Bool> = new Map();
     static var cursor:Int = 0;
     static var scenarioEvents:Array<Dynamic> = null;
 
@@ -109,7 +110,18 @@ class MockXscal {
             callCount++;
             if (name == "GetXSRuntimeInfo") return response({runtime:"xScal", version:"sim-1", platform:"Simulator"});
             if (name == "log") { SimLog.emit(Std.string(value)); return true; }
-            if (name == "Input.RegisterKey" || name == "Input.UnregisterKey") return true;
+            if (name == "Input.RegisterKey") {
+                var registerKey:Int = Std.int(value);
+                registered.set(registerKey, true);
+                return true;
+            }
+            if (name == "Input.UnregisterKey") {
+                var unregisterKey:Int = Std.int(value);
+                var existed:Bool = registered.exists(unregisterKey);
+                registered.remove(unregisterKey);
+                pressed.remove(unregisterKey);
+                return existed;
+            }
             if (name == "Input.IsKeyPressed") {
                 var key:Int = Std.int(value);
                 return pressed.exists(key) && pressed.get(key) == true;
@@ -130,6 +142,13 @@ class MockXscal {
 
     public static function setVirtualKey(key:Int, down:Bool):Void {
         if (key >= 1 && key <= 255) pressed.set(key, down);
+    }
+
+    public static function registeredKeys():String {
+        var keys:Array<Int> = [];
+        for (key in registered.keys()) keys.push(key);
+        keys.sort(function(a:Int, b:Int):Int return a - b);
+        return keys.join(",");
     }
 
     static function sendHostedDev(channel:String, body:String):Void {

@@ -14,6 +14,7 @@ import {
   truncateUrl,
   classifyMedia,
   splitParts,
+  discordEmojiAssetUrls,
   splitMentions,
   contentMentionsName,
   contentMatchesKeyword,
@@ -123,6 +124,22 @@ describe('isProdRelayHost', () => {
 describe('slash-command built-ins', () => {
   it('includes /online in the built-in autocomplete command list', () => {
     expect(BUILTIN_FORMS.some((cmd) => cmd.trigger === '/online')).toBe(true);
+  });
+});
+
+describe('Discord custom emoji assets', () => {
+  it('uses Discord media as a fallback when the primary CDN is unavailable', () => {
+    expect(discordEmojiAssetUrls('1509634313631699034', false)).toEqual({
+      primary: 'https://cdn.discordapp.com/emojis/1509634313631699034.png',
+      fallback: 'https://media.discordapp.net/emojis/1509634313631699034.png',
+    });
+  });
+
+  it('preserves the animated WebP form on both CDN hosts', () => {
+    expect(discordEmojiAssetUrls('1509628309871526022', true)).toEqual({
+      primary: 'https://cdn.discordapp.com/emojis/1509628309871526022.webp?animated=true',
+      fallback: 'https://media.discordapp.net/emojis/1509628309871526022.webp?animated=true',
+    });
   });
 });
 
@@ -419,6 +436,15 @@ describe('splitParts', () => {
       { text: '@Vault Dweller', kind: 'mention', url: undefined, emojiName: undefined, discordId: '123456789012345678' },
       { text: ' in ', kind: 'plain' },
       { text: '#events', kind: 'channel', url: 'https://discord.com/channels/1/234567890123456789', emojiName: undefined, discordId: '234567890123456789' },
+    ]);
+  });
+
+  it('renders a normalized Discord role as a readable mention', () => {
+    expect(splitParts('Ping @Raids Notifications', [
+      { type: 'role', discordId: '1549290715882725476', label: 'Raids Notifications' },
+    ])).toEqual([
+      { text: 'Ping ', kind: 'plain' },
+      { text: '@Raids Notifications', kind: 'mention', url: undefined, emojiName: undefined, discordId: '1549290715882725476' },
     ]);
   });
 

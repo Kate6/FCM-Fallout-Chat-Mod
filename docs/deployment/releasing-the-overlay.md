@@ -327,13 +327,17 @@ curl -sI "https://falloutchatmod.com/downloads/electron/Fallout%20Chat%20Mod%20S
 
 ### Step 7 — Register the release
 
-Confirm version and release notes with the user first, then call the admin endpoint. This updates the server's in-memory `latestVersion` cache — newly connecting overlay clients will receive `{ type: 'app:update-available', payload: { latestVersion } }` over the chat WebSocket and show a passive OS notification if the version is newer than their build.
+Confirm version, release notes, and the release target (**overlay**, **hud**, or
+**both**) with the user first, then call the admin endpoint. This updates the
+server's in-memory `latestVersion` cache — newly connecting overlay clients will
+receive `{ type: 'app:update-available', payload: { latestVersion } }` over the
+chat WebSocket and show a passive OS notification if the version is newer than their build.
 
 ```bash
 curl -X POST https://falloutchatmod.com/admin/releases \
   -H "Authorization: Bearer $PROD_ADMIN_RELEASE_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"version":"X.Y.Z","downloadUrl":"https://falloutchatmod.com/downloads/electron/Fallout%20Chat%20Mod%20Setup%20X.Y.Z%20(Windows).zip","hudModVersion":"<widget-version>","hudModUrl":"https://falloutchatmod.com/downloads/electron/FCM%20HUD%20Mod-<widget-version>%20(PROD).zip","releaseNotes":"..."}'
+  -d '{"version":"X.Y.Z","downloadUrl":"https://falloutchatmod.com/downloads/electron/Fallout%20Chat%20Mod%20Setup%20X.Y.Z%20(Windows).zip","hudModVersion":"<widget-version>","hudModUrl":"https://falloutchatmod.com/downloads/electron/FCM%20HUD%20Mod-<widget-version>%20(PROD).zip","releaseNotes":"...","releaseTarget":"both"}'
 ```
 
 `downloadUrl` is the Windows ZIP URL (the website download button uses this).
@@ -341,9 +345,12 @@ curl -X POST https://falloutchatmod.com/admin/releases \
 website Install page displays the exact `FCM HUD Mod ZIP` link from `/api/version`, and the
 same metadata is included in the Discord Updates and GitHub release messages.
 
-**Optional `announce: false` — quiet publish (no Discord ping).** By default every publish
-force-posts a new `@everyone` announcement to `#updates`, and the publish *fails* if the post
-can't get out. Add `"announce": false` to the body to skip the Discord post for that publish
+**Required `releaseTarget` and optional `announce: false`.** Every release must explicitly
+choose `overlay`, `hud`, or `both`; the PowerShell release script prompts when the parameter is
+omitted. The target controls the Updates embed title and pings only the associated opt-in role:
+`OVERLAY_UPDATE_NOTIFICATION_ROLE_ID`, `HUD_MOD_UPDATE_NOTIFICATION_ROLE_ID`, or both. The
+release flow never pings `@everyone` or `@here`, and it fails before recording if a selected role
+is not configured. Add `"announce": false` to skip the Discord post for that publish
 (e.g. a code-signing-only release where pinging everyone is noise). Everything else still
 happens — `verifyDownload` gates, the site download updates, the `latestVersion` cache + in-app
 `app:update-available` fire, and the GitHub Release is created — only the Discord post is
@@ -374,10 +381,10 @@ Set `DOWNLOAD_PAGE_URL=https://dev.falloutchatmod.com` so the Dev Discord messag
 the dev install page. The dev announcement is posted to the dev bot's configured
 `DISCORD_UPDATES_CHANNEL_ID`; production uses its own configured channel.
 
-To publish corrected notes without notifying the entire channel again, keep `announce: true`
-and add `mentionEveryone: false` to the same release request. This posts a replacement embed,
-updates the stored release notes and latest-version cache, and omits the `@everyone` content and
-allowed-mentions setting. Set `announce: false` only when no Discord post should be sent.
+To publish corrected notes without a push notification, keep `announce: true` and add
+`suppressNotifications: true`. This posts a replacement embed with the target's visible role
+mention, updates the stored release notes and latest-version cache, and suppresses the push.
+Set `announce: false` only when no Discord post should be sent.
 
 ### Step 6 — Nexus publish
 

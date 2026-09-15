@@ -58,8 +58,8 @@ class FcmCommand {
             case "delete", "del": return 0x2E;
             case "home": return 0x24;
             case "end": return 0x23;
-            case "pageup", "pgup", "prior": return 0x21;
-            case "pagedown", "pgdn", "next": return 0x22;
+            case "pageup", "prevpage", "pgup", "prior": return 0x21;
+            case "pagedown", "nextpage", "pgdn", "next": return 0x22;
             case "up", "arrowup": return 0x26;
             case "down", "arrowdown": return 0x28;
             case "left", "arrowleft": return 0x25;
@@ -98,12 +98,12 @@ class FcmCommand {
 
     public static function isNextChannel(raw:String, configured:String):Bool {
         var action:String = normalizeAction(raw);
-        return sameAction(action, configured) || action == "nextpage" || action == "pagedown";
+        return sameAction(action, configured) || samePhysicalKey(action, configured);
     }
 
     public static function isPreviousChannel(raw:String, configured:String):Bool {
         var action:String = normalizeAction(raw);
-        return sameAction(action, configured) || action == "prevpage" || action == "pageup";
+        return sameAction(action, configured) || samePhysicalKey(action, configured);
     }
 
     /**
@@ -354,6 +354,11 @@ class FcmCommand {
 
     static function sameAction(normalized:String, configured:String):Bool {
         return configured != null && normalized.length > 0 && normalized == normalizeAction(configured);
+    }
+
+    static function samePhysicalKey(normalized:String, configured:String):Bool {
+        var keyCode:Int = virtualKeyCode(normalized);
+        return keyCode > 0 && keyCode == virtualKeyCode(configured);
     }
 
     static function matchesScrollBinding(raw:String, configured:String):Bool {

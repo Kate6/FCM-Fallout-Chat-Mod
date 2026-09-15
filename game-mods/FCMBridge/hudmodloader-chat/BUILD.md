@@ -1,6 +1,6 @@
 # FCMChatWidget build, install, and verification
 
-**Widget version:** 2.10.93. Local review candidate, audited 2026-09-14.
+**Widget version:** 2.10.96. Local review candidate, audited 2026-09-15.
 This is the explicit opt-in HUD-mod track. The desktop overlay never installs or modifies it.
 
 ## Status and scope
@@ -23,6 +23,8 @@ investigations and superseded runbooks; it is not a source for current install s
 - A validated HUDModLoader installation and one selected ZFE/xScal provider for in-game testing.
 - The provider's required native-chat methods/capabilities, verified at runtime. A version number
   alone is not sufficient. Use the [provider guide](../../../docs/overlay/zfe/modder-guide.md).
+- ZFE must advertise `zfe-chat-async-send-v1` for user messages. The widget refuses synchronous
+  ZFE sends because native network stalls block Fallout's Scaleform/UI thread.
 
 Modern widget builds do not require Bethesda's HUDMenu or FFDec recompilation. If FFDec or an
 archive skill/tool is unavailable, identify that limit and use the repository's tested format

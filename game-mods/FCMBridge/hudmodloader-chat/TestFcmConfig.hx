@@ -361,6 +361,9 @@ class TestFcmConfig {
         eqs("parse scrollBottomKey", c.scrollBottomKey, "HOME");
         eqs("parse link activation key", FcmConfig.parse("[FCMChat]\nactivateLinkKey=F8\n").activateLinkKey, "F8");
         eqs("parse hideKey", c.hideKey, "DiagnosticSnapshot");
+        eqs("parse physical next-channel key", FcmConfig.parse("[FCMChat]\nchannelNextKey=F8\n").channelNextKey, "F8");
+        eqs("parse physical previous-channel key", FcmConfig.parse("[FCMChat]\nchannelPrevKey=F7\n").channelPrevKey, "F7");
+        eqs("parse physical hide key", FcmConfig.parse("[FCMChat]\nhideKey=F2\n").hideKey, "F2");
         eqb("channel tag visibility override ignored", c.showChannelTag, true);
         eqb("parse showHints", c.showHints, true);
         check("legacy timestamp settings are ignored", FcmConfig.parse(

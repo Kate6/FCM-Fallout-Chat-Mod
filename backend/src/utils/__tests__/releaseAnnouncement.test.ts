@@ -1,19 +1,20 @@
 /**
- * Unit tests for releaseAnnouncement.ts — the @everyone ping, env-aware download
- * links, and the Nexus endorsement copy used in the Discord release announcement.
+ * Unit tests for releaseAnnouncement.ts — target-specific opt-in role pings,
+ * env-aware download links, and the Nexus endorsement copy used in the Discord
+ * release announcement.
  */
 
 import { test, describe, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  RELEASE_PING,
   DEFAULT_NEXUS_MOD_URL,
   nexusModUrl,
   downloadPageUrl,
   releaseDownloadFieldValue,
   nexusEndorseFieldValue,
   releaseAnnouncementMessage,
+  releaseAnnouncementTitle,
 } from '../releaseAnnouncement';
 
 describe('releaseAnnouncement', () => {
@@ -29,27 +30,35 @@ describe('releaseAnnouncement', () => {
     }
   });
 
-  test('RELEASE_PING pings @everyone', () => {
-    assert.equal(RELEASE_PING, '@everyone');
-  });
-
-  test('quiet release posts omit content and allowed mentions', () => {
-    assert.deepEqual(releaseAnnouncementMessage(false), {});
-  });
-
-  test('normal release posts retain the explicit @everyone mention', () => {
-    assert.deepEqual(releaseAnnouncementMessage(true), {
-      content: '@everyone',
-      allowedMentions: { parse: ['everyone'] },
+  test('overlay release pings only the overlay notification role', () => {
+    assert.deepEqual(releaseAnnouncementMessage('overlay', {
+      overlayRoleId: '1548813456684355614',
+      hudRoleId: '1549274868120424479',
+    }), {
+      content: '<@&1548813456684355614>',
+      allowedMentions: { parse: [], roles: ['1548813456684355614'] },
     });
   });
 
-  test('silent release mentions everyone without pushing a notification', () => {
-    assert.deepEqual(releaseAnnouncementMessage(true, true), {
-      content: '@everyone',
-      allowedMentions: { parse: ['everyone'] },
+  test('combined release pings both opt-in notification roles and supports silent delivery', () => {
+    assert.deepEqual(releaseAnnouncementMessage('both', {
+      overlayRoleId: '1548813456684355614',
+      hudRoleId: '1549274868120424479',
+    }, true), {
+      content: '<@&1548813456684355614> <@&1549274868120424479>',
+      allowedMentions: { parse: [], roles: ['1548813456684355614', '1549274868120424479'] },
       flags: 4096,
     });
+  });
+
+  test('fails closed when a selected release target lacks its notification role', () => {
+    assert.throws(() => releaseAnnouncementMessage('hud', { overlayRoleId: '1548813456684355614' }));
+  });
+
+  test('uses a target-specific title', () => {
+    assert.equal(releaseAnnouncementTitle('1.3.99', 'overlay'), 'Fallout Chat Mod Overlay Update v1.3.99');
+    assert.equal(releaseAnnouncementTitle('1.3.99', 'hud', { version: '2.10.9', url: 'https://example.test/hud.zip' }), 'Fallout Chat Mod HUD Mod Update v2.10.9');
+    assert.equal(releaseAnnouncementTitle('1.3.99', 'both'), 'Fallout Chat Mod Overlay + HUD Mod Update v1.3.99');
   });
 
   describe('nexusModUrl', () => {
@@ -76,7 +85,7 @@ describe('releaseAnnouncement', () => {
   describe('releaseDownloadFieldValue (env-aware platform links — the prod-404 fix)', () => {
     test('uses the configured host for Windows, both Linux packages, and the Linux ZIP', () => {
       process.env.RELEASE_DOWNLOAD_HOST = 'dev.falloutchatmod.com';
-      const v = releaseDownloadFieldValue('1.3.91-dev');
+      const v = releaseDownloadFieldValue('1.3.91-dev', 'overlay');
       assert.ok(v.includes('🪟 [Windows](https://dev.falloutchatmod.com/downloads/electron/Fallout%20Chat%20Mod%20Setup%201.3.91-dev%20(Windows).zip)'));
       assert.ok(v.includes('🐧 [Linux AppImage](https://dev.falloutchatmod.com/downloads/electron/Fallout%20Chat%20Mod-1.3.91-dev.AppImage)'));
       assert.ok(v.includes('[Linux .deb](https://dev.falloutchatmod.com/downloads/electron/Fallout%20Chat%20Mod-1.3.91-dev.deb)'));
@@ -84,7 +93,7 @@ describe('releaseAnnouncement', () => {
     });
     test('defaults to the prod host when RELEASE_DOWNLOAD_HOST is unset', () => {
       delete process.env.RELEASE_DOWNLOAD_HOST;
-      const v = releaseDownloadFieldValue('1.2.3');
+      const v = releaseDownloadFieldValue('1.2.3', 'overlay');
       // Assert the exact prod links rather than a bare host substring — a bare
       // `includes('host')` trips CodeQL's incomplete-url-substring-sanitization
       // and proves nothing about the host. The full prod URLs exclude the dev host.
@@ -96,11 +105,20 @@ describe('releaseAnnouncement', () => {
 
     test('includes the target HUD package when release metadata provides one', () => {
       process.env.RELEASE_DOWNLOAD_HOST = 'dev.falloutchatmod.com';
-      const v = releaseDownloadFieldValue('1.3.91-dev', {
+      const v = releaseDownloadFieldValue('1.3.91-dev', 'both', {
         version: '2.10.8',
         url: 'https://dev.falloutchatmod.com/downloads/electron/ZFE%20FCM%20HUD%20Mod-2.10.8%20(DEV).zip',
       });
       assert.ok(v.includes('[FCM HUD Mod ZIP (ZFE / xScal) v2.10.8](https://dev.falloutchatmod.com/downloads/electron/ZFE%20FCM%20HUD%20Mod-2.10.8%20(DEV).zip)'));
+    });
+
+    test('HUD-only release exposes the HUD package without overlay installers', () => {
+      const v = releaseDownloadFieldValue('1.3.91-dev', 'hud', {
+        version: '2.10.8',
+        url: 'https://dev.falloutchatmod.com/downloads/electron/ZFE%20FCM%20HUD%20Mod-2.10.8%20(DEV).zip',
+      });
+      assert.ok(v.includes('FCM HUD Mod ZIP'));
+      assert.ok(!v.includes('[Windows]('));
     });
   });
 

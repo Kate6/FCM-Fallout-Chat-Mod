@@ -20,12 +20,14 @@ import { canon } from '../utils/textCanon';
 import { buildOverLengthDm } from '../utils/overLengthDm';
 import {
   downloadPageUrl,
+  releaseAnnouncementTitle,
   releaseAnnouncementMessage,
   releaseDownloadFieldValue,
   nexusEndorseFieldValue,
 } from '../utils/releaseAnnouncement';
-import type { HudModDownload } from '../utils/releaseAnnouncement';
+import type { HudModDownload, ReleaseTarget } from '../utils/releaseAnnouncement';
 import { normalizeDiscordReferences, type DiscordMessageEntity } from '../utils/discordReferences';
+import { outboundAllowedMentions, roleMentionAliases } from '../utils/discordMentions';
 import { normalizeDiscordRelayCard, type DiscordRelayEmbed } from './discordRelayCard';
 import { buildDiscordOverlayCard } from './discordOverlayCommandEmbeds';
 
@@ -43,11 +45,15 @@ const ZWS = '\u200B';
 const DISCORD_TYPING_THROTTLE_MS = 2_000;
 const DISCORD_TYPING_IDENTITY_TTL_MS = 30_000;
 const MAX_DISCORD_TYPING_STATE_ENTRIES = 4096;
+const MENTIONABLE_ROLE_CACHE_TTL_MS = 60_000;
 const discordTypingLastSentAt = new Map<string, number>();
 const discordTypingIdentityCache = new Map<string, {
   identity: { userId: string; username: string } | null;
   expiresAt: number;
 }>();
+let mentionableRolesCache: Array<{ id: string; name: string }> | null = null;
+let mentionableRolesCacheExpiresAt = 0;
+let mentionableRolesPromise: Promise<Array<{ id: string; name: string }>> | null = null;
 
 // Outbound rate-limit queue -- drains at 4 msg/sec (250ms interval)
 const outboundQueue: Array<() => Promise<void>> = [];
@@ -126,9 +132,10 @@ export function buildDiscordRelayPrefix(
  *   2. Discord member's server display name / global_name / username from the
  *      message's resolved `mentions` collection.
  *
- * All DB lookups are batched into a single `findMany` query. Role, channel,
- * @everyone, and @here tokens are NOT touched here — they are handled by
- * stripMentions() later (outbound path) or neutralised upstream.
+ * User rows are batched into a single `findMany` query. Discord's resolved
+ * role and channel collections provide the remaining labels. @everyone and
+ * @here tokens are deliberately not resolved and remain subject to the
+ * outbound stripMentions() abuse guard.
  *
  * Returns the content string with every `<@id>` / `<@!id>` replaced by `@Name`.
  */
@@ -138,7 +145,7 @@ async function resolveInboundUserMentions(
 ): Promise<{ content: string; entities: DiscordMessageEntity[] }> {
   // Collect every unique user-mention id present in the content string.
   const idSet = new Set<string>();
-  for (const m of content.matchAll(/<@!?(\d+)>/g)) {
+  for (const m of content.matchAll(/<@!?(\d{16,22})>/g)) {
     idSet.add(m[1]);
   }
   for (const m of content.matchAll(/<#(\d{16,22})>/g)) idSet.add(m[1]);
@@ -186,7 +193,9 @@ async function resolveInboundUserMentions(
   mentions?.channels?.forEach((channel, id) => {
     if ('name' in channel && typeof channel.name === 'string') channels.set(id, channel.name);
   });
-  return normalizeDiscordReferences(content, { users, channels, guildId: msg.guildId });
+  const roles = new Map<string, string>();
+  mentions?.roles?.forEach((role, id) => roles.set(id, role.name));
+  return normalizeDiscordReferences(content, { users, roles, channels, guildId: msg.guildId });
 }
 
 /**
@@ -270,6 +279,21 @@ async function resolveAppMentions(text: string): Promise<string> {
     // (?<![\w]) avoids matching inside an existing word (e.g. email-like "x@foo").
     const re = new RegExp(`(?<![A-Za-z0-9])@${escapeRe(c.name)}(?![A-Za-z0-9])`, 'gi');
     result = result.replace(re, `<@${c.id}>`);
+  }
+
+  // Roles are resolved after people so existing user-mention behaviour wins if
+  // a user and role share an identical display name. Only roles the bot can
+  // assign are eligible: this prevents the overlay/HUD from manufacturing a
+  // mention for @everyone, integration roles, or roles above the bot.
+  const roles = await getMentionableRoles();
+  const roleCandidates = roles
+    .flatMap((role) => roleMentionAliases(role.name)
+      .filter((alias) => alias.length >= 2)
+      .map((alias) => ({ id: role.id, alias })))
+    .sort((a, b) => b.alias.length - a.alias.length);
+  for (const role of roleCandidates) {
+    const re = new RegExp(`(?<![A-Za-z0-9])@${escapeRe(role.alias)}(?![A-Za-z0-9])`, 'gi');
+    result = result.replace(re, `<@&${role.id}>`);
   }
   return result;
 }
@@ -603,7 +627,10 @@ async function editDiscordRelayMessage(
   const discordChannel = await client.channels.fetch(link.discordChannelId);
   if (!discordChannel?.isTextBased()) return false;
   const discordMessage = await (discordChannel as TextChannel).messages.fetch(link.discordMessageId);
-  await discordMessage.edit({ content: `${link.discordPrefix}${watermarked}` });
+  await discordMessage.edit({
+    content: `${link.discordPrefix}${watermarked}`,
+    allowedMentions: outboundAllowedMentions(safeContent),
+  });
   return true;
 }
 
@@ -733,6 +760,9 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
   discordClient.on('emojiCreate', invalidate);
   discordClient.on('emojiDelete', invalidate);
   discordClient.on('emojiUpdate', invalidate);
+  discordClient.on('roleCreate', invalidateMentionableRolesCache);
+  discordClient.on('roleDelete', invalidateMentionableRolesCache);
+  discordClient.on('roleUpdate', invalidateMentionableRolesCache);
 
   discordClient.once('ready', () => {
     discordStatus = 'connected';
@@ -1345,7 +1375,10 @@ async function relayToDiscord(channelId: string, username: string, content: stri
     const watermarked = safeContent.length > 0 ? safeContent + ZWS : safeContent;
     const discordPrefix = cardMessage ? '' : buildDiscordRelayPrefix(channelName, username, authorCosmetics?.badges);
     const formatted = `${discordPrefix}${watermarked}`;
-    const outboundMessage = cardMessage ?? formatted;
+    const outboundMessage: string | MessageCreateOptions = cardMessage ?? {
+      content: formatted,
+      allowedMentions: outboundAllowedMentions(safeContent),
+    } satisfies MessageCreateOptions;
 
     const mappings = await loadRelayMappings();
     let sent = false;
@@ -1411,12 +1444,12 @@ const UPDATES_CHANNEL_ID = process.env.DISCORD_UPDATES_CHANNEL_ID || '1479531502
 async function postReleaseAnnouncement(
   version: string,
   releaseNotes: string,
-  hudMod?: HudModDownload,
-  options: { mentionEveryone?: boolean; suppressNotifications?: boolean } = {},
+  hudMod: HudModDownload | undefined,
+  options: { target: ReleaseTarget; suppressNotifications?: boolean },
 ): Promise<void> {
   const attemptDelays = [0, 500, 1500, 3000, 5000]; // 5 tries, ~10s total
   let lastErr: unknown = null;
-  const mentionEveryone = options.mentionEveryone ?? true;
+  const target = options.target;
   const suppressNotifications = options.suppressNotifications ?? false;
 
   for (let i = 0; i < attemptDelays.length; i++) {
@@ -1432,21 +1465,24 @@ async function postReleaseAnnouncement(
         throw new Error(`Updates channel ${UPDATES_CHANNEL_ID} is not a text channel`);
       }
       const embed = new EmbedBuilder()
-        .setTitle(`Fallout Chat Mod v${version} is out`)
+        .setTitle(releaseAnnouncementTitle(version, target, hudMod))
         .setURL(downloadPageUrl())
         .setColor(0xF1C40F) // gold/yellow — matches the Securitron role color
         .setDescription((releaseNotes || 'A new version is available.').slice(0, 4000))
         .addFields(
-          { name: '📥 Download', value: releaseDownloadFieldValue(version, hudMod) },
+          { name: '📥 Download', value: releaseDownloadFieldValue(version, target, hudMod) },
           { name: '❤️ Endorse on Nexus', value: nexusEndorseFieldValue() },
         )
         .setTimestamp(new Date());
       const message = {
         embeds: [embed],
-        ...releaseAnnouncementMessage(mentionEveryone, suppressNotifications),
+        ...releaseAnnouncementMessage(target, {
+          overlayRoleId: env.OVERLAY_UPDATE_NOTIFICATION_ROLE_ID,
+          hudRoleId: env.HUD_MOD_UPDATE_NOTIFICATION_ROLE_ID,
+        }, suppressNotifications),
       } satisfies MessageCreateOptions;
       await (channel as TextChannel).send(message);
-      logger.info({ version, channelId: UPDATES_CHANNEL_ID, attempt: i + 1, mentionEveryone, suppressNotifications }, 'Posted release announcement to Discord');
+      logger.info({ version, target, channelId: UPDATES_CHANNEL_ID, attempt: i + 1, suppressNotifications }, 'Posted release announcement to Discord');
       return; // success
     } catch (err) {
       lastErr = err;
@@ -1563,6 +1599,34 @@ async function listAssignableRoles(): Promise<Array<{ id: string; name: string; 
     logger.warn({ err }, 'Failed to list assignable Discord roles');
     return [];
   }
+}
+
+function invalidateMentionableRolesCache(): void {
+  mentionableRolesCache = null;
+  mentionableRolesCacheExpiresAt = 0;
+}
+
+async function getMentionableRoles(): Promise<Array<{ id: string; name: string }>> {
+  if (mentionableRolesCache && mentionableRolesCacheExpiresAt > Date.now()) {
+    return mentionableRolesCache;
+  }
+  if (!mentionableRolesPromise) {
+    mentionableRolesPromise = listAssignableRoles()
+      .then((roles) => roles.map(({ id, name }) => ({ id, name })))
+      .catch((err) => {
+        logger.warn({ err }, 'Failed to resolve mentionable Discord roles');
+        return [];
+      })
+      .then((roles) => {
+        mentionableRolesCache = roles;
+        mentionableRolesCacheExpiresAt = Date.now() + MENTIONABLE_ROLE_CACHE_TTL_MS;
+        return roles;
+      })
+      .finally(() => {
+        mentionableRolesPromise = null;
+      });
+  }
+  return mentionableRolesPromise;
 }
 
 /** List the bot's text channels in the configured guild, for the dashboard picker. */
