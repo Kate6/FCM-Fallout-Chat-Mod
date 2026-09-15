@@ -278,6 +278,33 @@ const authLimiter = rateLimit({
 });
 
 /**
+ * Remote MCP OAuth is a four-request authorization-code flow (authorize,
+ * Discord callback, consent, token) followed by periodic refreshes. Keeping
+ * those requests in the general auth bucket made five retries exhaust the
+ * entire 20-request login allowance. This dedicated bucket remains bounded
+ * per IP while leaving enough room for complete flows and token rotation.
+ */
+function mcpOAuthLimitCap(req: any): number {
+  return devCap(req, 120, 500);
+}
+
+const mcpOAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: mcpOAuthLimitCap,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: ipKey,
+  skip: devBypassSkip,
+  store: makeFailoverRedisStore('rl_mcp_oauth:'),
+  message: {
+    type: 'https://fo76chat.app/errors/429',
+    title: 'Too Many Requests',
+    status: 429,
+    detail: 'Too many MCP authorization attempts. Please wait before retrying.',
+  },
+});
+
+/**
  * Limiter for `/api/debug/overlay-report`: 10 req / min per IP. The endpoint is
  * authed via `X-App-Client-Key` but the key ships in every installed overlay,
  * so we still need a per-IP cap to prevent abusive clients from flooding Redis
@@ -590,5 +617,5 @@ const cosmeticsAppearanceLimiter = rateLimit({
 
 // ipKey is exported for unit testing: it encodes the security invariant that a
 // bucket key is ALWAYS the client IP and never the spoofable x-auth-token header.
-export { ipKey, apiLimitCap, cosmeticsAppearanceCap, apiLimiter, authLimiter, debugReportLimiter, registerLimiter, registerIpFloodLimiter, playerListLimiter, channelsLimiter, applicationsLimiter, partiesListLimiter, partyCreateLimiter, partyJoinLimiter, partyInviteLimiter, partyImageUploadLimiter, wikiSearchLimiter, campSearchLimiter, hudFeedLimiter, cosmeticsWriteLimiter, cosmeticsAppearanceLimiter };
-module.exports = { ipKey, apiLimitCap, cosmeticsAppearanceCap, apiLimiter, authLimiter, debugReportLimiter, registerLimiter, registerIpFloodLimiter, playerListLimiter, channelsLimiter, applicationsLimiter, partiesListLimiter, partyCreateLimiter, partyJoinLimiter, partyInviteLimiter, partyImageUploadLimiter, wikiSearchLimiter, campSearchLimiter, hudFeedLimiter, cosmeticsWriteLimiter, cosmeticsAppearanceLimiter };
+export { ipKey, apiLimitCap, cosmeticsAppearanceCap, mcpOAuthLimitCap, apiLimiter, authLimiter, mcpOAuthLimiter, debugReportLimiter, registerLimiter, registerIpFloodLimiter, playerListLimiter, channelsLimiter, applicationsLimiter, partiesListLimiter, partyCreateLimiter, partyJoinLimiter, partyInviteLimiter, partyImageUploadLimiter, wikiSearchLimiter, campSearchLimiter, hudFeedLimiter, cosmeticsWriteLimiter, cosmeticsAppearanceLimiter };
+module.exports = { ipKey, apiLimitCap, cosmeticsAppearanceCap, mcpOAuthLimitCap, apiLimiter, authLimiter, mcpOAuthLimiter, debugReportLimiter, registerLimiter, registerIpFloodLimiter, playerListLimiter, channelsLimiter, applicationsLimiter, partiesListLimiter, partyCreateLimiter, partyJoinLimiter, partyInviteLimiter, partyImageUploadLimiter, wikiSearchLimiter, campSearchLimiter, hudFeedLimiter, cosmeticsWriteLimiter, cosmeticsAppearanceLimiter };

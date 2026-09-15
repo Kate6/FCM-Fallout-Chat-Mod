@@ -14,7 +14,7 @@ const mockRegister = jest.fn(async body => { if (Object.prototype.hasOwnProperty
 const mockResolveClient = jest.fn(async () => clients);
 
 jest.mock('../src/config/redis', () => ({ getRedisClient: async () => redis }));
-jest.mock('../src/middleware/rateLimiter', () => ({ authLimiter: (_req, _res, next) => next() }));
+jest.mock('../src/middleware/rateLimiter', () => ({ mcpOAuthLimiter: (_req, _res, next) => next() }));
 jest.mock('../src/services/mcpAuthorizationService', () => ({ MCP_SCOPES: ['fcm:read', 'fcm:discord:write', 'fcm:moderation:write'], McpOAuthError: class McpOAuthError extends Error { constructor(code, message) { super(message); this.code = code; } }, mcpAuthorizationService: authz }));
 jest.mock('../src/services/mcpClientMetadataService', () => ({
   McpClientMetadataError: class extends Error {},
@@ -100,6 +100,8 @@ describe('MCP OAuth HTTP routes', () => {
     global.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: 'discord-token' }) }).mockResolvedValueOnce({ ok: true, json: async () => ({ id: '123456789012345678' }) });
     const callback = await agent.get('/oauth/discord/callback').query({ code: 'discord-code', state: oauthState });
     expect(callback.status).toBe(200); expect(callback.text).toContain('Authorize Claude');
+    expect(callback.text).toContain('type="hidden" name="decision" value="approve"');
+    expect(callback.text).toContain('type="submit" value="Authorize"');
     expect((await agent.get('/oauth/discord/callback').query({ code: 'discord-code', state: oauthState })).status).toBe(403);
     const consentToken = callback.text.match(/name="consent_token" value="([^"]+)"/)[1];
     const consent = await agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' });

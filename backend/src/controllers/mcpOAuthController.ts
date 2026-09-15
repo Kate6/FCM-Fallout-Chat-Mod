@@ -121,7 +121,7 @@ export async function discordCallback(req: Request, res: Response) {
     const name = escapeHtml(metadata.client_name || pending.clientId);
     const scopeFields = pending.scopes.map(scope => `<li>${escapeHtml(scope)}</li>`).join('');
     recordMcpMetric('oauth', { outcome: 'success' });
-    res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><title>Authorize FCM MCP</title></head><body><main><h1>Authorize ${name}</h1><p>Signed in as an authorized ${role.role}.</p><ul>${scopeFields}</ul><form method="post" action="/oauth/authorize/consent"><input type="hidden" name="consent_token" value="${consent}"><button name="decision" value="approve">Authorize</button><button name="decision" value="deny">Deny</button></form></main></body></html>`);
+    res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><title>Authorize FCM MCP</title></head><body><main><h1>Authorize ${name}</h1><p>Signed in as an authorized ${role.role}.</p><ul>${scopeFields}</ul><form method="post" action="/oauth/authorize/consent"><input type="hidden" name="consent_token" value="${consent}"><input type="hidden" name="decision" value="approve"><input type="submit" value="Authorize"></form><form method="post" action="/oauth/authorize/consent"><input type="hidden" name="consent_token" value="${consent}"><input type="hidden" name="decision" value="deny"><input type="submit" value="Deny"></form></main></body></html>`);
   } catch (error) {
     const message = 'Authorization is temporarily unavailable'; logger.error({ ...logContext(req, error), route: 'oauth/discord/callback' }, 'Discord OAuth callback failed');
     if (pending) redirectOAuthError(res, pending.redirectUri, pending.clientState, 'access_denied', message);

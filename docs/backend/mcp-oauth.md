@@ -46,6 +46,8 @@ Token, revocation, and consent endpoints accept only `application/x-www-form-url
 
 Consent decisions are bound once and expire with the five-minute consent window. Repeated submissions of the same decision are idempotent: concurrent or duplicate approvals return the same HMAC-derived, one-time authorization code while the database stores only its hash. A conflicting approve/deny replay is rejected. This prevents duplicate browser form submissions from replacing a successful localhost callback with an error response.
 
+The consent page uses explicit native submit inputs for approve and deny, with the decision carried as a hidden field. Remote MCP OAuth endpoints use a dedicated, failover-backed per-IP allowance of 120 requests per 15 minutes because one authorization-code flow spans four requests and refresh rotation must not consume the general website-login bucket.
+
 ## Audit and operational monitoring
 
 Every MCP mutation creates a durable audit intent before any side effect and uses that row ID as its correlation ID. Final records include the bounded target, tool/action, client ID, actor Discord ID, grant, outcome (`success`, `failure`, or `partial`), and elapsed time. MCP responses expose `X-Correlation-ID`; a client-supplied value is accepted only when it is a valid UUID.

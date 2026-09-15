@@ -18,7 +18,7 @@ jest.mock('../src/config/logger', () => {
   return { __esModule: true, default: log, ...log };
 });
 
-const { apiLimitCap, cosmeticsAppearanceCap, ipKey } = require('../src/middleware/rateLimiter');
+const { apiLimitCap, cosmeticsAppearanceCap, ipKey, mcpOAuthLimitCap } = require('../src/middleware/rateLimiter');
 
 // Minimal express-like req. No proxy headers, so clientIp() resolves to the TCP
 // peer (socket.remoteAddress) regardless of the TRUST_PROXY setting.
@@ -67,5 +67,10 @@ describe('picker allowances', () => {
     expect(apiLimitCap(makeReq({ token: 'session' }))).toBe(100);
     expect(apiLimitCap(makeReq({ token: 'session', overlayDev: true }))).toBe(500);
     expect(apiLimitCap(makeReq({ overlayDev: true }))).toBe(1000);
+  });
+
+  it('allows complete MCP OAuth flows and refreshes in a separate bounded bucket', () => {
+    expect(mcpOAuthLimitCap(makeReq())).toBe(120);
+    expect(mcpOAuthLimitCap(makeReq({ overlayDev: true }))).toBe(500);
   });
 });
