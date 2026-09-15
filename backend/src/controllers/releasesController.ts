@@ -76,18 +76,21 @@ const releaseBodySchema = z.object({
       message: 'hudModUrl must be an https URL on the configured downloads host (/downloads/...)',
     })
     .optional(),
-  // When false, skip the Discord @everyone announcement for THIS publish (e.g. a
-  // code-signing-only release where pinging everyone is noise). Defaults to true —
-  // normal releases always announce. The site download + in-app update notification
-  // still update; the operator edits the existing announcement by hand.
+  // The release operator must deliberately choose which client surfaces changed.
+  // This controls both the Discord title and the opt-in notification roles.
+  releaseTarget: z.enum(['overlay', 'hud', 'both']),
+  // When false, skip the Discord announcement for THIS publish. The site download
+  // and in-app update notification still update.
   announce: z.boolean().optional().default(true),
-  // When false, post the release embed without a channel-wide @everyone mention.
-  // This is useful for corrected follow-up notes while retaining the announcement.
-  mentionEveryone: z.boolean().optional().default(true),
   suppressNotifications: z.boolean().optional().default(false),
 }).refine(
   (value) => Boolean(value.hudModVersion) === Boolean(value.hudModUrl),
   { message: 'hudModVersion and hudModUrl must be provided together' },
+).refine(
+  (value) => value.releaseTarget === 'overlay'
+    ? !value.hudModUrl
+    : Boolean(value.hudModUrl),
+  { message: 'overlay releases must omit HUD metadata; hud and both releases require hudModVersion and hudModUrl' },
 );
 
 function toEntry(r: {
@@ -161,7 +164,7 @@ async function publishRelease(req: Request, res: Response, next: NextFunction): 
       return next(createError(400, detail));
     }
 
-    const { version, downloadUrl, releaseNotes, announce, mentionEveryone, suppressNotifications, hudModUrl, hudModVersion } = parsed.data;
+    const { version, downloadUrl, releaseNotes, releaseTarget, announce, suppressNotifications, hudModUrl, hudModVersion } = parsed.data;
     const publishedAt = new Date();
 
     // Pipeline gate: verify all five overlay artifacts and, when supplied, the
@@ -199,14 +202,14 @@ async function publishRelease(req: Request, res: Response, next: NextFunction): 
     // cannot get out (with retries), the publish fails and no DB row is created.
     //
     // `announce: false` opts out (a quiet publish): the site download + in-app
-    // update notification still update below, but no @everyone post fires — the
+    // update notification still update below, but no Discord post fires — the
     // operator edits the existing announcement by hand.
     if (announce) {
       try {
         if (hudModUrl && hudModVersion) {
-          await postReleaseAnnouncement(version, releaseNotes, { url: hudModUrl, version: hudModVersion }, { mentionEveryone, suppressNotifications });
+          await postReleaseAnnouncement(version, releaseNotes, { url: hudModUrl, version: hudModVersion }, { target: releaseTarget, suppressNotifications });
         } else {
-          await postReleaseAnnouncement(version, releaseNotes, undefined, { mentionEveryone, suppressNotifications });
+          await postReleaseAnnouncement(version, releaseNotes, undefined, { target: releaseTarget, suppressNotifications });
         }
       } catch (e: any) {
         return next(createError(
@@ -239,7 +242,10 @@ async function publishRelease(req: Request, res: Response, next: NextFunction): 
     await createGitHubRelease(
       version,
       releaseNotes,
-      hudModUrl && hudModVersion ? { hudMod: { url: hudModUrl, version: hudModVersion } } : {},
+      {
+        target: releaseTarget,
+        ...(hudModUrl && hudModVersion ? { hudMod: { url: hudModUrl, version: hudModVersion } } : {}),
+      },
     );
 
     res.json({ data: { message: `Release v${version} published`, ...toEntry(saved) } });

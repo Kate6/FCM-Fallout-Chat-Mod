@@ -57,6 +57,8 @@ export const HUD_ROLE_REFRESH_INTERVAL_MS = 60 * 1000;
 const HUD_ROLE_REFRESH_LOCK_TTL_SECONDS = Math.ceil(HUD_ROLE_REFRESH_INTERVAL_MS / 1000);
 const HUD_ROLE_REFRESH_LOCK_KEY_PREFIX = 'supporter:hud-role-refresh';
 const MAX_HUD_ROLE_REFRESH_ENTRIES = 4096;
+/** Never user-controlled: appended only from Discord's GuildMember.premiumSince. */
+const ACTIVE_SERVER_BOOSTER_MARKER = '__fcm_active_server_booster__';
 
 let clientRef: Client | null = null;
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
@@ -125,7 +127,26 @@ async function defaultFetchHudMemberRoles(discordId: string): Promise<readonly s
   if (!clientRef || !env.DISCORD_SERVER_ID) return null;
   const guild = await clientRef.guilds.fetch(env.DISCORD_SERVER_ID);
   const member = await guild.members.fetch(discordId);
-  return [...member.roles.cache.keys()];
+  return rolesForMember(member);
+}
+
+/**
+ * Discord may not expose a configurable managed Booster role for a guild, so use
+ * the member's authoritative premiumSince status rather than a role name/ID.
+ */
+function rolesForMember(member: GuildMember | PartialGuildMember): readonly string[] {
+  return roleIdsWithBoostStatus(
+    [...(member.roles?.cache?.keys() ?? [])] as string[],
+    member.premiumSince,
+  );
+}
+
+/** Pure projection used by every Discord-member path and its regression tests. */
+export function roleIdsWithBoostStatus(
+  roleIds: readonly string[],
+  premiumSince: Date | null,
+): readonly string[] {
+  return premiumSince ? [...roleIds, ACTIVE_SERVER_BOOSTER_MARKER] : [...roleIds];
 }
 
 function isMissingGuildMember(err: unknown): boolean {
@@ -325,8 +346,8 @@ async function onGuildMemberUpdate(
     if (!configured()) return;
     if (env.DISCORD_SERVER_ID && newMember.guild?.id !== env.DISCORD_SERVER_ID) return;
 
-    const before = [...(oldMember.roles?.cache?.keys() ?? [])] as string[];
-    const after = [...(newMember.roles?.cache?.keys() ?? [])] as string[];
+    const before = rolesForMember(oldMember);
+    const after = rolesForMember(newMember);
 
     // Only act when the TIER actually changed. GuildMemberUpdate fires for nickname
     // edits, timeouts, avatar changes and every other role — without this guard a
@@ -455,7 +476,7 @@ async function defaultFetchMembers(): Promise<Map<string, readonly string[]>> {
   const cosmeticsRoleIds = tierRoleIds();
 
   for (const [id, member] of members) {
-    const roles = [...member.roles.cache.keys()];
+    const roles = rolesForMember(member);
     // Only carry members who hold a paid tier or admin cosmetics role — the map is
     // then small regardless of guild size, and the lapse pass below treats
     // "absent" as "no longer entitled".
@@ -511,6 +532,7 @@ export default {
   refreshSupporterFromDiscord,
   refreshSupporterFromHudSend,
   resetHudRoleRefreshState,
+  roleIdsWithBoostStatus,
 };
 module.exports = {
   register,
@@ -519,5 +541,6 @@ module.exports = {
   refreshSupporterFromDiscord,
   refreshSupporterFromHudSend,
   resetHudRoleRefreshState,
+  roleIdsWithBoostStatus,
 };
 module.exports.default = module.exports;

@@ -30,6 +30,6 @@ extender/version, HUD version, retained message count, and the provider log.
 Scope: no desktop overlay installer, portable executable, AppImage, `.deb`, desktop version, or
 desktop download is replaced by this HUD-only release.
 
-Discord announcement setting: send the Updates-channel bot post with `mentionEveryone: true` and
-`suppressNotifications: true`. This keeps the visible `@everyone` mention while suppressing push
-notifications for the announcement.
+Discord announcement setting: use `releaseTarget: "hud"` and
+`suppressNotifications: true`. This keeps the visible HUD Mod update-role mention
+while suppressing push notifications; release notices never use `@everyone`.

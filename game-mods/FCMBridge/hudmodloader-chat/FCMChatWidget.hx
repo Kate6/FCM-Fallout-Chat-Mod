@@ -77,7 +77,7 @@ class FCMChatWidget extends MovieClip {
     // 2.10.0 is the first build that reports clientVersion to the relay. The relay
     // treats "no version reported" as "oldest possible client" and gates any new wire
     // field on this, so the version bump IS the capability signal.
-    static inline var VERSION:String  = "2.10.93"; // Terminal history marker + 16-event ZFE startup drain
+    static inline var VERSION:String  = "2.10.96"; // Physical-key rebinds across ZFE and xScal
     static inline var SETTINGS_PATH:String = "settings.ini";
     // This is a top-level ZFE command, not a relay operation. ZFE owns the DPAPI/local auth file
     // and must clear it; the SWF is not allowed to write arbitrary files from the HUD domain.
@@ -786,6 +786,7 @@ class FCMChatWidget extends MovieClip {
             runAfterConfigSafely();
         }
     }
+
 
     function onConfigIoError(e:IOErrorEvent):Void {
         if (_disposed) return;
@@ -3211,6 +3212,11 @@ class FCMChatWidget extends MovieClip {
             setLogText(linkHint());
             return;
         }
+        if (!_api.supportsNonBlockingSend()) {
+            setLogText("Sending is disabled: update ZFE for safe async chat.");
+            zfeLog("warn", "send", "blocked synchronous provider send to protect the game UI thread");
+            return;
+        }
 
         if (raw.length > _cfg.maxSendLen) raw = raw.substr(0, _cfg.maxSendLen);
         raw = fcmClean(raw);
@@ -3979,7 +3985,7 @@ class FCMChatWidget extends MovieClip {
      * Register and poll the physical keys that HUDModLoader may collapse to
      * "Unmapped". xScal documents this as Input.RegisterKey/IsKeyPressed, and
      * current ZFE builds expose the same compatibility surface on the generic
-     * bridge. xScal additionally polls the configured FCMChat.ini openKey here.
+     * bridge. Both providers poll the configured FCMChat.ini openKey here.
      * Registration does not consume a key or lock Fallout controls.
      */
     function startPhysicalNavigation():Void {
@@ -3994,17 +4000,21 @@ class FCMChatWidget extends MovieClip {
             return;
         }
 
-        // Page keys remain the physical fallback for channel actions. Feed keys are
-        // configured below; scroll-to-bottom is intentionally absent unless the user
-        // selected a physical token in FCMChat.ini.
-        var keyCodes:Array<Int> = [VK_PAGEUP, VK_PAGEDOWN, VK_UP, VK_DOWN];
-        for (token in [_cfg.scrollUpKey, _cfg.scrollDownKey, _cfg.scrollBottomKey,
+        // Register exactly the active profile. stopPhysicalNavigation() releases every
+        // previous registration before this set is installed, so a changed binding cannot
+        // remain live through the provider-level physical fallback.
+        var keyCodes:Array<Int> = [];
+        for (token in [_cfg.channelNextKey, _cfg.channelPrevKey,
+                _cfg.scrollUpKey, _cfg.scrollDownKey, _cfg.scrollBottomKey,
                 _cfg.activateLinkKey, _cfg.hideKey]) {
             var configuredCode:Int = FcmCommand.virtualKeyCode(token);
             if (configuredCode > 0 && keyCodes.indexOf(configuredCode) < 0) keyCodes.push(configuredCode);
         }
-        _physicalOpenKey = _api.provider == FcmNativeApi.XSCAL
-            ? FcmCommand.virtualKeyCode(_cfg.openKey) : 0;
+        // ZFE's native OpenChatKey vocabulary is narrower than Input.* (for example,
+        // updateChatHotkey rejects F12). Register the configured open key through the
+        // shared physical surface for both providers; ZFE's native watcher remains a
+        // compatibility fallback for the named tokens it accepts.
+        _physicalOpenKey = FcmCommand.virtualKeyCode(_cfg.openKey);
         _physicalOpenKeyDown = false;
         if (_physicalOpenKey > 0 && keyCodes.indexOf(_physicalOpenKey) < 0) {
             keyCodes.push(_physicalOpenKey);
@@ -4063,7 +4073,7 @@ class FCMChatWidget extends MovieClip {
         _physicalNavStep = "input-owner";
         releaseInputForPipboy();
         if (_disposed || !_physicalNavReady || _api == null) return;
-        if (_api.provider == FcmNativeApi.XSCAL && _physicalOpenKey > 0
+        if (_physicalOpenKey > 0
                 && _physicalNavRegistered.indexOf(_physicalOpenKey) >= 0) {
             _physicalNavStep = "read-open-key-" + _physicalOpenKey;
             var openDown:Bool = _api.isPhysicalKeyPressed(_physicalOpenKey);
@@ -4077,13 +4087,17 @@ class FCMChatWidget extends MovieClip {
             }
         }
         for (keyCode in _physicalNavRegistered) {
-            if (_api.provider == FcmNativeApi.XSCAL && keyCode == _physicalOpenKey) continue;
+            if (keyCode == _physicalOpenKey) continue;
             // Page keys switch channels in either state. Configured feed keys remain ordinary
             // game controls until the player has opened the editor with Insert.
             var isPhysicalHide:Bool = FcmCommand.virtualKeyCode(_cfg.hideKey) == keyCode;
             var isPhysicalLink:Bool = FcmCommand.virtualKeyCode(_cfg.activateLinkKey) == keyCode;
-            var action:String = isPhysicalHide ? _cfg.hideKey : isPhysicalLink ? _cfg.activateLinkKey : FcmCommand.physicalNavigationAction(keyCode,
-                _cfg.scrollUpKey, _cfg.scrollDownKey, _cfg.scrollBottomKey);
+            var action:String = isPhysicalHide ? _cfg.hideKey
+                : isPhysicalLink ? _cfg.activateLinkKey
+                : FcmCommand.virtualKeyCode(_cfg.channelNextKey) == keyCode ? _cfg.channelNextKey
+                : FcmCommand.virtualKeyCode(_cfg.channelPrevKey) == keyCode ? _cfg.channelPrevKey
+                : FcmCommand.physicalNavigationAction(keyCode,
+                    _cfg.scrollUpKey, _cfg.scrollDownKey, _cfg.scrollBottomKey);
             if (action.length == 0) continue;
             var command:String = FcmCommand.navigationAction(action,
                 _cfg.channelNextKey, _cfg.channelPrevKey,

@@ -178,6 +178,8 @@ services:
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET}
       DISCORD_SERVER_ID: ${DISCORD_SERVER_ID}
+      OVERLAY_UPDATE_NOTIFICATION_ROLE_ID: ${OVERLAY_UPDATE_NOTIFICATION_ROLE_ID:-}
+      HUD_MOD_UPDATE_NOTIFICATION_ROLE_ID: ${HUD_MOD_UPDATE_NOTIFICATION_ROLE_ID:-}
       DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI:-https://dev.falloutchatmod.com/auth/discord/callback}
       # Release announcement target. Code defaults DISCORD_UPDATES_CHANNEL_ID to a
       # PROD channel the dev bot can't see (Missing Access → publishRelease 502s),

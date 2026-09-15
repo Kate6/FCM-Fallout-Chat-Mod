@@ -70,6 +70,12 @@ moderation permissions, or the paid Discord subscription roles. Removing a real 
 role removes the bypass on the next gateway/reconcile/HUD refresh; Dev persona access is
 controlled by the DEV-only persona gate.
 
+An actively boosting Discord member also resolves as **Supporter (Tier 1)**. This uses
+Discord's authoritative `GuildMember.premiumSince` state rather than a custom Booster
+role name or ID, because Discord may not expose a managed Booster role for every guild.
+When Discord clears that boost state, the normal gateway/reconcile refresh lapses the
+Tier 1 privileges; it never grants moderation permissions.
+
 ### Entitlement vs privileges (#230's hard rule)
 
 - The `supporter_entitlements` row is the **entitlement**. It survives the user leaving

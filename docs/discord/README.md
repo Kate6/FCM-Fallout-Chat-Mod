@@ -180,9 +180,10 @@ Handled by the `messageCreate` listener at `discordService.ts:348`.
    the narrow exception: their public HTTPS image URL is preserved as card metadata
    (wiki maps remain the large image; other card art remains a thumbnail) rather
    than being relayed as free-form media.
-6. User (`<@id>`) and channel (`<#id>`) mentions are normalized to readable
-   `@name` / `#channel` text. Their Discord snowflakes are retained in
-   `metadata.entities`; channel entities also carry a canonical Discord URL.
+6. User (`<@id>`), role (`<@&id>`), and channel (`<#id>`) mentions are
+   normalized to readable `@name` / `@role` / `#channel` text. Their Discord
+   snowflakes are retained in `metadata.entities`; channel entities also carry a
+   canonical Discord URL.
    Identity is therefore paired by ID rather than inferred from a display name.
    Sharing a known `discord.com/events/...` URL resolves to the existing
    `scheduled_event` metadata and renders the standard event card in FCM.
@@ -213,6 +214,12 @@ has `discord_relay` enabled.
 - In-app autocomplete selections carry `{name, discordId}` and are converted to
   real `<@discordId>` Discord mentions. The same ID-backed entity is persisted
   with the FCM message so every overlay client renders the same mention label.
+- A typed `@Role Name` is resolved to an actual Discord role mention only when
+  the FCM bot can assign that role. Notification roles also accept their
+  channel-style shortcut: `@events`, `@infestations`, `@raids`, and `@trading`.
+  Raw Discord markup, managed roles, roles at or above the bot, and `@everyone`
+  / `@here` remain blocked. Discord receives an explicit allow-list containing
+  only these resolved user and role IDs.
 - A zero-width-space watermark is appended to prevent the inbound handler from
   re-relaying the message.
 - Format: `**[ChannelName]** **Username**: content`. When the server-resolved author
@@ -256,6 +263,8 @@ discordClient created (intents + partials)
 | `DISCORD_BOT_COMMANDS_CHANNEL_ID` | Optional channel that maintains the compact `/help` and `/events` sticky card |
 | `DISCORD_EVENTS_CHANNEL_ID` | Existing Discord text-channel snowflake for event announcements; must belong to `DISCORD_SERVER_ID` |
 | `DISCORD_UPDATES_CHANNEL_ID` | Release announcement channel (default `1479531502567166066`) |
+| `OVERLAY_UPDATE_NOTIFICATION_ROLE_ID` | Opt-in role pinged only for Overlay and combined releases |
+| `HUD_MOD_UPDATE_NOTIFICATION_ROLE_ID` | Opt-in role pinged only for HUD Mod and combined releases |
 | `DOWNLOAD_PAGE_URL` | Release embed/download-page URL; dev overrides this to `https://dev.falloutchatmod.com` |
 | `RELEASE_DOWNLOAD_HOST` | Host for release artifact links; prod defaults to `falloutchatmod.com`, dev uses `dev.falloutchatmod.com` |
 

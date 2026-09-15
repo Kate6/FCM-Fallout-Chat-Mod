@@ -2031,14 +2031,54 @@ type Part = {
   text: string;
   kind: 'plain' | 'mention' | 'url' | 'emoji' | 'channel';
   url?: string;
+  /** Alternate Discord media host used after a CDN image load failure. */
+  fallbackUrl?: string;
   discordId?: string;
   /** For emoji kind: the name portion of <:name:id> */
   emojiName?: string;
 };
 
+/**
+ * Return two equivalent Discord CDN URLs for a custom emoji. The public
+ * website renders the emoji itself rather than handing the token to Discord,
+ * so a transient failure on cdn.discordapp.com would otherwise leave a broken
+ * image icon in the chat feed. media.discordapp.net is Discord's separate
+ * media edge and gives browsers a safe retry path without proxying user
+ * content through FCM.
+ */
+export function discordEmojiAssetUrls(id: string, animated: boolean): { primary: string; fallback: string } {
+  const extension = animated ? 'webp?animated=true' : 'png';
+  return {
+    primary: `https://cdn.discordapp.com/emojis/${id}.${extension}`,
+    fallback: `https://media.discordapp.net/emojis/${id}.${extension}`,
+  };
+}
+
+function InlineDiscordEmoji({ name, primaryUrl, fallbackUrl }: {
+  name: string;
+  primaryUrl: string;
+  fallbackUrl: string;
+}) {
+  const [source, setSource] = useState<'primary' | 'fallback' | 'label'>('primary');
+  const label = `:${name}:`;
+  if (source === 'label') return <span title={label} aria-label={label}>{label}</span>;
+  return (
+    <img
+      src={source === 'primary' ? primaryUrl : fallbackUrl}
+      alt={label}
+      title={label}
+      onError={() => setSource(current => current === 'primary' ? 'fallback' : 'label')}
+      // display:inline overrides Tailwind v4 preflight `img { display:block }` so
+      // the emoji stays on the same line as surrounding text.
+      style={{ display: 'inline', height: 20, verticalAlign: 'middle', marginInline: 1 }}
+    />
+  );
+}
+
 /** Split content into plain / @mention / url / emoji segments so each can render its own way. */
 type ChatEntity =
   | { type: 'user'; discordId: string; label: string }
+  | { type: 'role'; discordId: string; label: string }
   | { type: 'channel'; discordId: string; label: string; url: string };
 
 export function chatEntities(metadata: ChatMessageMetadata): ChatEntity[] {
@@ -2049,22 +2089,23 @@ export function chatEntities(metadata: ChatMessageMetadata): ChatEntity[] {
     if (!/^\d{16,22}$/.test(typeof entity.discordId === 'string' ? entity.discordId : '')) return false;
     if (typeof entity.label !== 'string' || entity.label.length === 0 || entity.label.length > 100) return false;
     return entity.type === 'user'
+      || entity.type === 'role'
       || (entity.type === 'channel' && typeof entity.url === 'string' && /^https:\/\/discord(?:app)?\.com\/channels\//i.test(entity.url));
   });
 }
 
 export function splitParts(content: string, entities: readonly ChatEntity[] = []): Part[] {
-  type Span = { start: number; end: number; kind: 'mention' | 'url' | 'emoji' | 'channel'; url?: string; emojiName?: string; discordId?: string; priority?: number };
+  type Span = { start: number; end: number; kind: 'mention' | 'url' | 'emoji' | 'channel'; url?: string; fallbackUrl?: string; emojiName?: string; discordId?: string; priority?: number };
   const spans: Span[] = [];
   for (const entity of entities) {
-    const token = `${entity.type === 'user' ? '@' : '#'}${entity.label}`;
+    const token = `${entity.type === 'channel' ? '#' : '@'}${entity.label}`;
     let from = 0;
     while (from < content.length) {
       const start = content.indexOf(token, from);
       if (start < 0) break;
       spans.push({
         start, end: start + token.length,
-        kind: entity.type === 'user' ? 'mention' : 'channel',
+        kind: entity.type === 'channel' ? 'channel' : 'mention',
         discordId: entity.discordId,
         url: entity.type === 'channel' ? entity.url : undefined,
         priority: 1,
@@ -2082,14 +2123,13 @@ export function splitParts(content: string, entities: readonly ChatEntity[] = []
     const id = m[3];
     // Animated emojis: use .webp?animated=true, not .gif — emojis uploaded as
     // animated WebP/APNG 415 on the .gif rendition. WebP animates in <img>.
-    const url = animated
-      ? `https://cdn.discordapp.com/emojis/${id}.webp?animated=true`
-      : `https://cdn.discordapp.com/emojis/${id}.png`;
+    const urls = discordEmojiAssetUrls(id, animated);
     spans.push({
       start: m.index ?? 0,
       end: (m.index ?? 0) + m[0].length,
       kind: 'emoji',
-      url,
+      url: urls.primary,
+      fallbackUrl: urls.fallback,
       emojiName: name,
     });
   }
@@ -5201,7 +5241,7 @@ export default function ChatOverlay() {
                 return;
               }
               if (frame.type === 'hud:open-url') {
-                const hudUrl = hudOpenUrlFromFrame(frame, overlayShell);
+                const hudUrl = hudOpenUrlFromFrame(frame, Boolean(overlayShell));
                 if (hudUrl) openUrl(hudUrl);
                 return;
               }
@@ -7109,7 +7149,7 @@ export default function ChatOverlay() {
   // immediately without rebuilding this callback (and re-rendering the feed).
   const msgMentionsMe = useCallback((m: ChatMessage) =>
     m.userId !== myUserIdRef.current
-      && messageTriggersNotify(m.content, myNamesRef.current, notifyKeywordsRef.current, chatEntities(m.metadata), myDiscordIdRef.current),
+      && messageTriggersNotify(m.content, myNamesRef.current, notifyKeywordsRef.current, chatEntities(m.metadata ?? null), myDiscordIdRef.current),
   []);
   // Show the jump button only when there is at least one visible mention whose
   // message id has NOT yet been dismissed. dismissedMentionEpoch is bumped each
@@ -7339,19 +7379,8 @@ export default function ChatOverlay() {
         }
         return link;
       }
-      if (p.kind === 'emoji' && p.url) {
-        return (
-          <img
-            key={i}
-            src={p.url}
-            alt={`:${p.emojiName}:`}
-            title={`:${p.emojiName}:`}
-            // display:inline overrides Tailwind v4 preflight `img { display:block }` so
-            // the emoji stays on the same line as the username (inline flow parity with
-            // the desktop C# overlay). verticalAlign:middle centres it with the text cap.
-            style={{ display: 'inline', height: 20, verticalAlign: 'middle', marginInline: 1 }}
-          />
-        );
+      if (p.kind === 'emoji' && p.url && p.fallbackUrl && p.emojiName) {
+        return <InlineDiscordEmoji key={i} name={p.emojiName} primaryUrl={p.url} fallbackUrl={p.fallbackUrl} />;
       }
       return <React.Fragment key={i}>{p.text}</React.Fragment>;
     });

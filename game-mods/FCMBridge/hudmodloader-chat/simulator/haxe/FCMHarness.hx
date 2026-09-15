@@ -26,13 +26,6 @@ class FCMHarness extends Sprite {
         else __SFECodeObj = MockXscal.root();
         MockXscal.loadScenario("/hosted-dev-snapshot.json");
         BSUIDataManager = MockGameData.manager();
-        if (ExternalInterface.available) {
-            ExternalInterface.addCallback("simDispatch", simDispatch);
-            ExternalInterface.addCallback("simSubmit", simSubmit);
-            ExternalInterface.addCallback("simSnapshot", simSnapshot);
-            ExternalInterface.addCallback("simSetHudMode", simSetHudMode);
-            ExternalInterface.call("fcmSimLog", "SIMULATED xScal host initialized");
-        }
         // Keep the class linked so the production getDefinitionByName path resolves it.
         var sharedClass:Class<SharedHUDTools> = SharedHUDTools;
         try {
@@ -40,6 +33,13 @@ class FCMHarness extends Sprite {
             addChild(widget);
         } catch (error:Dynamic) {
             SimLog.emit("HARNESS widget construction failed: " + Std.string(error));
+        }
+        if (ExternalInterface.available) {
+            ExternalInterface.addCallback("simDispatch", simDispatch);
+            ExternalInterface.addCallback("simSubmit", simSubmit);
+            ExternalInterface.addCallback("simSnapshot", simSnapshot);
+            ExternalInterface.addCallback("simSetHudMode", simSetHudMode);
+            ExternalInterface.call("fcmSimLog", "SIMULATED xScal host initialized");
         }
     }
 

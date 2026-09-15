@@ -55,11 +55,15 @@ See the [native relay guide](native-chat-relay/README.md) for the full data path
 ### ZFE automatic roster safety (2.10.92)
 
 The visible widget fails closed on automatic Server-room roster/leave controls through ZFE. ZFE
-currently performs that relay operation synchronously on Fallout's Scaleform/UI thread; an
+older ZFE builds perform that relay operation synchronously on Fallout's Scaleform/UI thread; an
 unreachable relay was observed blocking the thread for roughly 15 seconds per attempt. Static
-community chat/history and user-initiated sends remain enabled. xScal retains Server-room binding.
+community chat/history remains enabled. xScal retains Server-room binding.
 Restore ZFE automatic binding only after its provider exposes and tests a non-blocking request
 primitive; scheduling the native call from an SWF timer does not make it asynchronous.
+
+From widget 2.10.94, ordinary ZFE sends require the runtime capability
+`zfe-chat-async-send-v1`. A ZFE build without it gets an update-required message instead of a
+potentially blocking native call. The gate uses the advertised capability, not a version string.
 
 ## Combined General feed
 
@@ -90,9 +94,11 @@ The shipped key map is `openKey=INSERT`, `channelNextKey=NextPage`, `channelPrev
 `hideKey=DELETE`. Insert opens chat by
 default; Enter sends a non-empty draft and Escape cancels. Page Up/Down switch channels while idle
 or typing. Up/Down selects a message row and paints a bounded highlight. The configured link key
-(Enter by default) opens the selected row's first validated HTTP(S) URL directly through GFx in
-the operating system's default browser. This user-initiated path does not synchronously contact
-the relay and does not require the Electron overlay. The HUD abbreviates
+(Enter by default) activates the selected row's first validated HTTP(S) URL. Ruffle verifies the
+selection and activation path, but Fallout's GFx host did not open the operating-system browser
+through `getURL` during in-game acceptance. Shipping browser launch therefore requires a future,
+sanctioned native ZFE/xScal URL-opening capability; it must not be routed through the Electron
+overlay or a synchronous relay call. The HUD abbreviates
 URLs to `host/...` but retains the full target; Discord channel entities and scheduled events carry
 their native URLs in the existing capability-gated HUD transport. The SWF gains no independent
 network transport; browser navigation is confined to already validated HTTP(S) targets.
@@ -139,6 +145,48 @@ available; migration to `hotkeys.v1.*` is not implemented in 2.10.85 and needs s
 | Feed refresh | Atomic hidden staging, six rows per timer turn | Same renderer; verified locally without recurring over-30 ms message turns |
 | Transport payload | Command plus JSON string | ActionScript object or no arguments according to method |
 | Settings persistence | ZFE vendor-scoped storage | Relay persistence only when the capability is advertised |
+
+Provider-level physical registrations are derived exclusively from the active profile. On reload
+or profile reapplication, the widget unregisters the complete previous set before registering the
+new channel, scroll, link, hide, and open-chat keys. ZFE also attempts to replace its narrower native
+open-chat watcher through `updateChatHotkey`, while generic `Input.*` handles physical tokens such as
+F-keys that the native watcher rejects. Thus a
+superseded default such as Insert or Page Down is neither dispatched nor retained as an active FCM
+binding after a successful rebind.
+
+### Verified ZFE rebind procedure
+
+In-game acceptance on 2026-09-15 with ZFE 0.12.26 and FCMChatWidget 2.10.96 confirmed the
+provider-neutral physical-key path. Exit Fallout 76, edit the existing `[FCMChat]` keys in
+`Data/FCMChat.ini`, and keep the ZFE fragment `OpenChatKey` aligned with `openKey`. Restart the game;
+the widget first attempts ZFE's native `updateChatHotkey`, then registers every mapped profile key,
+including `openKey`, through the compatibility `Input.*` surface. A native update returning `false`
+for an F-key is expected and is not fatal when physical registration succeeds. Verify `zfe.log`
+contains `FCMChatWidget 2.10.96 loaded`, one accepted registration for each expected Windows VK,
+and a `physical navigation poll started provider=zfe` line listing only the new profile. Exercise
+every action and confirm the superseded bindings are inactive. The accepted profile was F12 open,
+F8/F7 channels, F6/F5 scroll, F4 newest, F3 selected-link activation, and F2 hide.
+
+Do not validate rebinds by editing persisted appearance storage alone, and do not infer success
+from `updateChatHotkey` alone. `Data/FCMChat.ini` is authoritative; replacing the BA2 or fragment
+requires a full game restart.
+
+### Verified xScal rebind procedure
+
+In-game acceptance on 2026-09-15 with the installed xScal 0.1.15 contract and FCMChatWidget
+2.10.96 confirmed the same physical-key lifecycle. Exit Fallout 76, select the xScal extender,
+set `[Chat] enabled=true` and the intended `relayEndpoint` in the root `xscal.ini`, and edit only
+the existing `[FCMChat]` bindings in `Data/FCMChat.ini`. xScal has no `OpenChatKey` setting; do not
+copy ZFE's `[TextChat]` keys into `xscal.ini`. Restart the game and verify `xscal.log` contains the
+2.10.96 startup marker, `provider=xscal`, one accepted `Input.RegisterKey` result per new VK, and a
+physical-poll line whose `openKey` and key set match the complete replacement profile.
+
+The accepted rotated profile was F2 open, F3/F4 channels, F5/F6 scroll, F7 newest, F8 selected-link
+activation, and F12 hide. The log confirmed accepted VKs 113 through 119 plus 123, then delivered
+Dev history across 16/16/10-event polls and emitted `replay completed` with 41 retained records.
+Manual in-game testing confirmed the rotated actions worked. As with ZFE, exercise every action
+and verify superseded bindings are inactive; registration itself does not suppress an overlapping
+Fallout gameplay action.
 
 Channel and scroll bindings always come from `FCMChat.ini`. Both providers use the visible
 SharedHUDTools editor; only ZFE can use the native draft buffer as a fallback. Provider acceptance

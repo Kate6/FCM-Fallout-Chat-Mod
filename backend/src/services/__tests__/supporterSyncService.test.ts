@@ -4,10 +4,22 @@ import {
   HUD_ROLE_REFRESH_INTERVAL_MS,
   refreshSupporterFromDiscord,
   refreshSupporterFromHudSend,
+  roleIdsWithBoostStatus,
   resetHudRoleRefreshState,
   runReconcile,
 } from '../supporterSyncService';
 import { resolveSupporterTier } from '../../utils/supporterTier';
+
+test('Discord premiumSince maps an active Server Booster to Tier 1 and clears on lapse', () => {
+  const roleIds = {
+    supporterRoleId: 'ROLE_SUPPORTER',
+    overseerCircleRoleId: 'ROLE_OVERSEER',
+    adminRoleId: null,
+    serverBoosterRoleId: '__fcm_active_server_booster__',
+  };
+  assert.equal(resolveSupporterTier(roleIdsWithBoostStatus([], new Date()), roleIds), 'supporter');
+  assert.equal(resolveSupporterTier(roleIdsWithBoostStatus([], null), roleIds), 'none');
+});
 
 test('explicit account refresh restores access from either configured Discord tier role', async () => {
   const roleIds = {

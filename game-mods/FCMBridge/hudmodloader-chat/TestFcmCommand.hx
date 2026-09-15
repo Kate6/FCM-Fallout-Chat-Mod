@@ -60,6 +60,17 @@ class TestFcmCommand {
         check("built-in physical arrow remains available for default scroll",
             FcmCommand.physicalNavigationAction(0x26, "Up", "Down", "") == "ArrowUp");
         check("page down selects next channel", FcmCommand.isNextChannel("Page Down", "NextPage"));
+        check("old page-down channel key is inactive after rebind",
+            !FcmCommand.isNextChannel("PageDown", "F8"));
+        check("custom next-channel key is active after rebind",
+            FcmCommand.isNextChannel("F8", "F8"));
+        check("old page-up channel key is inactive after rebind",
+            !FcmCommand.isPreviousChannel("PageUp", "F7"));
+        check("custom previous-channel key is active after rebind",
+            FcmCommand.isPreviousChannel("F7", "F7"));
+        check("loader channel aliases retain their physical virtual keys",
+            FcmCommand.virtualKeyCode("NextPage") == 0x22
+            && FcmCommand.virtualKeyCode("PrevPage") == 0x21);
         check("page up selects previous channel", FcmCommand.isPreviousChannel("Page Up", "PrevPage"));
         check("ordinary action does not scroll", FcmCommand.scrollDirection("NextPage") == 0);
         check("custom scroll-up action rebinds from arrow", FcmCommand.scrollDirection("Console", "Console", "Down") == -1);

@@ -147,19 +147,22 @@ alphabetically. Used by the dashboard channel picker.
 Internal helper. Converts `EmbedData` to a discord.js `EmbedBuilder` with all
 Discord character limits applied.
 
-### `postReleaseAnnouncement(version, releaseNotes, hudMod?, options?)` — `discordService.ts`
+### `postReleaseAnnouncement(version, releaseNotes, hudMod?, { target, suppressNotifications? })` — `discordService.ts`
 
 Posted to the **Updates** channel (`DISCORD_UPDATES_CHANNEL_ID`) by `publishRelease`
 on every release. It is a **required** publish step — if it fails after retries the
 publish 502s and no release is recorded.
 
-- **Pings `@everyone` by default.** The message `content` is `@everyone` with
-  `allowedMentions: { parse: ['everyone'] }`; the ping only fires if the bot holds
-  **Mention Everyone** in that channel (otherwise it posts silently). Pass
-  `{ mentionEveryone: false }` for a replacement or corrected announcement that keeps
-  the embed but omits both the content and the mention permission. Pass
-  `{ mentionEveryone: true, suppressNotifications: true }` to retain the visible
-  `@everyone` mention while setting Discord's Suppress Notifications message flag.
+- **Pings only opt-in update roles.** `target` is required: `overlay` mentions
+  `OVERLAY_UPDATE_NOTIFICATION_ROLE_ID`, `hud` mentions
+  `HUD_MOD_UPDATE_NOTIFICATION_ROLE_ID`, and `both` mentions both. The message
+  uses `allowedMentions: { parse: [], roles: [...] }`; it never enables
+  `@everyone` or `@here`. Missing target role configuration fails the publish
+  before a release is recorded. `suppressNotifications: true` retains the
+  visible role mention while setting Discord's Suppress Notifications flag.
+- **Target-specific title and downloads.** The title explicitly says Overlay
+  Update, HUD Mod Update, or Overlay + HUD Mod Update. HUD-only notices omit
+  desktop-installer links; overlay-only notices omit the HUD package link.
 - **Download field** — direct 🪟 Windows ZIP / 🐧 Linux AppImage / Linux `.deb` links, the
   Linux ZIP with install docs, the Download-page link, and the versioned **FCM HUD Mod ZIP**
   link when the release includes HUD metadata.

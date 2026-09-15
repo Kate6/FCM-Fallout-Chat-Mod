@@ -32,6 +32,7 @@ const mockAutoModRuleRows = [];
 // Captures the data passed to autoModViolation.create so the engine test can assert
 // the PERSISTED message is the original (not the canon form).
 const mockViolationCreate = jest.fn().mockResolvedValue({});
+const mockPostModAlert = jest.fn().mockResolvedValue(undefined);
 
 jest.mock('../src/config/prisma', () => ({
   __esModule: true,
@@ -125,6 +126,10 @@ jest.mock('../src/services/voiceService', () => ({ default: { register: jest.fn(
 jest.mock('../src/services/reactionRoleService', () => ({ default: { register: jest.fn(), handleReactionAdd: jest.fn(), handleReactionRemove: jest.fn() } }));
 jest.mock('../src/services/ticketService', () => ({ default: { register: jest.fn(), openReportThread: jest.fn() } }));
 jest.mock('../src/services/wikiCatalogService', () => ({ getEntry: jest.fn(), bestMatch: jest.fn() }));
+jest.mock('../src/services/discordService', () => {
+  const actual = jest.requireActual('../src/services/discordService');
+  return { ...actual, postModAlert: (...args) => mockPostModAlert(...args) };
+});
 
 // ── autoModEngine action-side dependency mocks ──────────────────────────────────
 // The engine's TIMEOUT/MUTE_OVERLAY actions call muteUser, and every check is
@@ -377,9 +382,7 @@ describe('autoModEngine.engineEvaluate — canon matching, original persisted/br
     pushBlockAlertKeywordRule();
     // Spy on the REAL postModAlert to capture the ALERT embed content (broadcast
     // evidence). It is non-throwing/fire-and-forget in prod; resolve it here.
-    const alertSpy = jest
-      .spyOn(discordService, 'postModAlert')
-      .mockResolvedValue(undefined);
+    const alertSpy = mockPostModAlert;
 
     // "badword" decomposed via a combining mark on the a: ba + U+0301 + dword.
     // canon() collapses it to "badword" (matches the keyword); the raw string does
@@ -408,7 +411,6 @@ describe('autoModEngine.engineEvaluate — canon matching, original persisted/br
     expect(contentField.value).toContain(original);
     expect(contentField.value).not.toContain(canon(original) + ' for'); // canon form absent
 
-    alertSpy.mockRestore();
   });
 
   it('does NOT block clean content (no false positive through the engine)', async () => {

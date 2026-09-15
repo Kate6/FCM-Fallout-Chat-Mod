@@ -1,5 +1,18 @@
 # Archived HUD build notes
 
+## Provider physical-key rebind candidate 2.10.96
+
+- Fixes channel-next, channel-previous, and hide parsing so recognized physical tokens such as
+  F8, F7, and F2 are not silently replaced by their defaults.
+- Registers `openKey` through numeric `Input.*` for both providers. This covers ZFE F-keys when
+  its narrower native `updateChatHotkey` watcher returns false; accepted native tokens remain a
+  compatibility fallback.
+- Fresh ZFE 0.12.26 in-game acceptance on 2026-09-15 confirmed the F12/F8/F7/F6/F5/F4/F3/F2
+  profile.
+- Fresh xScal in-game acceptance on 2026-09-15 confirmed the rotated F2/F3/F4/F5/F6/F7/F8/F12
+  profile. The native log accepted all eight VKs, selected `provider=xscal`, completed Dev history
+  replay, and retained 41 records; manual testing confirmed the reassigned actions worked.
+
 ## Terminal subscribe-history candidate 2.10.93
 
 - Subscribe-time relay history ends with exactly one `FCMCTL/1/HISTORY-DONE` system frame after
