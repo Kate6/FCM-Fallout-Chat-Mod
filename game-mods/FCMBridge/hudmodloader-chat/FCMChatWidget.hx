@@ -104,7 +104,11 @@ class FCMChatWidget extends MovieClip {
     static inline var FONT_BODY:String = "Roboto Condensed Light";
     static inline var FONT_BOLD:String = "Roboto Condensed Bold";
     #else
-    static inline var FONT_BODY:String = "$MAIN_Font_Light";  // body / feed / messages / prompts / notices
+    // NOTE (Slasher/Patch 70, 2026-09-15): the repackaged fonts_en.swf no longer embeds the
+    // Roboto Condensed Light face or the $MAIN_Font_Light export, so body text rendered tofu
+    // while $MAIN_Font_Bold names/tags stayed readable. Retarget body weight to the Regular
+    // face ($MAIN_Font), which is present. Revert if a later patch restores the Light export.
+    static inline var FONT_BODY:String = "$MAIN_Font";  // body / feed / messages / prompts / notices
     static inline var FONT_BOLD:String = "$MAIN_Font_Bold";   // tab labels / headers / sender names / active-tab
     #end
     // FALLBACK (do NOT ship unless aliases tofu in-game): re-add the @:font embed and
@@ -2243,7 +2247,8 @@ class FCMChatWidget extends MovieClip {
     //
     //   1. FormatTextEdit(x,y,w,h,font,size,hexColor,bgHexColor,bgAlpha)
     //      → HUDTools stores entryFormats[VENDOR] via HUDMessageProvider IPC.
-    //      font arg is the engine body alias (FONT_BODY = $MAIN_Font_Light),
+    //      font arg is the engine body alias (FONT_BODY = $MAIN_Font; the former
+    //      $MAIN_Font_Light export is absent from post-Slasher fonts_en.swf),
     //      matching HUDTools' own entry_tf default — no embed needed.
     //
     //   2. FormatOnScreenKeyboard(oskX,oskY)

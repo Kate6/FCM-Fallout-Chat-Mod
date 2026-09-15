@@ -32,7 +32,10 @@ outline. Use text-field offsets when marker and field share a proven row coordin
 `localToGlobal`/`globalToLocal` when crossing parents. Do not add guessed scroll-line offsets.
 Account for wrapped names, reserved marker/emoji gaps, clipping, and reflow.
 
-The widget uses Fallout font aliases such as `$MAIN_Font_Light` in embedded-font mode. This is
+The widget uses Fallout font aliases such as `$MAIN_Font` (body) and `$MAIN_Font_Bold`
+(names/tags) in embedded-font mode. Body text previously used `$MAIN_Font_Light`, but the
+Slasher/Patch 70 repack dropped that export from `fonts_en.swf`, so the body weight was
+retargeted to the Regular face that ships in the current game build. This is
 project/runtime evidence, not a universal GFx alias or proof of arbitrary glyph coverage. Avoid
 introducing dynamic classes/interfaces on hot compatibility paths without target verification;
 the historical Error #1014 failures did not establish a universal ban on those language features.
