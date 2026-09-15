@@ -38,8 +38,8 @@ describe('/minerva command metadata', () => {
     ({ buildMinervaResponse } = require('../src/services/commandService'));
   });
 
-  test('includes a structured attribution link for the overlay card', () => {
-    const result = buildMinervaResponse();
+  test('includes a structured attribution link for the overlay card', async () => {
+    const result = await buildMinervaResponse();
 
     expect(result.metadata).toMatchObject({
       type: 'minerva',
