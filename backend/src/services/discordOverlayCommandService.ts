@@ -41,7 +41,6 @@ const COMMAND_NAME = 'fcm';
 const MODERATION_COMMAND = 'moderate';
 const SPECIAL_COMMANDS = new Set(['wiki', 'camp', 'minerva', 'nukecodes', 'serverstatus', 'help', 'appearance', 'events', 'giveaway', 'apply', 'keybinds']);
 const RESERVED_COMMAND_NAMES = new Set([COMMAND_NAME, MODERATION_COMMAND, 'report', ...SPECIAL_COMMANDS]);
-const CATEGORY_CHOICES = REASON_CATEGORIES.map((name) => ({ name, value: name }));
 
 type CommandContext = { channelId: string; channelName: string; parentChannelId: string | null; isLinked: boolean };
 type PrivateCommandResult = {
@@ -58,6 +57,13 @@ type OverlayCardCommandResult = {
   targetChannelId: string;
   metadata: Record<string, unknown>;
 };
+
+// Resolve this only after module initialization. moderationActionsService also
+// reaches Discord services, so evaluating its exported category constant while
+// the circular module graph is loading fails under Jest's module isolation.
+function moderationCategoryChoices() {
+  return REASON_CATEGORIES.map((name) => ({ name, value: name }));
+}
 
 /** Converts an overlay event trigger to a valid, non-reserved Discord command name. */
 export function discordEventShortcutName(trigger: string): string | null {
@@ -551,9 +557,9 @@ function buildModerationCommand() {
     .setDMPermission(false)
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
     .addSubcommand((sub) => sub.setName('kick').setDescription('Kick an FCM user for five minutes').addStringOption((opt) => opt.setName('user').setDescription('Search FCM, Discord, Steam name, or ID').setAutocomplete(true).setRequired(true)).addStringOption((opt) => opt.setName('reason').setDescription('Reason').setRequired(true)))
-    .addSubcommand((sub) => sub.setName('mute').setDescription('Mute an FCM user').addStringOption((opt) => opt.setName('user').setDescription('Search FCM, Discord, Steam name, or ID').setAutocomplete(true).setRequired(true)).addIntegerOption((opt) => opt.setName('minutes').setDescription('1–40320 minutes').setMinValue(1).setMaxValue(40_320).setRequired(true)).addStringOption((opt) => opt.setName('reason').setDescription('Reason').setRequired(true)).addStringOption((opt) => opt.setName('category').setDescription('Category').addChoices(...CATEGORY_CHOICES)))
+    .addSubcommand((sub) => sub.setName('mute').setDescription('Mute an FCM user').addStringOption((opt) => opt.setName('user').setDescription('Search FCM, Discord, Steam name, or ID').setAutocomplete(true).setRequired(true)).addIntegerOption((opt) => opt.setName('minutes').setDescription('1–40320 minutes').setMinValue(1).setMaxValue(40_320).setRequired(true)).addStringOption((opt) => opt.setName('reason').setDescription('Reason').setRequired(true)).addStringOption((opt) => opt.setName('category').setDescription('Category').addChoices(...moderationCategoryChoices())))
     .addSubcommand((sub) => sub.setName('unmute').setDescription('Unmute an FCM user').addStringOption((opt) => opt.setName('user').setDescription('Search FCM, Discord, Steam name, or ID').setAutocomplete(true).setRequired(true)).addStringOption((opt) => opt.setName('reason').setDescription('Reason')))
-    .addSubcommand((sub) => sub.setName('ban').setDescription('Ban an FCM user').addStringOption((opt) => opt.setName('user').setDescription('Search FCM, Discord, Steam name, or ID').setAutocomplete(true).setRequired(true)).addStringOption((opt) => opt.setName('reason').setDescription('Reason').setRequired(true)).addStringOption((opt) => opt.setName('evidence').setDescription('Evidence summary for the audit record').setRequired(true)).addIntegerOption((opt) => opt.setName('minutes').setDescription('Leave blank for permanent').setMinValue(1).setMaxValue(43_200)).addStringOption((opt) => opt.setName('category').setDescription('Category').addChoices(...CATEGORY_CHOICES)))
+    .addSubcommand((sub) => sub.setName('ban').setDescription('Ban an FCM user').addStringOption((opt) => opt.setName('user').setDescription('Search FCM, Discord, Steam name, or ID').setAutocomplete(true).setRequired(true)).addStringOption((opt) => opt.setName('reason').setDescription('Reason').setRequired(true)).addStringOption((opt) => opt.setName('evidence').setDescription('Evidence summary for the audit record').setRequired(true)).addIntegerOption((opt) => opt.setName('minutes').setDescription('Leave blank for permanent').setMinValue(1).setMaxValue(43_200)).addStringOption((opt) => opt.setName('category').setDescription('Category').addChoices(...moderationCategoryChoices())))
     .addSubcommand((sub) => sub.setName('unban').setDescription('Reverse a ban by FCM ban ID').addStringOption((opt) => opt.setName('ban-id').setDescription('Ban UUID').setRequired(true)).addStringOption((opt) => opt.setName('reason').setDescription('Reason')))
     .addSubcommand((sub) => sub.setName('delete-message').setDescription('Delete an FCM chat message by ID').addStringOption((opt) => opt.setName('message-id').setDescription('Message UUID').setRequired(true)).addStringOption((opt) => opt.setName('reason').setDescription('Reason')))
     .toJSON();
