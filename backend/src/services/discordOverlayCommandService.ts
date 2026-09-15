@@ -19,7 +19,7 @@ import {
 import env from '../config/environment';
 import logger from '../config/logger';
 import prisma from '../config/prisma';
-import { buildHelpResponse, getCommands, tryHandleCommand, type CommandResult } from './commandService';
+import { buildHelpResponse, getCommands, tryHandleCommand, type ChatCommand, type CommandResult } from './commandService';
 import { buildDiscordOverlayCard } from './discordOverlayCommandEmbeds';
 import { splitDiscordResponse } from '../lib/discordResponsePagination';
 import { searchEntries } from './wikiCatalogService';
@@ -40,9 +40,17 @@ import {
 const COMMAND_NAME = 'fcm';
 const MODERATION_COMMAND = 'moderate';
 const SPECIAL_COMMANDS = new Set(['wiki', 'camp', 'minerva', 'nukecodes', 'serverstatus', 'help', 'appearance', 'events', 'giveaway', 'apply', 'keybinds']);
+const RESERVED_COMMAND_NAMES = new Set([COMMAND_NAME, MODERATION_COMMAND, 'report', ...SPECIAL_COMMANDS]);
 const CATEGORY_CHOICES = REASON_CATEGORIES.map((name) => ({ name, value: name }));
 
 type CommandContext = { channelId: string; channelName: string; parentChannelId: string | null };
+
+/** Converts an overlay event trigger to a valid, non-reserved Discord command name. */
+export function discordEventShortcutName(trigger: string): string | null {
+  const name = trigger.startsWith('/') ? trigger.slice(1).toLowerCase() : '';
+  if (!/^[a-z0-9_-]{1,32}$/.test(name) || RESERVED_COMMAND_NAMES.has(name)) return null;
+  return name;
+}
 
 function clip(value: string, limit = 1_900): string {
   return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
@@ -226,7 +234,18 @@ async function handleEventsCommand(interaction: ChatInputCommandInteraction): Pr
     await interaction.reply({ content: clip(`Event commands:\n${lines.join('\n')}`), flags: MessageFlags.Ephemeral });
     return;
   }
-  const raw = requested.trim().toLowerCase();
+  await runEventCommand(interaction, requested.trim().toLowerCase(), eventCommands);
+}
+
+/**
+ * Sends a Discord event interaction through the same command and finalization
+ * pipeline used by overlay announcements, preserving the Event channel target.
+ */
+async function runEventCommand(
+  interaction: ChatInputCommandInteraction,
+  raw: string,
+  eventCommands: ChatCommand[],
+): Promise<void> {
   const trigger = raw.split(/\s+/, 1)[0];
   const configured = eventCommands.find((command) => command.trigger === trigger || command.alias === trigger);
   if (!configured) {
@@ -237,7 +256,7 @@ async function handleEventsCommand(interaction: ChatInputCommandInteraction): Pr
   if (!user) return;
   const context = mappedContext ?? { channelId: interaction.channelId, channelName: 'Discord', parentChannelId: null };
   const displayName = user.chatName ?? user.discordDisplayName ?? user.discordUsername ?? user.username;
-  const result = await tryHandleCommand(requested.trim(), user.id, displayName, context.channelId, context.channelName, null, 0, context.parentChannelId);
+  const result = await tryHandleCommand(raw, user.id, displayName, context.channelId, context.channelName, null, 0, context.parentChannelId);
   if (!result.handled || result.actionType !== 'relay') {
     await interaction.reply({ content: 'That event command could not be run.', flags: MessageFlags.Ephemeral });
     return;
@@ -484,6 +503,16 @@ function buildEventsCommand() {
     .toJSON();
 }
 
+function buildEventShortcutCommand(command: ChatCommand) {
+  const name = discordEventShortcutName(command.trigger);
+  if (!name) return null;
+  return new SlashCommandBuilder()
+    .setName(name)
+    .setDescription(command.description.slice(0, 100))
+    .setDMPermission(false)
+    .toJSON();
+}
+
 function buildModerationCommand() {
   return new SlashCommandBuilder()
     .setName(MODERATION_COMMAND)
@@ -501,6 +530,11 @@ function buildModerationCommand() {
 
 async function registerCommands(client: Client): Promise<void> {
   if (!env.DISCORD_SERVER_ID) return;
+  const eventShortcuts = [];
+  for (const eventCommand of (await getCommands()).filter((command) => command.actionType === 'announce')) {
+    const shortcut = buildEventShortcutCommand(eventCommand);
+    if (shortcut) eventShortcuts.push(shortcut);
+  }
   const commands = [
     buildOverlayCommand(),
     buildSpecialCommand('wiki', 'Look up Fallout 76 wiki data', { name: 'query', description: 'Item, creature, weapon, perk, or location', autocomplete: true }),
@@ -516,6 +550,7 @@ async function registerCommands(client: Client): Promise<void> {
     buildReportCommand(),
     buildEventsCommand(),
     buildModerationCommand(),
+    ...eventShortcuts,
   ];
   const manager = client.application?.commands;
   if (!manager) return;
@@ -546,6 +581,11 @@ async function onInteraction(interaction: Interaction): Promise<void> {
     if (interaction.commandName === MODERATION_COMMAND) await handleModeration(interaction);
     else if (interaction.commandName === 'report') await handleReportCommand(interaction);
     else if (interaction.commandName === COMMAND_NAME || SPECIAL_COMMANDS.has(interaction.commandName)) await handleOverlayCommand(interaction);
+    else {
+      const shortcut = discordEventShortcutName(`/${interaction.commandName}`);
+      if (!shortcut) return;
+      await runEventCommand(interaction, `/${shortcut}`, (await getCommands()).filter((command) => command.actionType === 'announce'));
+    }
   } catch (err) {
     logger.error({ err, command: interaction.commandName }, '[discord-overlay-commands] interaction failed');
     if (!interaction.replied) await interaction.reply({ content: 'Command failed. Please try again.', flags: MessageFlags.Ephemeral }).catch(() => {});

@@ -50,6 +50,10 @@ every currently enabled overlay command whose action is an event announcement;
 `/events command:"/ss"` runs one. The event message is finalized through the
 same relay path as the overlay, so it appears in the mapped event channel and
 in FCM history rather than merely as a Discord interaction response.
+Every enabled event announcement is also registered as its own Discord slash
+command (for example `/gu`, `/dc`, `/lits`, `/mj`, `/nw`, `/sbq`, and `/ss`).
+Those shortcuts run the exact same finalization path, so the Events channel,
+overlay, and HUD all receive the same announcement.
 
 First-class FCM slash commands can be invoked from any Discord channel where the
 bot can send messages; the invoking channel does not need an FCM relay mapping.
