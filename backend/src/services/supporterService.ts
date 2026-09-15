@@ -82,6 +82,7 @@ export function tierRoleIds() {
     supporterRoleId: env.SUPPORTER_ROLE_ID,
     overseerCircleRoleId: env.OVERSEER_CIRCLE_ROLE_ID,
     adminRoleId: env.ADMIN_ROLE_ID,
+    serverBoosterRoleId: '__fcm_active_server_booster__',
   };
 }
 

@@ -34,6 +34,17 @@ describe('resolveSupporterTier', () => {
     assert.equal(resolveSupporterTier(['ROLE_OVR'], ROLES), 'overseer');
   });
 
+  test('maps Discord-confirmed active server boosters to Supporter Tier 1', () => {
+    assert.equal(
+      resolveSupporterTier(['ACTIVE_BOOSTER'], { ...ROLES, serverBoosterRoleId: 'ACTIVE_BOOSTER' }),
+      'supporter',
+    );
+    assert.equal(
+      resolveSupporterTier(['ACTIVE_BOOSTER'], { ...ROLES, serverBoosterRoleId: '' }),
+      'none',
+    );
+  });
+
   test('highest tier wins when a member holds both', () => {
     assert.equal(resolveSupporterTier(['ROLE_SUP', 'ROLE_OVR'], ROLES), 'overseer');
     assert.equal(resolveSupporterTier(['ROLE_OVR', 'ROLE_SUP'], ROLES), 'overseer');

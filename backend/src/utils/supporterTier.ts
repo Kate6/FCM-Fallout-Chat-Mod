@@ -38,6 +38,8 @@ export interface TierRoleIds {
   overseerCircleRoleId: string | undefined | null;
   /** Staff role that receives the highest cosmetic tier without paid access. */
   adminRoleId: string | undefined | null;
+  /** Synthetic marker added only after Discord confirms an active server boost. */
+  serverBoosterRoleId?: string | undefined | null;
 }
 
 /**
@@ -62,6 +64,9 @@ export function resolveSupporterTier(
     return 'overseer';
   }
   if (roleIds.supporterRoleId && discordRoles.includes(roleIds.supporterRoleId)) {
+    return 'supporter';
+  }
+  if (roleIds.serverBoosterRoleId && discordRoles.includes(roleIds.serverBoosterRoleId)) {
     return 'supporter';
   }
   return 'none';
