@@ -77,6 +77,28 @@ export function validateRedirectUri(raw: string): string {
   return raw;
 }
 
+function isHttpLoopback(url: URL): boolean {
+  return url.protocol === 'http:' && (url.hostname === '127.0.0.1' || url.hostname === '[::1]' || url.hostname === 'localhost');
+}
+
+/**
+ * Redirects are byte-exact by default. RFC 8252 permits a native loopback
+ * client to register its callback without a port and choose an ephemeral port
+ * when it launches its local listener. Codex publishes precisely that metadata.
+ */
+export function matchesRegisteredRedirectUri(registeredUris: readonly string[], requested: string): boolean {
+  if (registeredUris.includes(requested)) return true;
+  let callback: URL;
+  try { callback = new URL(requested); } catch { return false; }
+  if (!isHttpLoopback(callback) || !callback.port || callback.hash || callback.username || callback.password) return false;
+  return registeredUris.some(registered => {
+    let metadata: URL;
+    try { metadata = new URL(registered); } catch { return false; }
+    return isHttpLoopback(metadata) && !metadata.port && !metadata.hash && !metadata.username && !metadata.password
+      && metadata.hostname === callback.hostname && metadata.pathname === callback.pathname && metadata.search === callback.search;
+  });
+}
+
 export function validateClientMetadata(value: unknown, options: { cimd?: boolean } = {}): McpClientMetadata {
   if (!value || typeof value !== 'object') throw new McpClientMetadataError('client metadata must be an object');
   const input = value as Record<string, unknown>;

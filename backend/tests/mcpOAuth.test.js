@@ -1,5 +1,5 @@
 const { EventEmitter } = require('events');
-const { validateClientMetadata, validateRedirectUri, McpClientMetadataError, fetchClientMetadataJson, resolveOAuthClient, registerOAuthClient, clearCimdCacheForTests } = require('../src/services/mcpClientMetadataService');
+const { validateClientMetadata, validateRedirectUri, matchesRegisteredRedirectUri, McpClientMetadataError, fetchClientMetadataJson, resolveOAuthClient, registerOAuthClient, clearCimdCacheForTests } = require('../src/services/mcpClientMetadataService');
 const { authorizationServerMetadata, protectedResourceMetadata } = require('../src/controllers/mcpOAuthController');
 
 function response() {
@@ -37,6 +37,15 @@ describe('MCP OAuth discovery and client validation', () => {
     'https://user:pass@example.com/callback',
     'https://example.com/callback#fragment',
   ])('rejects unsafe callback: %s', uri => expect(() => validateRedirectUri(uri)).toThrow(McpClientMetadataError));
+
+  test('allows only an ephemeral port for a portless registered HTTP loopback callback', () => {
+    const registered = ['http://127.0.0.1/callback/codex', 'http://localhost/callback/codex'];
+    expect(matchesRegisteredRedirectUri(registered, 'http://127.0.0.1:40301/callback/codex')).toBe(true);
+    expect(matchesRegisteredRedirectUri(registered, 'http://localhost:49152/callback/codex')).toBe(true);
+    expect(matchesRegisteredRedirectUri(registered, 'http://127.0.0.1:40301/callback/other')).toBe(false);
+    expect(matchesRegisteredRedirectUri(registered, 'http://127.0.0.2:40301/callback/codex')).toBe(false);
+    expect(matchesRegisteredRedirectUri(['https://client.example/callback'], 'https://client.example:443/callback')).toBe(false);
+  });
 
   test('accepts only public authorization-code clients and preserves CIMD identity', () => {
     expect(validateClientMetadata({ client_id: 'https://client.example/metadata.json', client_name: 'Claude', redirect_uris: ['https://claude.ai/api/mcp/auth_callback'], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'] })).toMatchObject({ client_id: 'https://client.example/metadata.json', client_name: 'Claude' });

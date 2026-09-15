@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import env from '../config/environment';
 import { getRedisClient } from '../config/redis';
 import { McpOAuthError, MCP_SCOPES, mcpAuthorizationService } from '../services/mcpAuthorizationService';
-import { McpClientMetadataError, registerOAuthClient, resolveOAuthClient } from '../services/mcpClientMetadataService';
+import { matchesRegisteredRedirectUri, McpClientMetadataError, registerOAuthClient, resolveOAuthClient } from '../services/mcpClientMetadataService';
 import { mcpRoleService } from '../services/mcpRoleService';
 import logger from '../config/logger';
 import { classifyMcpRoleDenial, noteMcpSecurityEvent, recordMcpMetric } from '../services/mcpAuditService';
@@ -66,7 +66,7 @@ export async function authorize(req: Request, res: Response) {
     // always receives a local JSON error and never a redirect.
     if (!clientId || !redirectUri) throw new McpClientMetadataError('client_id and redirect_uri are required');
     const client = await resolveOAuthClient(clientId);
-    if (!client.redirectUris.includes(redirectUri)) throw new McpClientMetadataError('redirect_uri is not registered exactly');
+    if (!matchesRegisteredRedirectUri(client.redirectUris, redirectUri)) throw new McpClientMetadataError('redirect_uri is not registered exactly');
     trustedRedirect = redirectUri; clientState = scalar(req.query.state);
     if (!responseType) { redirectOAuthError(res, trustedRedirect, clientState, 'invalid_request', 'response_type is required'); return; }
     if (responseType !== 'code') { redirectOAuthError(res, trustedRedirect, clientState, 'unsupported_response_type', 'Only code response_type is supported'); return; }

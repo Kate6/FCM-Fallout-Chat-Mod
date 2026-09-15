@@ -9,7 +9,21 @@ const mockResolveClient = jest.fn(async () => clients);
 jest.mock('../src/config/redis', () => ({ getRedisClient: async () => redis }));
 jest.mock('../src/middleware/rateLimiter', () => ({ authLimiter: (_req, _res, next) => next() }));
 jest.mock('../src/services/mcpAuthorizationService', () => ({ MCP_SCOPES: ['fcm:read', 'fcm:discord:write', 'fcm:moderation:write'], McpOAuthError: class McpOAuthError extends Error { constructor(code, message) { super(message); this.code = code; } }, mcpAuthorizationService: authz }));
-jest.mock('../src/services/mcpClientMetadataService', () => ({ McpClientMetadataError: class extends Error {}, registerOAuthClient: mockRegister, resolveOAuthClient: mockResolveClient }));
+jest.mock('../src/services/mcpClientMetadataService', () => ({
+  McpClientMetadataError: class extends Error {},
+  registerOAuthClient: mockRegister,
+  resolveOAuthClient: mockResolveClient,
+  matchesRegisteredRedirectUri: (registeredUris, requested) => {
+    if (registeredUris.includes(requested)) return true;
+    const callback = new URL(requested);
+    return registeredUris.some(registered => {
+      const metadata = new URL(registered);
+      return callback.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(callback.hostname) && callback.port
+        && metadata.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(metadata.hostname) && !metadata.port
+        && metadata.hostname === callback.hostname && metadata.pathname === callback.pathname && metadata.search === callback.search;
+    });
+  },
+}));
 jest.mock('../src/services/mcpRoleService', () => ({ mcpRoleService: { authorize: mockRoleAuth } }));
 
 const express = require('express');
@@ -99,6 +113,13 @@ describe('MCP OAuth HTTP routes', () => {
     expect(accepted.status).toBe(302); expect(accepted.headers.location).toContain('discord.com/api/oauth2/authorize');
     const rejected = await request(app()).get('/oauth/authorize').query({ ...base, resource: [env.MCP_RESOURCE_URL, 'https://evil.example/mcp'] });
     expect(rejected.status).toBe(302); expect(rejected.headers.location).toContain('error=invalid_request');
+  });
+
+  test('accepts Codex ephemeral loopback ports from portless client metadata', async () => {
+    clients.redirectUris = ['http://127.0.0.1/callback/CkPYkR2KjUtX'];
+    const response = await request(app()).get('/oauth/authorize').query({ client_id: 'registered', redirect_uri: 'http://127.0.0.1:40301/callback/CkPYkR2KjUtX', resource: env.MCP_RESOURCE_URL, response_type: 'code', code_challenge_method: 'S256', code_challenge: 'a'.repeat(43) });
+    expect(response.status).toBe(302); expect(response.headers.location).toContain('discord.com/api/oauth2/authorize');
+    clients.redirectUris = ['https://claude.ai/api/mcp/auth_callback'];
   });
 
   test('callback fails closed on browser-session mismatch and redirects a validated role denial', async () => {

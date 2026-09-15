@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import env from '../config/environment';
+import { matchesRegisteredRedirectUri } from './mcpClientMetadataService';
 import prisma from '../config/prisma';
 import { McpRoleService, McpStaffRole, mcpRoleService } from './mcpRoleService';
 import { classifyMcpRoleDenial, noteMcpSecurityEvent, recordMcpMetric } from './mcpAuditService';
@@ -66,7 +67,7 @@ export class McpAuthorizationService {
       throw new McpOAuthError('invalid_grant', 'PKCE S256 challenge is required');
     }
     const client = await this.db.mcpOAuthClient.findUnique({ where: { clientId: input.clientId } });
-    if (!client || client.disabledAt || !client.redirectUris.includes(input.redirectUri)) throw new McpOAuthError('invalid_client', 'Client or redirect URI is invalid');
+    if (!client || client.disabledAt || !matchesRegisteredRedirectUri(client.redirectUris, input.redirectUri)) throw new McpOAuthError('invalid_client', 'Client or redirect URI is invalid');
     const role = await this.requireRole(input.discordId);
     const scopes = this.authorizeScopes(role, input.scopes);
     const code = opaque('fcm_code_');

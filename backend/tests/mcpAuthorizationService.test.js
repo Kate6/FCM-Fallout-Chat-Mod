@@ -100,6 +100,13 @@ describe('mcpAuthorizationService', () => {
       .rejects.toMatchObject({ code: 'invalid_client' });
   });
 
+  it('accepts an ephemeral port for a portless registered HTTP loopback callback', async () => {
+    prisma.mcpOAuthClient.findUnique.mockResolvedValue({ ...client, redirectUris: ['http://127.0.0.1/callback/CkPYkR2KjUtX'] });
+    await expect(service().issueAuthorizationCode({ clientId: client.clientId, discordId: '42',
+      redirectUri: 'http://127.0.0.1:40301/callback/CkPYkR2KjUtX', resource: 'https://falloutchatmod.com/mcp',
+      pkceChallenge: pkceS256(verifier), codeChallengeMethod: 'S256', scopes: ['fcm:read'] })).resolves.toMatchObject({ code: expect.any(String) });
+  });
+
   it('rejects non-S256 challenge methods and malformed verifiers', async () => {
     await expect(service().issueAuthorizationCode({ clientId: 'client-a', discordId: '42', redirectUri: client.redirectUris[0],
       resource: 'https://falloutchatmod.com/mcp', pkceChallenge: pkceS256(verifier), codeChallengeMethod: 'plain', scopes: ['fcm:read'] }))
