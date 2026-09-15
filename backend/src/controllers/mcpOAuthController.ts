@@ -13,6 +13,15 @@ const headers = (res: Response) => res.set({ 'Cache-Control': 'no-store', Pragma
 const issuer = () => env.MCP_ISSUER_URL.replace(/\/$/, '');
 const oauthError = (res: Response, status: number, error: string, description: string) => { recordMcpMetric('oauth', { outcome: 'failure' }); return res.status(status).json({ error, error_description: description }); };
 const scalar = (value: unknown): string | undefined => typeof value === 'string' ? value : undefined;
+// Codex currently repeats the same resource indicator when both its local
+// server configuration and protected-resource discovery provide it. OAuth
+// resource indicators can be repeated, but this server authorizes one
+// resource only: accept duplicate byte-identical values and reject conflicts.
+const resourceIndicator = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value) || !value.length || value.some(item => typeof item !== 'string') || value.some(item => item !== value[0])) return undefined;
+  return value[0];
+};
 const logContext = (req: Request, error: unknown) => ({ routeRequestId: scalar(req.headers['x-request-id']) || 'unavailable', errorType: error instanceof Error ? error.name : typeof error });
 const sign = (payload: string) => createHmac('sha256', env.MCP_OAUTH_STATE_SECRET).update(payload).digest('base64url');
 const seal = (value: object) => { const payload = Buffer.from(JSON.stringify(value)).toString('base64url'); return `${payload}.${sign(payload)}`; };
@@ -47,7 +56,7 @@ export async function register(req: Request, res: Response) {
 }
 
 export async function authorize(req: Request, res: Response) {
-  const clientId = scalar(req.query.client_id), redirectUri = scalar(req.query.redirect_uri), resource = scalar(req.query.resource);
+  const clientId = scalar(req.query.client_id), redirectUri = scalar(req.query.redirect_uri), resource = resourceIndicator(req.query.resource);
   const challenge = scalar(req.query.code_challenge), method = scalar(req.query.code_challenge_method), responseType = scalar(req.query.response_type);
   let trustedRedirect: string | undefined; let clientState: string | undefined;
   try {

@@ -93,6 +93,14 @@ describe('MCP OAuth HTTP routes', () => {
     expect(trusted.status).toBe(302); expect(trusted.headers.location).toContain('state=kept'); expect(trusted.headers.location).toContain('error=invalid_scope');
   });
 
+  test('accepts repeated identical resource indicators but rejects conflicting ones', async () => {
+    const base = { client_id: 'registered', redirect_uri: clients.redirectUris[0], response_type: 'code', code_challenge_method: 'S256', code_challenge: 'a'.repeat(43) };
+    const accepted = await request(app()).get('/oauth/authorize').query({ ...base, resource: [env.MCP_RESOURCE_URL, env.MCP_RESOURCE_URL] });
+    expect(accepted.status).toBe(302); expect(accepted.headers.location).toContain('discord.com/api/oauth2/authorize');
+    const rejected = await request(app()).get('/oauth/authorize').query({ ...base, resource: [env.MCP_RESOURCE_URL, 'https://evil.example/mcp'] });
+    expect(rejected.status).toBe(302); expect(rejected.headers.location).toContain('error=invalid_request');
+  });
+
   test('callback fails closed on browser-session mismatch and redirects a validated role denial', async () => {
     const first = request.agent(app());
     const started = await first.get('/oauth/authorize').query({ client_id: 'registered', redirect_uri: clients.redirectUris[0], resource: env.MCP_RESOURCE_URL, response_type: 'code', code_challenge_method: 'S256', code_challenge: 'a'.repeat(43), state: 'original' });
