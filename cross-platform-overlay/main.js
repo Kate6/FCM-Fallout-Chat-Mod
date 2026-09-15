@@ -2640,7 +2640,9 @@ ipcMain.on('discord:link', () => {
   const st = loadState();
   if (!st || !st.installToken) return;
   providerLoginRequested = true;
-  const linkUrl = `${RELAY_HTTP}/auth/discord/link?installToken=${encodeURIComponent(st.installToken)}`;
+  // Unique URL per attempt is defense-in-depth with the backend's no-store
+  // redirect: the browser cannot reuse a cached 302 carrying consumed state.
+  const linkUrl = `${RELAY_HTTP}/auth/discord/link?installToken=${encodeURIComponent(st.installToken)}&attempt=${encodeURIComponent(crypto.randomUUID())}`;
   const pollGeneration = ++discordOAuthPollGeneration;
   try {
     Promise.resolve(shell.openExternal(linkUrl)).catch((e) => {
@@ -2843,7 +2845,9 @@ function refreshDiscordStatus(attempt = 0, oauthPoll = null) {
           saveState({ discordLinked: linked, discordName });
           // Include discordDisplayName so the onboarding step-3 prefill can
           // default the FO76 name input to the user's Discord display name.
-          sendToRenderer('relay:discord-status', { linked, discordName, discordDisplayName });
+          const avatarUrl = d.avatarUrl || d.discordAvatarUrl || null;
+          if (avatarUrl != null) saveState({ avatarUrl: avatarUrl || '', discordAvatarUrl: avatarUrl || '' });
+          sendToRenderer('relay:discord-status', { linked, discordName, discordDisplayName, avatarUrl });
 
           if (!linked) continueOAuthPoll();
 

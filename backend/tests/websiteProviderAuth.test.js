@@ -137,10 +137,23 @@ test('profile link refuses an occupied Discord identity without switching accoun
 test('profile link start requires an authenticated account and binds it into state', async () => {
   const response = await request(app).get('/auth/discord/profile');
   expect(response.status).toBe(302);
+  expect(response.headers['cache-control']).toBe('no-store');
   const stateWrite = mockRedis.set.mock.calls.find(([key]) => key.startsWith('oauth_state:'));
   expect(JSON.parse(stateWrite[1])).toMatchObject({ intent: 'profile', sessionId: 'browser-a', linkUserId: 'account-a' });
   mockBrowserSession = {};
   expect((await request(app).get('/auth/discord/profile')).status).toBe(401);
+});
+
+test('desktop Discord link start is non-cacheable and stores fresh one-time state', async () => {
+  const response = await request(app).get('/auth/discord/link?installToken=install-123');
+  expect(response.status).toBe(302);
+  expect(response.headers['cache-control']).toBe('no-store');
+  expect(response.headers.location).toContain('discord.com/api/oauth2/authorize');
+  expect(mockRedis.set).toHaveBeenCalledWith(
+    expect.stringMatching(/^oauth_link_state:/),
+    'install-123',
+    { EX: 300 },
+  );
 });
 
 test('Steam profile can change only its own chat name', async () => {

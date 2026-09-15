@@ -306,6 +306,7 @@ app.get('/auth/discord/profile', authLimiter, requireLinkAuth, async (req: Reque
   await new Promise<void>((resolve, reject) => req.session.save(err => err ? reject(err) : resolve()));
   const params = new URLSearchParams({ client_id: env.DISCORD_CLIENT_ID,
     redirect_uri: env.DISCORD_REDIRECT_URI, response_type: 'code', scope: 'identify', state });
+  res.setHeader('Cache-Control', 'no-store');
   res.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
 });
 
@@ -348,6 +349,7 @@ app.get('/auth/discord', authLimiter, async (req: Request, res: Response) => {
     scope: 'identify guilds.members.read',
     state,
   });
+  res.setHeader('Cache-Control', 'no-store');
   res.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
 });
 
@@ -656,6 +658,9 @@ app.get('/auth/discord/link', authLimiter, async (req: Request, res: Response) =
     scope: 'identify guilds.members.read',
     state,
   });
+  // OAuth state is one-time. Prevent a browser from caching this stable link URL
+  // and replaying an old redirect/state on a later link or relink attempt.
+  res.setHeader('Cache-Control', 'no-store');
   res.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
 });
 
@@ -949,12 +954,15 @@ app.get('/api/auth/discord-status/:installToken', async (req: Request, res: Resp
     const discordAvatarUrl = user?.discordId && user.discordAvatar
       ? `https://cdn.discordapp.com/avatars/${user.discordId}/${user.discordAvatar}.png?size=128`
       : null;
+    const avatarUrl = user?.discordId && user.discordAvatar
+      ? buildAvatarUrl(user.discordId)
+      : null;
 
     const redis = await getRedisClient();
     const cached = await redis.get(`discord_link:${installToken}`);
     if (cached) {
       const parsed = JSON.parse(cached);
-      res.json({ data: { linked: true, username: fo76Username, displayName, discordAvatarUrl, ...parsed } });
+      res.json({ data: { linked: true, username: fo76Username, displayName, discordAvatarUrl, avatarUrl, ...parsed } });
       return;
     }
 
@@ -968,13 +976,14 @@ app.get('/api/auth/discord-status/:installToken', async (req: Request, res: Resp
           discordUsername: user.discordUsername,
           discordAvatar: user.discordAvatar,
           discordAvatarUrl,
+          avatarUrl,
           discordDisplayName: user.discordDisplayName || user.discordUsername,
         },
       });
       return;
     }
 
-    res.json({ data: { linked: false, username: fo76Username, displayName, discordAvatarUrl: null } });
+    res.json({ data: { linked: false, username: fo76Username, displayName, discordAvatarUrl: null, avatarUrl: null } });
   } catch (err) {
     logger.error({ err }, 'Failed to check discord-status');
     res.status(500).json({ data: { linked: false } });

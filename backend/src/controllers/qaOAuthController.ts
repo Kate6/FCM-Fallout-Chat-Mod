@@ -5,6 +5,7 @@ import prisma from '../config/prisma';
 import logger from '../config/logger';
 import env from '../config/environment';
 import { verifyQaRole } from '../services/qaAuthService';
+import { captureAvatar } from '../services/avatarService';
 
 const STATE_TTL = 300; // 5 min
 const GRANT_TTL = 600; // 10 min
@@ -37,6 +38,10 @@ export async function qaStart(req: Request, res: Response): Promise<void> {
     scope: 'identify guilds.members.read',
     state,
   });
+  // The state is single-use. A cached 302 can replay an already-consumed state
+  // on a later login attempt, which correctly fails CSRF validation but strands
+  // the user. Never let browsers or intermediary caches reuse this redirect.
+  res.setHeader('Cache-Control', 'no-store');
   res.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
 }
 
@@ -48,6 +53,7 @@ export interface QaCallbackDeps {
   fetchIdentity(accessToken: string): Promise<QaIdentity>;
   fetchDevGuildRoles(discordUserId: string, accessToken: string): Promise<string[]>;
   upsertUser(identity: QaIdentity, installToken: string): Promise<{ id: string; displayName: string }>;
+  captureAvatar(discordId: string, avatarHash: string | null): Promise<unknown>;
   mintSession(userId: string): Promise<string>;
   storeGrant(installToken: string, grant: { token: string; userId: string; displayName: string; role: string }): Promise<void>;
 }
@@ -93,6 +99,14 @@ export function makeQaCallbackHandler(deps: QaCallbackDeps): RequestHandler {
     let token: string;
     try {
       user = await deps.upsertUser(identity, installToken);
+      // Persist the Discord avatar before granting the session so the first
+      // Identity-card refresh can use our same-origin object-store URL.
+      try {
+        await deps.captureAvatar(identity.id, identity.avatar ?? null);
+      } catch (err) {
+        // Avatar storage is enrichment, never an authentication dependency.
+        logger.warn({ err, discordId: identity.id }, '[qa-oauth] avatar capture failed (non-fatal)');
+      }
       token = await deps.mintSession(user.id);
       await deps.storeGrant(installToken, { token, userId: user.id, displayName: user.displayName, role: 'user' });
     } catch (err) {
@@ -188,6 +202,9 @@ export const defaultQaCallbackDeps: QaCallbackDeps = {
       select: { id: true, username: true },
     });
     return { id: user.id, displayName: displayName };
+  },
+  async captureAvatar(discordId, avatarHash) {
+    return captureAvatar(discordId, avatarHash);
   },
   async mintSession(userId) {
     const token = uuidv4();

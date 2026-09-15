@@ -1401,7 +1401,12 @@ function buildSettingsPanel() {
     hint(s, 'Linking opens Discord in your browser to authorise this install. Click REFRESH STATUS after returning to update the panel. Unlinking signs you out and returns you to the provider login screen. Your chat display name comes from your FO76 name above, or your Discord display name.');
 
     window.relayBridge.onDiscordStatus?.((status) => {
-      commit({ discordLinked: status.linked, discordName: status.discordName || '' });
+      commit({
+        discordLinked: status.linked,
+        discordName: status.discordName || '',
+        discordDisplayName: status.discordDisplayName || currentSettings.discordDisplayName,
+        discordAvatarUrl: status.avatarUrl ?? currentSettings.discordAvatarUrl,
+      });
       renderDiscordStatus();
       renderProfile();
     });
@@ -1474,7 +1479,9 @@ function buildSettingsPanel() {
       if (s.discordName)        patch.discordName = s.discordName;
       if (s.discordUsername)    patch.discordUsername = s.discordUsername;
       if (s.discordDisplayName) patch.discordDisplayName = s.discordDisplayName;
-      if (s.discordAvatarUrl != null) patch.discordAvatarUrl = s.discordAvatarUrl || '';
+      if (s.avatarUrl != null || s.discordAvatarUrl != null) {
+        patch.discordAvatarUrl = s.avatarUrl || s.discordAvatarUrl || '';
+      }
       if (s.steamLinked != null) patch.steamLinked = !!s.steamLinked;
       if (s.steamDisplayName != null) patch.steamDisplayName = s.steamDisplayName;
       if (s.username)           patch.fo76Name = s.username;

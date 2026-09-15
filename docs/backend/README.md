@@ -47,7 +47,9 @@ All main API routes mount under `/api/` and are subject to `apiLimiter` (100 req
 - `/admin/migration/*` — gated by `requireMigrationKey`, 10 req/15min per IP
 - `/admin/nuke-users` — gated by `requireAdminKey`
 - `/auth/*` — Discord, Nexus, and Steam provider flows (not under `/api/`)
-- `/avatars/:discordId` and `/party-images/:imageId` — public static-like asset streams
+- `/avatars/:discordId` and `/party-images/:imageId` — public static-like asset streams.
+  Discord OAuth link/login callbacks refresh `avatars/<discordId>.png` in MinIO; OAuth
+  start redirects are `no-store` because their CSRF state is single-use.
 
 The dashboard SPA (`admin-dashboard/dist/`) is served as `express.static` from the same origin as the backend in production.
 
