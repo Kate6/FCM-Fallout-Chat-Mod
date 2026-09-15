@@ -131,7 +131,7 @@ export function buildDiscordRelayPrefix(
  * INBOUND relay path (Discord → overlay). Each mentioned user id is resolved with
  * this priority:
  *   1. Our DB `users.username` if it is a real FO76 name (not 'Wanderer', not
- *      a `pending-*` placeholder, not an `Overlay<digits>` auto-handle).
+ *      a `pending-*` / `discord:*` placeholder, not an `Overlay<digits>` auto-handle).
  *   2. Discord member's server display name / global_name / username from the
  *      message's resolved `mentions` collection.
  *
@@ -175,6 +175,7 @@ async function resolveInboundUserMentions(
       u &&
       u !== 'Wanderer' &&
       !u.startsWith('pending-') &&
+      !u.startsWith('discord:') &&
       !/^Overlay\d+$/.test(u);
     if (isReal) fo76Map.set(row.discordId, u);
   }
