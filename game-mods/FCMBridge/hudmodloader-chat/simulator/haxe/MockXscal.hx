@@ -1,0 +1,168 @@
+import flash.external.ExternalInterface;
+import flash.events.Event;
+import flash.net.URLLoader;
+import flash.net.URLRequest;
+import flash.net.URLRequestMethod;
+
+class MockXscal {
+    public static var callCount(default, null):Int = 0;
+    public static var pollCount(default, null):Int = 0;
+    public static var historyDoneDeliveries(default, null):Int = 0;
+    static var pressed:Map<Int, Bool> = new Map();
+    static var cursor:Int = 0;
+    static var scenarioEvents:Array<Dynamic> = null;
+
+    public static function loadScenario(url:String):Void {
+        var loader = new URLLoader();
+        loader.addEventListener(Event.COMPLETE, function(_:Event):Void {
+            try {
+                var parsed:Dynamic = haxe.Json.parse(Std.string(loader.data));
+                var incoming:Dynamic = Reflect.field(parsed, "events");
+                if (Std.isOfType(incoming, Array)) {
+                    scenarioEvents = cast incoming;
+                    scenarioEvents.push({kind:"chat.message", id:scenarioEvents.length + 1,
+                        messageId:"sim-history-done", channel:"system", senderUserId:"system",
+                        senderDisplayName:"FCM", body:"FCMCTL/1/HISTORY-DONE", targetUserId:""});
+                    cursor = 0;
+                    pollCount = 0;
+                    historyDoneDeliveries = 0;
+                    SimLog.emit("HOSTED DEV snapshot loaded events=" + scenarioEvents.length);
+                }
+            } catch (_:Dynamic) {
+                SimLog.emit("HOSTED DEV snapshot rejected");
+            }
+        });
+        try loader.load(new URLRequest(url)) catch (_:Dynamic) {}
+    }
+
+    public static function root():Dynamic {
+        var chat:Dynamic = {};
+        Reflect.setField(chat, "getRuntimeInfo", function():String {
+            return response({success:true, runtime:"xScal Chat", version:"sim-1", protocol:1,
+                mode:"simulated", capabilities:["xscal-chat-interface"]});
+        });
+        Reflect.setField(chat, "connect", function(_:Dynamic):String {
+            SimLog.emit("CHAT connect accepted");
+            return response({success:true, status:"authenticated", code:"connected"});
+        });
+        Reflect.setField(chat, "getAuthState", function(_:Dynamic):String {
+            return response({success:true, state:"authenticated", status:"authenticated",
+                userId:"sim-relay-user", linkedUserId:"sim-linked-user", canRetryHudSend:true,
+                canSaveHudLayout:true});
+        });
+        Reflect.setField(chat, "getConnectionState", function():String {
+            return response({success:true, state:"authenticated", status:"authenticated"});
+        });
+        Reflect.setField(chat, "pollEvents", function(args:Dynamic):String {
+            callCount++;
+            pollCount++;
+            SimLog.emit("CHAT poll cursor=" + cursor);
+            if (scenarioEvents == null) {
+                scenarioEvents = [];
+                for (index in 0...40) scenarioEvents.push({kind:"chat.message", id:index + 1,
+                    messageId:"sim-history-" + index, channel:index % 2 == 0 ? "global" : "trade",
+                    senderUserId:"sim-user-1", senderDisplayName:"VaultTester",
+                    body:"Deterministic history row " + index, targetUserId:""});
+                scenarioEvents.push({kind:"chat.message", id:41, messageId:"sim-history-done",
+                    channel:"system", senderUserId:"system", senderDisplayName:"FCM",
+                    body:"FCMCTL/1/HISTORY-DONE", targetUserId:""});
+            }
+            if (scenarioEvents != null) {
+                var max:Int = args == null ? 16 : Std.int(Reflect.field(args, "max"));
+                if (max < 1) max = 1;
+                if (max > 16) max = 16;
+                var start:Int = args == null ? cursor : Std.int(Reflect.field(args, "cursor"));
+                if (start < 0 || start > scenarioEvents.length) start = cursor;
+                var end:Int = Std.int(Math.min(scenarioEvents.length, start + max));
+                var hosted = scenarioEvents.slice(start, end);
+                for (event in hosted) {
+                    if (Reflect.field(event, "body") == "FCMCTL/1/HISTORY-DONE") historyDoneDeliveries++;
+                }
+                cursor = end;
+                return response({success:true, cursor:cursor, events:hosted});
+            }
+            return response({success:true, cursor:cursor, events:[]});
+        });
+        Reflect.setField(chat, "sendMessage", function(args:Dynamic):String {
+            callCount++;
+            var body:String = args == null ? "" : Std.string(Reflect.field(args, "body"));
+            var channel:String = args == null ? "global" : Std.string(Reflect.field(args, "channel"));
+            var messageId:String = "sim-send-" + callCount;
+            SimLog.emit("CHAT send len=" + body.length);
+            if (scenarioEvents == null) scenarioEvents = [];
+            var nextId:Int = scenarioEvents.length + 1;
+            scenarioEvents.push({kind:"chat.message", id:nextId, messageId:messageId,
+                channel:channel, senderUserId:"sim-linked-user", senderDisplayName:"Simulator76",
+                body:body, targetUserId:""});
+            if (channel != "server") sendHostedDev(channel, body);
+            return response({success:true, messageId:messageId, targetUserId:""});
+        });
+        Reflect.setField(chat, "reportMessage", function(_:Dynamic):String {
+            callCount++;
+            return response({success:true, reportId:"sim-report-" + callCount});
+        });
+        Reflect.setField(chat, "disconnect", function():String return response({success:true}));
+        Reflect.setField(chat, "clearChatAuth", function():String return response({success:true}));
+
+        var root:Dynamic = {chatInterface:chat};
+        Reflect.setField(root, "call", function(name:String, value:Dynamic = null):Dynamic {
+            callCount++;
+            if (name == "GetXSRuntimeInfo") return response({runtime:"xScal", version:"sim-1", platform:"Simulator"});
+            if (name == "log") { SimLog.emit(Std.string(value)); return true; }
+            if (name == "Input.RegisterKey" || name == "Input.UnregisterKey") return true;
+            if (name == "Input.IsKeyPressed") {
+                var key:Int = Std.int(value);
+                return pressed.exists(key) && pressed.get(key) == true;
+            }
+            return false;
+        });
+        return root;
+    }
+
+    public static function setPressed(action:String, down:Bool):Void {
+        var key = switch (action.toLowerCase()) {
+            case "up": 0x26; case "down": 0x28; case "nextpage": 0x22;
+            case "prevpage": 0x21; case "insert": 0x2D; case "delete": 0x2E;
+            default: 0;
+        };
+        if (key > 0) pressed.set(key, down);
+    }
+
+    public static function setVirtualKey(key:Int, down:Bool):Void {
+        if (key >= 1 && key <= 255) pressed.set(key, down);
+    }
+
+    static function sendHostedDev(channel:String, body:String):Void {
+        if (ExternalInterface.available) {
+            try {
+                ExternalInterface.call("fcmHostedDevSend", channel, body);
+            } catch (_:Dynamic) {}
+            return;
+        }
+        var request = new URLRequest("/__fcm/hosted-dev/send");
+        request.method = URLRequestMethod.POST;
+        request.contentType = "application/json";
+        request.data = haxe.Json.stringify({channel:channel, body:body});
+        var loader = new URLLoader();
+        try loader.load(request) catch (_:Dynamic) {}
+    }
+
+    static function response(value:Dynamic):String return haxe.Json.stringify(value);
+}
+
+class SimLog {
+    public static var count(default, null):Int = 0;
+    public static var last(default, null):String = "";
+    public static function emit(value:String):Void {
+        count++;
+        var clean = value == null ? "" : value.split("\n").join(" ");
+        if (clean.length > 500) clean = clean.substr(0, 500);
+        // Ruffle paints Haxe diagnostic output over the movie. Retain bounded
+        // diagnostics in memory and forward them when ExternalInterface is
+        // available, but never contaminate the HUD's rendered surface.
+        last = clean;
+        if (ExternalInterface.available) {
+            try ExternalInterface.call("fcmSimLog", clean) catch (_:Dynamic) {}
+        }
+    }
+}

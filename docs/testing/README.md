@@ -21,6 +21,8 @@ the exact commands you run locally. Deeper material lives in sibling docs:
   graph, branch protection, the hermetic mock relay, and the coverage rollout.
 - **[hud-recovery.md](hud-recovery.md)** — in-game wrapping, provider reconnect, queued-send,
   and duplicate-delivery checks for xScal and ZFE.
+- **[hud-automation-plan.md](hud-automation-plan.md)** — proposed Ruffle contract simulator,
+  optional licensed GFx host, programmable input tests, simulated logs, and native smoke tier.
 
 > This is a living plan. Several units cited below are **not yet directly testable** because the
 > code has no `module.exports` / named exports or runs side effects at import time. Those are
@@ -103,7 +105,7 @@ the mock relay).
 
 | Workspace | Unit / Component | E2E | Rationale |
 | --------- | ---------------- | --- | --------- |
-| `backend` | **Jest 29** (existing, supertest) | — | 21 passing CommonJS suites, Postgres+Redis integration; no Vite. Not worth churning. |
+| `backend` | **Jest 30.4.2** (existing, supertest) | — | CommonJS suites, Postgres+Redis integration; no Vite. |
 | `admin-dashboard` | **Vitest + @testing-library/react + jsdom** (new `test:unit`) | `@playwright/test` (existing) | Owns the canonical `ChatOverlay.tsx` — highest-value coverage. Vitest reuses the Vite 6 + plugin-react transform with zero extra config. |
 | `cross-platform-overlay` | **Vitest + @testing-library/react + jsdom** (new) | `@playwright/test` `_electron` | Same Vite reuse; jsdom needs no native electron, so units run on `ubuntu-latest`. |
 | repo root `tests/` | — | `@playwright/test` (`_electron` + chromium) | Cross-process E2E driving the real Electron app against the mock relay. |
@@ -165,9 +167,11 @@ the auto-update E2E it served was retired; a future Playwright suite would need 
 cd backend
 npm ci
 npx prisma generate
+npx prisma validate
 npm run build            # tsc — Jest reads the compiled *.test.js
 npm test                 # Jest + supertest (needs Postgres + Redis up)
 npm run test:unit        # node:test TS units (wiki services) via src/testRunner.ts
+npm run test:mcp-inspector # build + official Inspector initialize/list/call smoke
 ```
 
 Bring the dependencies up first with the dev stack:

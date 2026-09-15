@@ -22,6 +22,14 @@ class TestFcmFeedPlan {
         check("pending flip changes transaction key", pendingTxn != ackedTxn);
         var otherChannel = FcmFeedPlan.recordKey("trade", "m-1", "", false);
         check("channel scopes the key", durable != otherChannel);
+        var beforeEdit = FcmFeedPlan.recordKey("global", "m-1", "", false, "hello", "");
+        var afterEdit = FcmFeedPlan.recordKey("global", "m-1", "", false, "hello edited", "");
+        check("in-place body edit changes the key", beforeEdit != afterEdit);
+        var beforeLink = FcmFeedPlan.recordKey("global", "m-1", "", false, "see this", "");
+        var afterLink = FcmFeedPlan.recordKey("global", "m-1", "", false, "see this", "https://example.com/x");
+        check("link resolution change changes the key", beforeLink != afterLink);
+        var sameContent = FcmFeedPlan.recordKey("global", "m-1", "", false, "hello", "");
+        check("identical content reuses", beforeEdit == sameContent);
 
         // prefixReuseCount.
         var oldKeys = [durable, pendingTxn, FcmFeedPlan.recordKey("trade", "m-2", "", false)];

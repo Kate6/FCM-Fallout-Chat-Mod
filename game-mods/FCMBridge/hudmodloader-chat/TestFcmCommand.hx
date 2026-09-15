@@ -101,6 +101,16 @@ class TestFcmCommand {
             !FcmCommand.feedNavigationEnabled(false, false));
         check("feed navigation is disabled while hidden",
             !FcmCommand.feedNavigationEnabled(true, true));
+        check("Enter activates a selected link during an owned edit",
+            FcmCommand.linkActivationEnabled("Enter", "ENTER", true, true));
+        check("custom link key activates during an owned edit",
+            FcmCommand.linkActivationEnabled("F8", "F8", true, true));
+        check("link key is disabled before OpenChat",
+            !FcmCommand.linkActivationEnabled("Enter", "ENTER", false, true));
+        check("link key is disabled without a selected link",
+            !FcmCommand.linkActivationEnabled("Enter", "ENTER", true, false));
+        check("unrelated key does not activate a link",
+            !FcmCommand.linkActivationEnabled("F7", "F8", true, true));
         check("first navigation edge is new",
             FcmCommand.navigationEdgeIsNew(false));
         check("latched navigation edge is ignored",
@@ -143,6 +153,19 @@ class TestFcmCommand {
             FcmCommand.shouldRebindRosterSession("Ada|Beck", ""));
         check("initial roster does not force a rebind",
             !FcmCommand.shouldRebindRosterSession("", "Ada"));
+        check("open editor suppresses automatic roster network work",
+            !FcmCommand.shouldSendRoster(true, true, true, 49000, true, false));
+        check("unsafe synchronous transport suppresses automatic roster work",
+            !FcmCommand.shouldSendRoster(false, false, false, 60000, false, true));
+        check("ready roster ignores harmless membership churn",
+            !FcmCommand.shouldSendRoster(true, false, true, 29000, true, true));
+        check("ready roster renews only at the keepalive boundary",
+            FcmCommand.shouldSendRoster(true, false, true, 30000, true, false));
+        check("unconfirmed roster retries only after its retry boundary",
+            !FcmCommand.shouldSendRoster(true, false, false, 9999, true, false)
+            && FcmCommand.shouldSendRoster(true, false, false, 10000, true, false));
+        check("first roster is sent once",
+            FcmCommand.shouldSendRoster(true, false, false, 0, false, false));
         check("bare true after a successful clear is an empty native buffer",
             FcmCommand.nativeInputBufferIsClear("true", "true"));
         check("a rejected clear does not admit an empty native buffer",

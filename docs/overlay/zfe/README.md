@@ -52,6 +52,15 @@ website's `/link` page. Connection success alone does not establish a linked acc
 membership uses authenticated controls built from HUD-published account/world/roster data.
 See the [native relay guide](native-chat-relay/README.md) for the full data path.
 
+### ZFE automatic roster safety (2.10.92)
+
+The visible widget fails closed on automatic Server-room roster/leave controls through ZFE. ZFE
+currently performs that relay operation synchronously on Fallout's Scaleform/UI thread; an
+unreachable relay was observed blocking the thread for roughly 15 seconds per attempt. Static
+community chat/history and user-initiated sends remain enabled. xScal retains Server-room binding.
+Restore ZFE automatic binding only after its provider exposes and tests a non-blocking request
+primitive; scheduling the native call from an SWF timer does not make it asynchronous.
+
 ## Combined General feed
 
 In local candidate 2.10.78, General shows **General, current-room Server, Trading, Events,
@@ -68,8 +77,8 @@ intentional repeated send is not silently merged. Provider event IDs cover older
 a durable message ID. These guards do not merge distinct server-assigned messages or suppress
 a second independently loaded renderer.
 
-Initial history is bounded to 15 rows per static channel plus 50 for the current SERVER room
-(up to 125 events), drained across the native 64-event poll limit. Authenticated recovery and
+Initial history is bounded to 15 rows per static channel plus 50 for the current SERVER room,
+then one terminal completion frame, drained in 16-event native polls. Authenticated recovery and
 world rebinding preserve that partition. New-message notices count only rows visible in the
 selected tab. Delayed render slices have generation checks and their own exception handling;
 stale work cannot replace a newer feed with a fallback.
@@ -77,8 +86,23 @@ stale work cannot replace a newer feed with a fallback.
 ## Input and appearance
 
 The shipped key map is `openKey=INSERT`, `channelNextKey=NextPage`, `channelPrevKey=PrevPage`,
-`scrollUpKey=Up`, `scrollDownKey=Down`, `scrollBottomKey=`, and `hideKey=DELETE`. Insert opens chat by
-default; Enter sends and Escape cancels. Page Up/Down switch channels while idle or typing.
+`scrollUpKey=Up`, `scrollDownKey=Down`, `scrollBottomKey=`, `activateLinkKey=ENTER`, and
+`hideKey=DELETE`. Insert opens chat by
+default; Enter sends a non-empty draft and Escape cancels. Page Up/Down switch channels while idle
+or typing. Up/Down selects a message row and paints a bounded highlight. The configured link key
+(Enter by default) opens the selected row's first validated HTTP(S) URL directly through GFx in
+the operating system's default browser. This user-initiated path does not synchronously contact
+the relay and does not require the Electron overlay. The HUD abbreviates
+URLs to `host/...` but retains the full target; Discord channel entities and scheduled events carry
+their native URLs in the existing capability-gated HUD transport. The SWF gains no independent
+network transport; browser navigation is confined to already validated HTTP(S) targets.
+Ordinary HTTP(S) URLs embedded in message text follow the same behavior, including messages that
+also contain bundled emoji; when several links exist, the action opens the first one. Link
+activation is accepted only while `openKey` owns a visible editor and a link row is selected;
+before OpenChat, the same physical key remains a normal Fallout control.
+The highlight color is independently configurable as `Selected message` in F11 → Customize →
+Colors or as `selectedRowColor` in `FCMChat.ini`; it persists through ZFE storage and the xScal
+device-scoped layout relay.
 Configured feed scrolling acts only while chat owns a visible input session. The blank newest and
 newest value is intentional: Home/End remain unassigned. Delete hides only while idle; `/hide` plus
 F11 → FCM → Hide chat remain available. F11 → FCM → Scroll to newest is always available.
@@ -86,8 +110,10 @@ Aliases and reversed Up/Down bindings use the same navigation policy. Edge guard
 normalized action names; different aliases are not universally one shared latch. Test simultaneous
 named/physical delivery on the installed loader before claiming one action per physical press.
 
-ZFE users keep `Data/FCMChat.ini` `openKey` aligned with `[TextChat] OpenChatKey` in the effective
-extender config. xScal users change `openKey` only; xScal has no `OpenChatKey` setting. Its physical
+`Data/FCMChat.ini` is authoritative for FCM's `openKey`. After discovery the widget updates ZFE's
+process-level chat watcher to that value, so an older persisted F11 snapshot or a packaged
+`OpenChatKey=INSERT` cannot silently restore Insert. xScal also reads `openKey` only from that file;
+xScal has no `OpenChatKey` setting. Its physical
 key API takes numeric VK codes and returns Booleans. Registration does not promise keyboard
 suppression. FCM's ZFE `Input.*` route remains a tested compatibility path on specific builds,
 not the public `zfe-input-v1` contract. That capability names owner-scoped `input.v1.*` text
@@ -96,7 +122,7 @@ available; migration to `hotkeys.v1.*` is not implemented in 2.10.85 and needs s
 
 | Provider | Authoritative open key | Detection | Configuration precedence |
 | --- | --- | --- | --- |
-| ZFE | `[TextChat] OpenChatKey`, matching `FCMChat.ini` `openKey` | ZFE `isChatKeyPressed` | `Data/configuration/zfe.ini` overrides `Data/ZFE/TextChat/fragments/FCMChatWidget.ini` |
+| ZFE | `FCMChat.ini` `openKey`, synchronized to ZFE after discovery | ZFE `isChatKeyPressed` | File key wins over persisted appearance and the packaged ZFE default |
 | xScal | `FCMChat.ini` `openKey` only | Numeric `Input.RegisterKey` / `Input.IsKeyPressed` | `xscal.ini` has transport settings only and must not contain `OpenChatKey` |
 
 | Behavior | ZFE | xScal |
@@ -122,6 +148,12 @@ loses focus without its callback, the widget waits 225 ms, recovers an Enter sub
 cancels other stale sessions so Insert works again. The recovery draft stays in memory and logs
 only its length. Do not infer xScal
 key support from ZFE commands or route ZFE input verbs through xScal's `chatInterface`.
+
+Provider hotkeys remain observable globally, but FCM will not acquire the editor in a configured
+`hideInHUDModes` state. The default includes `ContainerMode`; this prevents a letter binding such
+as T from stealing Fallout's Deposit All action. A held key is latched while blocked, so leaving
+the container does not open chat until a fresh key press. Letter bindings can still overlap
+ordinary gameplay controls outside blocked modes and should be chosen accordingly.
 
 Both providers use the host's SharedHUDTools editor first. The widget does not dispatch its own
 ControlMap lock events. A legacy ZFE editor fallback has different ownership guarantees and must

@@ -21,10 +21,11 @@ export interface HudKeybindRow {
 export const HUD_KEYBIND_ROWS: HudKeybindRow[] = [
   {
     key: 'Insert',
-    config: 'openKey=INSERT (ZFE also OpenChatKey=INSERT)',
-    description: 'Open the HUD chat input and start typing. On ZFE, keep the widget and native settings aligned; xScal uses openKey only.',
+    config: 'openKey=INSERT',
+    description: 'Open the HUD chat input and start typing. FCM synchronizes this value to ZFE after discovery; xScal polls it directly.',
   },
   { key: 'Enter', config: 'native game input', description: 'Send the message.' },
+  { key: 'Enter (configurable)', config: 'activateLinkKey=ENTER', description: 'Open the selected row’s first validated link. This action is active only after Open Chat owns the editor and a link row is selected.' },
   { key: 'Escape', config: 'native game input', description: 'Cancel typing and close the input.' },
   { key: 'Arrow Up / Down', config: 'scrollUpKey=Up / scrollDownKey=Down', description: 'Scroll the HUD feed up or down. Arrow/Cursor/Dpad aliases match the defaults; change either setting to rebind it. Ignored until Insert opens a typing session.' },
   { key: 'Optional newest key', config: 'scrollBottomKey= (unset)', description: 'Jump to the newest HUD messages after you opt in with Home, End, F12, or a forwarded HUD action. The packaged default is unbound.' },
@@ -96,15 +97,11 @@ export default function HudKeybindGuide({ variant = 'dashboard' }: HudKeybindGui
 
       <p style={sectionStyle}>ZFE OPEN-CHAT KEY</p>
       <p style={{ fontSize: isPublic ? '12px' : '11px', color: muted, margin: '0 0 8px', lineHeight: '1.7' }}>
-        ZFE reads the native <code style={codeStyle}>OpenChatKey</code>. The packaged default is{' '}
-        <code style={codeStyle}>INSERT</code>. To use <code style={codeStyle}>DELETE</code>, set{' '}
-        <code style={codeStyle}>openKey=DELETE</code> in <code style={codeStyle}>Data/FCMChat.ini</code>{' '}
-        and set <code style={codeStyle}>OpenChatKey=DELETE</code> in the active{' '}
-        <code style={codeStyle}>[TextChat]</code> configuration. If{' '}
-        <code style={codeStyle}>Data/configuration/zfe.ini</code> has a{' '}
-        <code style={codeStyle}>[TextChat]</code> override, it wins over the fragment at{' '}
-        <code style={codeStyle}>Data/ZFE/TextChat/fragments/FCMChatWidget.ini</code>. Restart Fallout 76{' '}
-        after changing native ZFE configuration. Supported values are{' '}
+        ZFE starts with its native <code style={codeStyle}>OpenChatKey</code>, but FCM synchronizes
+        the watcher to <code style={codeStyle}>openKey</code> in <code style={codeStyle}>Data/FCMChat.ini</code>{' '}
+        after widget discovery. To use <code style={codeStyle}>DELETE</code>, set{' '}
+        <code style={codeStyle}>openKey=DELETE</code> there and reload the widget or restart Fallout.
+        Supported values are{' '}
         <code style={codeStyle}>INSERT</code>, <code style={codeStyle}>DELETE</code>,{' '}
         <code style={codeStyle}>HOME</code>, <code style={codeStyle}>END</code>,{' '}
         <code style={codeStyle}>PAGE_DOWN</code>/<code style={codeStyle}>PAGEDOWN</code>/<code style={codeStyle}>PGDN</code>,{' '}
@@ -173,14 +170,12 @@ export default function HudKeybindGuide({ variant = 'dashboard' }: HudKeybindGui
         <li>Press <code style={codeStyle}>F11</code> to open the HUDModLoader menu.</li>
         <li>Choose <code style={codeStyle}>FCM</code> → <code style={codeStyle}>Customize...</code> to resize, move, change opacity/theme, or reset settings.</li>
         <li>After pressing <code style={codeStyle}>Insert</code>, use the configured scroll keys to review history. Choose <code style={codeStyle}>scrollBottomKey</code> if you want a keyboard shortcut for newest; the menu's <code style={codeStyle}>Scroll to newest</code> action is always available.</li>
+        <li>Select a row containing a link, then press <code style={codeStyle}>activateLinkKey</code> (Enter by default). The binding is inactive until Open Chat owns the editor.</li>
         <li>Select <code style={codeStyle}>FCM</code> → <code style={codeStyle}>Customize...</code> → <code style={codeStyle}>Reset all settings</code> only when you want the packaged defaults restored.</li>
       </ol>
       <p style={{ fontSize: isPublic ? '12px' : '11px', color: muted, marginTop: '8px', marginBottom: '0' }}>
-        If Insert does not open chat, verify that <code style={codeStyle}>openKey</code> in
-        <code style={codeStyle}>Data/FCMChat.ini</code> matches <code style={codeStyle}>OpenChatKey</code> in
-        <code style={codeStyle}>Data/ZFE/TextChat/fragments/FCMChatWidget.ini</code>. If
-        <code style={codeStyle}>Data/configuration/zfe.ini</code> has a <code style={codeStyle}>[TextChat]</code>
-        <code style={codeStyle}>OpenChatKey</code> override, that value must match too. The known
+        If Insert does not open chat, verify <code style={codeStyle}>openKey</code> in
+        <code style={codeStyle}>Data/FCMChat.ini</code> and reload the widget. The known
         fallback is <code style={codeStyle}>PAGE_DOWN</code> / <code style={codeStyle}>Page Down</code>.
         Use the loader reload control for live widget changes; replacing the BA2 or ZFE fragment
         requires exiting and restarting Fallout 76 so native configuration is reloaded.

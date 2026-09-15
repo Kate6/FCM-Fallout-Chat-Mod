@@ -74,6 +74,7 @@ import { renewBridgeLease, clearBridgeLease } from './overlayServerBridge';
 import { sendServerMessage, ServerMessageError } from './serverMessageService';
 import { parseHudSendCarrier, claimHudSend, hudSendReceiptIdentity, hudSendResponse, HUD_SEND_RECEIPT_SECONDS } from './hudSendReceipt';
 import { HUD_LAYOUT_CONTROL, HUD_LAYOUT_EVENT, parseHudLayout, parseHudLayoutControl, readHudLayout, writeHudLayout } from './hudLayoutService';
+import { HUD_OPEN_URL_CONTROL, parseHudOpenUrlControl } from './hudOpenUrl';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -118,8 +119,8 @@ const STATIC_HISTORY_PER_CHANNEL = Math.max(
 );
 // xScal retains at most 128 queued events and asks for at most 64 per poll.
 // The complete bounded relay history fits in that queue: 15 rows for each of
-// the five durable channels (the 75-row SQL window) plus the 50-row Redis
-// window for the current SERVER room. The widget drains this in multiple
+// the five durable channels (the 75-row SQL window), the 50-row Redis
+// window for the current SERVER room, and one terminal marker. The widget drains this in multiple
 // pollEvents calls; truncating it to one poll made xScal and ZFE show different
 // initial history.
 const NATIVE_SUBSCRIBE_HISTORY_LIMIT = 125;
@@ -1122,6 +1123,23 @@ async function handleSend(ws: WebSocket, frame: Record<string, unknown>): Promis
     return;
   }
 
+  if (slug === 'server' && body.startsWith(HUD_OPEN_URL_CONTROL)) {
+    const url = parseHudOpenUrlControl(body);
+    if (!url) { await deliver(errEnvelope('invalid_request', 'Invalid browser link')); return; }
+    if (!(await checkWorldControlRateLimit(identity.userId))) {
+      await deliver(errEnvelope('rate_limited', 'Browser links are temporarily rate limited')); return;
+    }
+    // Load lazily to preserve relayHandler <-> websocket/handlers initialization order.
+    const { broadcastToUsers } = require('../../websocket/handlers') as typeof import('../../websocket/handlers');
+    const delivered = await broadcastToUsers({ type: 'hud:open-url', payload: { url } }, [identity.linkedUserId!]);
+    if (delivered < 1) {
+      await deliver(errEnvelope('desktop_unavailable', 'Open the desktop overlay to launch links'));
+      return;
+    }
+    sendControlAck(ws);
+    return;
+  }
+
   // ── Authenticated world/roster control intercept (before ALL_SLUGS check) ──
   // Actor identity comes only from `identity`, derived from the relay token above.
   // Controls are bounded, applied to membership, and never broadcast/persisted.
@@ -1910,11 +1928,25 @@ async function handleSubscribeInternal(ws: WebSocket, frame: Record<string, unkn
     state.cursor = Math.max(state.cursor, eventCursor);
   }
 
-  // Release the barrier only after the complete snapshot is on the socket. Live events that
-  // arrived during the database/Redis reads are sorted and replayed once, skipping any cursor
-  // already included in the snapshot. This closes the subscribe/backfill race without dropping
-  // a message or relying on each HUD renderer to deduplicate it.
-  state.initializing = false;
+  // Reserve the terminal cursor while the live-frame barrier remains closed. Any live frame
+  // queued before this await completes has an earlier global relay sequence; after the await,
+  // draining the queue and emitting the marker are synchronous, so the completion marker is the
+  // final frame in the subscribe snapshot transaction.
+  const historyDoneCursor = await nextRelaySeq();
+  const historyDoneEvent = {
+    id: historyDoneCursor,
+    kind: 'chat.message',
+    channel: 'system',
+    messageId: uuidv4(),
+    senderUserId: 'system',
+    senderDisplayName: 'FCM',
+    targetUserId: '',
+    body: 'FCMCTL/1/HISTORY-DONE',
+    createdAt: new Date().toISOString(),
+  };
+
+  // Live events that arrived during the database/Redis reads are sorted and replayed once,
+  // skipping any cursor already included in the snapshot. The terminal marker follows them.
   const pendingLiveFrames = state.pendingLiveFrames.splice(0);
   state.pendingLiveBytes = 0;
   pendingLiveFrames.sort((a, b) => a.cursor - b.cursor);
@@ -1927,6 +1959,13 @@ async function handleSubscribeInternal(ws: WebSocket, frame: Record<string, unkn
     initialCursors.add(pending.cursor);
     state.cursor = Math.max(state.cursor, pending.cursor);
   }
+  if (!sendRaw(ws, JSON.stringify({ op: 'event', cursor: historyDoneCursor,
+    event: relayHudEventForClient(historyDoneEvent, supportsHudCosmeticsTransport) }))) {
+    subscribers.delete(state);
+    return;
+  }
+  state.cursor = Math.max(state.cursor, historyDoneCursor);
+  state.initializing = false;
 
   // If still LIMITED (not linked), push the link-code notice on THIS long-lived subscribe
   // connection. The register/hello pushes land on a transient connection the client's

@@ -30,6 +30,8 @@ export interface Environment {
   MESSAGE_RETENTION_DAYS: number;
   DISCORD_TOKEN: string;
   DISCORD_CHANNEL_ID: string;
+  /** Optional command-only Discord channel where the bot maintains a sticky help embed. */
+  DISCORD_BOT_COMMANDS_CHANNEL_ID: string;
   DISCORD_CLIENT_ID: string;
   DISCORD_CLIENT_SECRET: string;
   DISCORD_SERVER_ID: string;
@@ -152,6 +154,13 @@ export interface Environment {
   GITHUB_WEBHOOK_SECRET: string;
   // Staff role for ticket gating (developers) — owner/admin/moderator reuse the existing ids.
   DEVELOPER_ROLE_ID: string;
+  MCP_REMOTE_ENABLED: boolean;
+  MCP_ISSUER_URL: string;
+  MCP_RESOURCE_URL: string;
+  MCP_ALLOWED_ORIGINS: string[];
+  MCP_OAUTH_STATE_SECRET: string;
+  MCP_ACCESS_TOKEN_TTL_SECONDS: number;
+  MCP_REFRESH_TOKEN_TTL_SECONDS: number;
   // Role @-pinged in bug/suggestion ticket threads (support team).
   SUPPORT_ROLE_ID: string;
   // Nexus OAuth 2.0 + PKCE (feature-flagged: disabled when creds are absent)
@@ -230,6 +239,7 @@ const env: Environment = {
   // Discord bridge
   DISCORD_TOKEN: process.env.DISCORD_TOKEN || '',
   DISCORD_CHANNEL_ID: process.env.DISCORD_CHANNEL_ID || '',
+  DISCORD_BOT_COMMANDS_CHANNEL_ID: process.env.DISCORD_BOT_COMMANDS_CHANNEL_ID || '',
 
   // Discord OAuth2
   DISCORD_CLIENT_ID: process.env.DISCORD_CLIENT_ID || '',
@@ -325,6 +335,13 @@ const env: Environment = {
   GITHUB_PROJECT_NUMBER: parseInt(process.env.GITHUB_PROJECT_NUMBER || '5', 10),
   GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET || '',
   DEVELOPER_ROLE_ID: process.env.DEVELOPER_ROLE_ID || '',
+  MCP_REMOTE_ENABLED: process.env.MCP_REMOTE_ENABLED === 'true',
+  MCP_ISSUER_URL: process.env.MCP_ISSUER_URL || 'https://falloutchatmod.com',
+  MCP_RESOURCE_URL: process.env.MCP_RESOURCE_URL || 'https://falloutchatmod.com/mcp',
+  MCP_ALLOWED_ORIGINS: (process.env.MCP_ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean),
+  MCP_OAUTH_STATE_SECRET: process.env.MCP_OAUTH_STATE_SECRET || '',
+  MCP_ACCESS_TOKEN_TTL_SECONDS: Math.min(900, Math.max(60, Number.parseInt(process.env.MCP_ACCESS_TOKEN_TTL_SECONDS || '600', 10) || 600)),
+  MCP_REFRESH_TOKEN_TTL_SECONDS: Math.min(259200, Math.max(86400, Number.parseInt(process.env.MCP_REFRESH_TOKEN_TTL_SECONDS || '259200', 10) || 259200)),
   SUPPORT_ROLE_ID: process.env.SUPPORT_ROLE_ID || '',
   // Nexus OAuth 2.0 + PKCE (feature-flagged: disabled when creds are absent)
   NEXUS_OAUTH_CLIENT_ID: process.env.NEXUS_OAUTH_CLIENT_ID || '',
@@ -463,6 +480,16 @@ if (env.NODE_ENV === 'production') {
   if (!env.DB_PASSWORD) missing.push('DB_PASSWORD');
   if (!env.DISCORD_CLIENT_ID) missing.push('DISCORD_CLIENT_ID');
   if (!env.DISCORD_CLIENT_SECRET) missing.push('DISCORD_CLIENT_SECRET');
+  if (env.MCP_REMOTE_ENABLED) {
+    if (!process.env.MCP_ISSUER_URL) missing.push('MCP_ISSUER_URL');
+    if (!process.env.MCP_RESOURCE_URL) missing.push('MCP_RESOURCE_URL');
+    if (env.MCP_ALLOWED_ORIGINS.length === 0) missing.push('MCP_ALLOWED_ORIGINS');
+    if (env.MCP_OAUTH_STATE_SECRET.length < 32) missing.push('MCP_OAUTH_STATE_SECRET (minimum 32 characters)');
+    for (const [name, value] of [['MCP_ISSUER_URL', env.MCP_ISSUER_URL], ['MCP_RESOURCE_URL', env.MCP_RESOURCE_URL]] as const) {
+      try { if (new URL(value).protocol !== 'https:') missing.push(`${name} (must be HTTPS)`); }
+      catch { missing.push(`${name} (must be an absolute URL)`); }
+    }
+  }
   if (!env.REDIS_PASSWORD && !env.REDIS_URL) missing.push('REDIS_PASSWORD');
   missing.push(...collectMinioProductionErrors(env));
   missing.push(...collectSupporterTierProductionErrors({

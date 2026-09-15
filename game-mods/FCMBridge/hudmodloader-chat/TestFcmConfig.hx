@@ -50,6 +50,7 @@ class TestFcmConfig {
         eqs("HUD transport decodes tag", FcmConfig.hudTransportTag(hudWire), "X;Y");
         eqs("HUD transport validates color", FcmConfig.hudTransportStarColor(hudWire), "#FD4DA6");
         eqs("HUD name color carrier", FcmConfig.hudTransportNameColor("FCMHUD/1;n=%23FF8800"), "#FF8800");
+        eqs("HUD link carrier", FcmConfig.hudTransportValue("FCMHUD/1;u=https%3A%2F%2Fexample.com%2Fx", "u"), "https://example.com/x");
         eqs("HUD rejects invalid name color", FcmConfig.hudTransportNameColor("FCMHUD/1;n=url%28evil%29"), "");
         eqb("HUD transport rejects ordinary target", FcmConfig.hudTransportHasStar("user_123"), false);
         eqs("HUD transport rejects invalid color",
@@ -134,6 +135,7 @@ class TestFcmConfig {
         eqi("default borderColor", d.borderColor, 0xF5CB5B);
         eqi("default textColor", d.textColor, 0xFAF4DA);
         eqi("default channelTagColor", d.channelTagColor, 0x8FBC8F);
+        eqi("default selectedRowColor", d.selectedRowColor, 0xF5CB5B);
         check("default bgAlpha", d.bgAlpha == 0.94);
         eqi("default maxMessages", d.maxMessages, 200);
         eqi("default maxSendLen", d.maxSendLen, 225);
@@ -142,6 +144,14 @@ class TestFcmConfig {
         eqi("clamp pollMs min", FcmConfig.parse("[FCMChat]\npollMs=10\n").pollMs, 1000);
         eqi("clamp pollMs max", FcmConfig.parse("[FCMChat]\npollMs=999999\n").pollMs, 60000);
         eqs("default openKey", d.openKey, "INSERT");
+        var environment = FcmConfig.parse("[FCMChat]\nopenKey=T\nchannelNextKey=TeamChat\nhideInHUDModes=ContainerMode\nlinkUrl=dev.falloutchatmod.com/link\n");
+        var merged = FcmConfig.mergePersistedCustomization(environment,
+            "[FCMChat]\nopenKey=INSERT\nchannelNextKey=NextPage\nhideInHUDModes=\nlinkUrl=falloutchatmod.com/link\ntabActiveColor=#5AB0FF\n");
+        eqs("persisted appearance cannot restore stale open key", merged.openKey, "T");
+        eqs("persisted appearance cannot restore stale channel key", merged.channelNextKey, "TeamChat");
+        eqs("persisted appearance keeps environment endpoint", merged.linkUrl, "dev.falloutchatmod.com/link");
+        eqs("persisted appearance keeps container safety gate", merged.hideInHUDModes.join(","), "ContainerMode");
+        eqi("persisted appearance still applies active-tab color", merged.tabActiveColor, 0x5AB0FF);
         // openKey is interpolated into htmlText (idle prompt) — must be a safe key token
         // ([A-Za-z0-9_]); anything else falls back to default (crash rule #2, htmlText injection).
         eqs("openKey safe kept", FcmConfig.parse("[FCMChat]\nopenKey=PAGE_DOWN\n").openKey, "PAGE_DOWN");
@@ -151,6 +161,7 @@ class TestFcmConfig {
         eqs("default scrollUpKey", d.scrollUpKey, "Up");
         eqs("default scrollDownKey", d.scrollDownKey, "Down");
         eqs("default scrollBottomKey (unset)", d.scrollBottomKey, "");
+        eqs("default link activation key", d.activateLinkKey, "ENTER");
         eqs("default hideKey", d.hideKey, "DELETE");
         eqb("default showChannelTag", d.showChannelTag, true);
         eqb("default showHints", d.showHints, false);
@@ -290,9 +301,10 @@ class TestFcmConfig {
         editorCfg.customizeSize("cz_input_height_up");
         eqi("editor follows live input height", editorCfg.inputRect().height, 46);
 
-        var colors = FcmConfig.parse("[FCMChat]\ninputBgColor=#123456\ninputTextColor=#ABCDEF\nbgAlpha=0.25\n");
+        var colors = FcmConfig.parse("[FCMChat]\ninputBgColor=#123456\ninputTextColor=#ABCDEF\nselectedRowColor=#654321\nbgAlpha=0.25\n");
         eqi("input background parses", colors.inputBgColor, 0x123456);
         eqi("input font color parses", colors.inputTextColor, 0xABCDEF);
+        eqi("selected row color parses", colors.selectedRowColor, 0x654321);
         eqs("appearance survives local save", FcmConfig.parse(colors.toIni()).toIni(), colors.toIni());
         for (field in FcmConfig.COLOR_FIELDS) {
             check("color menu action " + field, colors.customizeColor("cz_color_" + field + "_5"));
@@ -347,6 +359,7 @@ class TestFcmConfig {
         eqs("parse scrollUpKey", c.scrollUpKey, "Console");
         eqs("parse scrollDownKey", c.scrollDownKey, "F12");
         eqs("parse scrollBottomKey", c.scrollBottomKey, "HOME");
+        eqs("parse link activation key", FcmConfig.parse("[FCMChat]\nactivateLinkKey=F8\n").activateLinkKey, "F8");
         eqs("parse hideKey", c.hideKey, "DiagnosticSnapshot");
         eqb("channel tag visibility override ignored", c.showChannelTag, true);
         eqb("parse showHints", c.showHints, true);

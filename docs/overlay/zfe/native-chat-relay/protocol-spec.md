@@ -426,9 +426,10 @@ client can continue from the newest event it received.
 FCM's native subscriber implementation uses a separate bounded subscribe-time backfill so the
 HUD receives context on first load. A cursor-zero subscription sends up to 15 recent rows for
 each static feed (`global`, `trade`, `events`, `infests`, and `raids`) and up to 50 rows for the
-current ephemeral `server` room: 125 events total. This is an FCM relay policy chosen to fit
-xScal's 128-event queue; the native `pollEvents` limit remains 64, so the widget drains the
-ordered snapshot over multiple polls. Other relay consumers must not assume this exact window.
+current ephemeral `server` room, followed by one terminal `FCMCTL/1/HISTORY-DONE` system event.
+This is an FCM relay policy chosen to fit xScal's queue; the widget requests 16 events per
+`pollEvents` call and drains the ordered snapshot over multiple polls. Other relay consumers must
+not assume this exact window.
 
 ### Subscribe
 
@@ -624,10 +625,10 @@ Redis, or any other backend, as long as the WebSocket JSON contract stays compat
 - [../two-way-chat-implemented.md](../two-way-chat-implemented.md) — M7 in-game send over FCMHUD/1
 
 
-### Recovery completion (widget v2.10.55)
+### History completion (widget v2.10.93)
 
-`FCMCTL/1/RESYNC` replays up to 15 recent rows per static feed with fresh delivery cursors.
-It finishes with a native-known `chat.message` event on `system`, `senderUserId: "system"`,
+Both the initial subscribe snapshot and `FCMCTL/1/RESYNC` replay finish with a native-known
+`chat.message` event on `system`, `senderUserId: "system"`,
 and body `FCMCTL/1/HISTORY-DONE`. This marker is emitted even for empty history and must not
 be rendered by the widget. Native send acceptance/queueing is not replay completion.
 The widget retries at most three times with at least ten seconds between attempts until

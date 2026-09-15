@@ -6,15 +6,14 @@
  *   2. Mirrors to live WS (disconnect, mute-flag flip)
  *   3. Propagates to Discord where applicable (timeouts)
  *   4. Writes an audit_log row
- *   5. Posts a public system message into General announcing the action
+ *   5. Posts a staff-only Vault Security (mod-log) embed for the action
  *
  * The WS guards consume this state; the REST controller drives this service.
  */
-import { v4 as uuidv4 } from 'uuid';
 import prisma from '../config/prisma';
 import logger from '../config/logger';
 import env from '../config/environment';
-import { broadcast, broadcastMessageDeletion, disconnectByUserId, markClientMuted, notifyAndDisconnect } from '../websocket/handlers';
+import { broadcastMessageDeletion, markClientMuted, notifyAndDisconnect } from '../websocket/handlers';
 import { getDiscordClient, postModAlert } from './discordService';
 import { isProtectedTarget } from './userRoleService';
 import { revokeTokensForLinkedUser } from './relay/tokenService';
@@ -24,7 +23,6 @@ import type { GuildMember } from 'discord.js';
 const KICK_COOLDOWN_MS = 5 * 60 * 1000;        // 5 min
 const MAX_MUTE_MS      = 30 * 24 * 60 * 60 * 1000; // 30 d (hard cap)
 const DISCORD_TIMEOUT_CAP_MS = 28 * 24 * 60 * 60 * 1000; // Discord API ceiling
-const GENERAL_CHANNEL_ID = '00000000-0000-0000-0000-000000000001';
 const WS_CLOSE_BANNED = 4002;
 
 async function evictRelaySessions(targetId: string, reason: 'banned' | 'kicked'): Promise<void> {
@@ -62,21 +60,6 @@ export class ProtectedTargetError extends Error {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-async function announceInGeneral(text: string): Promise<void> {
-  broadcast({
-    type: 'chat:message',
-    payload: {
-      id: uuidv4(),
-      content: text,
-      username: '[Mod]',
-      userId: 'system',
-      channelId: GENERAL_CHANNEL_ID,
-      source: 'bot',
-      timestamp: new Date().toISOString(),
-    },
-  });
-}
-
 async function audit(actorId: string | null, action: string, targetId: string, reason: string, metadata?: unknown): Promise<void> {
   await prisma.auditLog.create({
     data: {
@@ -99,20 +82,39 @@ async function ensureNotProtected(targetId: string): Promise<void> {
   }
 }
 
-async function applyDiscordTimeout(discordId: string | null, ms: number, reason: string): Promise<void> {
-  if (!discordId) return;
+async function applyDiscordTimeout(discordId: string | null, ms: number, reason: string): Promise<boolean> {
+  if (!discordId) return false;
   const client = getDiscordClient();
-  if (!client) { logger.warn('Discord client not connected — skipping timeout'); return; }
+  if (!client) { logger.warn('Discord client not connected — skipping timeout'); return false; }
   const guildId = env.DISCORD_SERVER_ID;
-  if (!guildId) return;
+  if (!guildId) return false;
   try {
     const guild = await client.guilds.fetch(guildId);
     const member = await guild.members.fetch(discordId).catch(() => null);
-    if (!member) return;
+    if (!member) return false;
     const clamped = Math.min(ms, DISCORD_TIMEOUT_CAP_MS);
     await member.timeout(clamped, reason.slice(0, 512));
+    return true;
   } catch (err) {
     logger.warn({ err, discordId }, 'failed to apply Discord timeout (bot perms / hierarchy?)');
+    return false;
+  }
+}
+
+async function applyDiscordKick(discordId: string | null, reason: string): Promise<{ applied: boolean; warning?: string }> {
+  if (!discordId) return { applied: false, warning: 'Target has no linked Discord account' };
+  const client = getDiscordClient();
+  if (!client) return { applied: false, warning: 'Discord bot not connected' };
+  if (!env.DISCORD_SERVER_ID) return { applied: false, warning: 'DISCORD_SERVER_ID not configured' };
+  try {
+    const guild = await client.guilds.fetch(env.DISCORD_SERVER_ID);
+    const member = await guild.members.fetch(discordId).catch(() => null);
+    if (!member) return { applied: false, warning: 'Target is not in the Discord guild' };
+    await member.kick(reason.slice(0, 512));
+    return { applied: true };
+  } catch (err: any) {
+    logger.warn({ err, discordId }, 'failed to kick Discord member');
+    return { applied: false, warning: `Discord kick failed: ${err?.message ?? 'unknown'} (check Kick Members permission and role hierarchy)` };
   }
 }
 
@@ -263,11 +265,19 @@ async function displayNameOf(userId: string): Promise<string> {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export async function kickUser(targetId: string, actorId: string, reason: string): Promise<{ disconnected: number; until: Date }> {
+export async function kickUser(
+  targetId: string,
+  actorId: string,
+  reason: string,
+  options: { kickDiscord?: boolean } = {},
+): Promise<{ disconnected: number; until: Date; discordKicked: boolean; discordWarning?: string }> {
   await ensureNotProtected(targetId);
   if (!reason?.trim()) throw new Error('Kick reason is required');
   const until = new Date(Date.now() + KICK_COOLDOWN_MS);
-  await prisma.user.update({ where: { id: targetId }, data: { kickedUntil: until } });
+  const target = await prisma.user.update({ where: { id: targetId }, data: { kickedUntil: until }, select: { discordId: true } });
+  const discordKick = options.kickDiscord
+    ? await applyDiscordKick(target.discordId, `FCM kick: ${reason}`)
+    : { applied: false as const };
   // Notify before close so the overlay can render "You were kicked: <reason>"
   const disconnected = notifyAndDisconnect(
     targetId,
@@ -276,9 +286,8 @@ export async function kickUser(targetId: string, actorId: string, reason: string
     `KICK_COOLDOWN:${Math.ceil(KICK_COOLDOWN_MS / 1000)}`,
   );
   await evictRelaySessions(targetId, 'kicked');
-  await audit(actorId, 'kick', targetId, reason, { until: until.toISOString(), disconnected });
+  await audit(actorId, 'kick', targetId, reason, { until: until.toISOString(), disconnected, discordKicked: discordKick.applied, discordWarning: discordKick.warning });
   const [actorName, targetName] = await Promise.all([displayNameOf(actorId), displayNameOf(targetId)]);
-  await announceInGeneral(`${actorName} kicked ${targetName} for 5 minutes — ${reason}`);
   // Mod-log alert (fire-and-forget — never throws)
   postModAlert({
     title: '👢 User Kicked',
@@ -293,7 +302,7 @@ export async function kickUser(targetId: string, actorId: string, reason: string
     timestamp: true,
     footerText: `Target ID: ${targetId}`,
   }).catch(() => {});
-  return { disconnected, until };
+  return { disconnected, until, discordKicked: discordKick.applied, discordWarning: discordKick.warning };
 }
 
 export async function muteUser(
@@ -315,13 +324,11 @@ export async function muteUser(
   markClientMuted(targetId, true, { until: until.toISOString(), reason, category });
   let discordPropagated = false;
   if (!skipDiscord && updated.discordId) {
-    await applyDiscordTimeout(updated.discordId, clamped, `${category}: ${reason}`);
-    discordPropagated = true;
+    discordPropagated = await applyDiscordTimeout(updated.discordId, clamped, `${category}: ${reason}`);
   }
   await audit(actorId, 'mute', targetId, `${category}: ${reason}`, { until: until.toISOString(), durationMs: clamped, discordPropagated });
   const [actorName, targetName] = await Promise.all([displayNameOf(actorId), displayNameOf(targetId)]);
   const humanDur = formatDuration(clamped);
-  await announceInGeneral(`${actorName} muted ${targetName} for ${humanDur} (${category}): ${reason}`);
   // Mod-log alert (fire-and-forget — never throws)
   postModAlert({
     title: '🔇 User Muted',
@@ -350,7 +357,17 @@ export async function unmuteUser(targetId: string, actorId: string, reason: stri
   if (u.discordId) await clearDiscordTimeout(u.discordId);
   await audit(actorId, 'unmute', targetId, reason);
   const [actorName, targetName] = await Promise.all([displayNameOf(actorId), displayNameOf(targetId)]);
-  await announceInGeneral(`${actorName} unmuted ${targetName}${reason ? ` — ${reason}` : ''}`);
+  postModAlert({
+    title: '🔊 User Unmuted',
+    color: '#00FF7F',
+    fields: [
+      { name: 'Actor', value: actorName, inline: true },
+      { name: 'Target', value: targetName, inline: true },
+      { name: 'Reason', value: reason.slice(0, 1024) || 'No reason provided' },
+    ],
+    timestamp: true,
+    footerText: `Target ID: ${targetId}`,
+  }).catch(() => {});
 }
 
 export interface NewBanEvidence {
@@ -368,6 +385,7 @@ export async function createBan(
   reasonText: string,
   bannedUntil: Date | null, // null = permanent
   evidence: NewBanEvidence[],
+  options: { banDiscord?: boolean } = {},
 ): Promise<{ banId: string; disconnected: number; discordLockdown: DiscordLockdownResult }> {
   await ensureNotProtected(targetId);
   if (evidence.length === 0) throw new Error('Ban requires at least one piece of evidence');
@@ -390,13 +408,14 @@ export async function createBan(
     select: { id: true },
   });
 
-  // Discord lockdown: strip roles + disconnect voice; for permanent bans, apply
-  // guild ban. Save the stripped role IDs so we can restore on unban.
+  // Discord lockdown: strip roles + disconnect voice; permanent bans and the
+  // Discord slash-ban path apply a guild ban. Save the stripped role IDs so we
+  // can restore on unban.
   // Surfaces warnings (missing perms, role-hierarchy issues, guild-ban failure)
   // back to the controller so the dashboard can show "ban applied — Discord
   // propagation skipped role X above bot's top role".
   const target = await prisma.user.findUnique({ where: { id: targetId }, select: { discordId: true } });
-  const lockdown = await applyDiscordBanLockdown(target?.discordId ?? null, bannedUntil === null, `${category}: ${reasonText}`);
+  const lockdown = await applyDiscordBanLockdown(target?.discordId ?? null, bannedUntil === null || options.banDiscord === true, `${category}: ${reasonText}`);
 
   await prisma.user.update({
     where: { id: targetId },
@@ -452,7 +471,6 @@ export async function createBan(
   });
   const [actorName, targetName] = await Promise.all([displayNameOf(actorId), displayNameOf(targetId)]);
   const dur = bannedUntil ? formatDuration(bannedUntil.getTime() - Date.now()) : 'permanent';
-  await announceInGeneral(`${actorName} banned ${targetName} (${dur}, ${category}): ${reasonText.slice(0, 200)}`);
   // Mod-log alert (fire-and-forget — never throws)
   postModAlert({
     title: '🔨 User Banned',
@@ -493,6 +511,16 @@ export async function deleteMessageById(messageId: string, actorId: string, reas
     },
   }).catch((err) => logger.warn({ err, messageId }, 'message deletion audit write failed'));
   broadcastMessageDeletion(messageId);
+  postModAlert({
+    title: '🗑️ Message Deleted',
+    color: '#FFA500',
+    fields: [
+      { name: 'Message ID', value: messageId, inline: false },
+      { name: 'Reason', value: reason.slice(0, 1024) || 'No reason provided' },
+    ],
+    timestamp: true,
+    footerText: `Actor ID: ${actorId}`,
+  }).catch(() => {});
 }
 
 export async function reverseBan(banId: string, actorId: string, reverseReason: string): Promise<void> {
@@ -528,7 +556,6 @@ export async function reverseBan(banId: string, actorId: string, reverseReason: 
   }
   await audit(actorId, 'unban', ban.userId, reverseReason, { banId });
   const [actorName, targetName] = await Promise.all([displayNameOf(actorId), displayNameOf(ban.userId)]);
-  await announceInGeneral(`${actorName} unbanned ${targetName}${reverseReason ? ` — ${reverseReason}` : ''}`);
   // Mod-log alert (fire-and-forget — never throws)
   postModAlert({
     title: '✅ Ban Reversed',
@@ -561,7 +588,13 @@ export async function sweepExpired(): Promise<{ unbanned: number; unmuted: numbe
     const saved = Array.isArray(u.savedDiscordRoles) ? (u.savedDiscordRoles as unknown as string[]) : [];
     await liftDiscordBanLockdown(u.discordId, saved);
     const name = await displayNameOf(u.id);
-    await announceInGeneral(`${name}'s temporary ban expired`);
+    postModAlert({
+      title: '⌛ Temporary Ban Expired',
+      color: '#00FF7F',
+      fields: [{ name: 'Target', value: name, inline: true }],
+      timestamp: true,
+      footerText: `Target ID: ${u.id}`,
+    }).catch(() => {});
   }
 
   const expiredMutes = await prisma.user.findMany({

@@ -1,0 +1,366 @@
+# Automated HUD-mod test harness plan
+
+## Required change-to-install flow
+
+Every visible HUD widget change follows this sequence; do not skip directly from source edits to a
+game install:
+
+1. Add or update pure Haxe tests for parsing, matching, state gates, and provider-neutral logic.
+2. Compile with Haxe diagnostics and build the production SWF.
+3. Normalize and structurally validate the FWS v32 artifact, including emoji linkage.
+4. Run all `test-*.hxml`, package/anchor/BA2 tests, and the full `simulator/npm test` Playwright
+   suite. Cover both xScal and ZFE whenever changed behavior crosses providers.
+5. Verify teardown: the owned Vite server, page, player, and browser close after the run; failure
+   artifacts are retained without leaving a listener on port 41739.
+6. Rebuild the one-entry BA2 with the validated SWF, extract it, and require byte equality.
+7. Generate the requested target package, inspect its endpoint/config stamps, and preserve unrelated
+   game configuration during an authorized local install.
+8. Record remaining bounded in-game checks. Ruffle cannot certify Bethesda GFx font metrics,
+   HUDMenu handled-return ordering, provider DLL behavior, or Fallout control suppression.
+
+Any failing step blocks packaging and installation. New harness-testable HUD behavior must add
+Playwright coverage in the same change and run in the required `hud-ruffle` CI gate.
+
+Status: M0 and the installed-xScal 0.1.15 browser contract fixture are implemented, 2026-09-14;
+rendered widget-to-provider integration remains pending.
+This does not claim native Fallout 76, ZFE, xScal, or GFx
+acceptance. It defines a layered simulator plus an optional real-game smoke runner.
+
+The implemented M0 runner lives in
+`game-mods/FCMBridge/hudmodloader-chat/simulator/`. It self-hosts pinned Ruffle 0.6.0, copies and
+hashes the exact normalized production SWF, renders it in Chromium, records browser key delivery,
+captures evidence, and lets Playwright own and tear down its strict loopback server. The current
+artifact test completes in roughly two seconds locally. An isolated Haxe contract-host prototype
+is retained behind `?mode=harness`. The in-movie mock xScal object is discovered by the production
+widget and can drive its connect/poll/render path, but Ruffle does not expose the harness's AVM2
+ExternalInterface callbacks to browser automation. That is an emulator compatibility limitation,
+not a widget or Fallout failure, and the browser-to-movie interaction test remains skipped rather
+than being reported as passing M1. Harness diagnostics are retained in a bounded in-memory field;
+they must never use Haxe `trace()`, because Ruffle paints trace output over the HUD stage.
+The browser laboratory scales its complete 16:9 stage to the available workspace width; it must
+not crop the right edge when the evidence sidebar is visible or when the viewport narrows.
+
+For an explicit hosted-DEV history check, run `npm run sync:hosted-dev` in the simulator before
+starting it. The sync process reads the DEV persona key from `DEV_PERSONA_LOGIN_SECRET` or the
+existing `service=fcm-overlay, environment=dev` OS-keyring entry, creates a short-lived synthetic
+DEV session, honors the hosted golden-build version gate, and requests up to 300 rows for each
+ordinary channel. It writes only a gitignored `public/hosted-dev-snapshot.json` containing the
+isolated environment's fake chat rows; the key and session token are never written or sent to the
+browser/SWF. Harness mode loads this same-origin snapshot into the mock xScal queue. This is a
+point-in-time history fixture, not a persistent live connection, and it never targets production.
+The sync retains the latest 50 rows independently per channel, merges those channel batches by
+`created_at`, normalizes backend channel names to HUD slugs, and returns at most 16 records per
+`pollEvents` call. This preserves coverage of every populated channel without feeding an unbounded
+300-row General batch through repeated immediate render generations. The current DEV seed produces
+75 retained rows, matching the scale of the fresh 75-record native xScal capture. Both simulator
+and distributable HUD retain the normal 200-row default.
+Manual compose uses real keyboard delivery into the SWF because Ruffle does not expose the
+harness's AVM2 callbacks to the browser. The right-panel Open chat/Up/Down/Page/Delete controls
+focus the player and emit the corresponding browser key edges; a physical Insert key works after
+the stage is focused. The harness translates supported keys into both the bubbling
+`HUDMod::UserEvent` shape and numeric `Input.*` state, exercising the two input surfaces used by
+ZFE and xScal without claiming suppression of gameplay controls. `SharedHUDTools` owns the visible
+editor, Enter submits, and Escape cancels. The mock provider queues an authoritative self-echo
+with the returned message ID. This never sends input to the desktop, Fallout process, or hosted
+DEV backend.
+
+`npm run dev:hosted` is the explicit write-enabled variant. Its Vite middleware holds the
+short-lived synthetic DEV session server-side, accepts only loopback-origin requests, validates
+the allowlisted HUD channel and 1..500-character body, opens a DEV WebSocket with the active
+golden-build header, sends `chat:send`, waits for `message:ack`, and closes the socket. The SWF sees
+only the same-origin send endpoint; credentials and session tokens never enter browser content.
+The ordinary `npm run dev` remains local-mock-only and cannot write remotely. The evidence panel
+shows `Hosted DEV: LIVE` only after the bridge authenticates successfully.
+
+The generated simulator copy of `FCMChat.ini` disables inactivity auto-hide so a healthy idle
+widget stays observable during long browser runs. The source/package config retains the normal
+60-second in-game auto-hide behavior; the simulator-only override is never packaged into a BA2.
+The right-panel keybind profile editor similarly changes only an in-memory simulator profile.
+Applying it regenerates the served INI and reloads the same widget. Its buttons emit both the
+configured named HUD action and matching Windows virtual-key edge, allowing the same profile to be
+replayed through xScal and ZFE; duplicate and unsupported active bindings are rejected before reload.
+The harness also exposes deterministic container/all HUD-mode transitions for tests. Current CI
+checks the compiled provider routes, key delivery, file-versus-persisted precedence, and both
+production HUD-mode guards. Ruffle 0.6.0 does not expose this AVM2 movie's inbound callbacks, so a
+browser test must not claim that an internal editor-state assertion is real-game acceptance.
+
+When a local Fallout 76 installation is found (or `FCM_FALLOUT76_DATA` points at its `Data`
+directory), preparation extracts `programs/fonts_programs.swf` from the installed Interface BA2
+into ignored, temporary simulator output and supplies it to Ruffle. Harness builds resolve the
+game aliases directly to `Roboto Condensed Light` and `Roboto Condensed Bold`, matching the local
+`fontconfig_en.txt`; production builds retain `$MAIN_Font_Light`/`$MAIN_Font_Bold`. No game font is
+committed or distributed, and Ruffle font metrics remain non-acceptance evidence.
+
+Harness mode has an explicit xScal/ZFE selector. xScal exposes the observed
+`__SFECodeObj.chatInterface` object-method contract and receives parsed ActionScript objects. ZFE
+exposes `__ZFE.call`, positively answers `chat.v1.getRuntimeInfo` with
+`zfe-chat-online-v1`, and receives JSON-string payloads for `chat.v1.*`. The production
+`FcmNativeApi.discover()` and provider-specific call routing remain between the widget and these
+mocks; the simulator does not call the localhost DEV bridge until the selected provider's real
+`sendMessage` surface is invoked. Both mocks expose numeric `Input.*`, while the harness also emits
+the loader's bubbling named user-event shape. “X-Cal” and “XS-Cal” are treated as references to the
+same xScal provider, not additional invented extender contracts.
+
+The public xScal source at upstream commit `2c073777b8399960122c4971694f5b6e8be2a8ba`
+was evaluated and deliberately not retained as an emulator dependency. It provides the MovieRoot
+hook, generic callback registry, and `GetXSRuntimeInfo`, but not the installed runtime's
+`chatInterface`, relay client, plugin/module system, or `Input.*` surface. The emulator must instead
+reproduce a sanitized, versioned contract observed from the locally installed xScal 0.1.15 DLL.
+
+That fixture is `simulator/fixtures/installed-xscal-0.1.15.json`. It records the installed DLL's
+version, SHA-256, byte size, supported Fallout runtime, exact chat method names, and numeric input
+callback names without copying the DLL, endpoint, messages, account identifiers, or credentials.
+The browser suite replays authentication gating, cursor polling, synthetic regular/Discord/event
+links, Discord-ID targeting, sends, and Insert registration/pressed/unregistration semantics.
+
+`hudmodloader-chat/native-capture/Capture-HudSession.ps1` supplies the native evidence loop. It
+attaches read-only to a user-launched Fallout process, fingerprints the exact Fallout/xScal/widget/
+HUDModLoader artifacts, tails only log bytes written after capture starts, sanitizes them in real
+time, and records that it does not own the game process. It never launches, kills, or modifies the
+game and does not copy the DLL. Its PowerShell sanitizer and incremental log reader run in CI.
+
+Linux/Steam Proton uses the schema-compatible `native-capture/capture_hud_session.py`. It validates
+the selected `Fallout76.exe` against the supplied installation through `/proc`, fingerprints the
+same artifacts, records X11/Wayland session metadata, and tails the same fresh logs. It contains no
+window-control or virtual-input integration and sends no process signals; `inputAutomation=false`
+is explicit in every Linux manifest. Its process selection, sanitizer, tailer, and fingerprinting
+are covered by Linux CI tests.
+
+## Decision
+
+Build a deterministic, browser-driven simulator around the exact production
+`FCMChatWidget.swf`. Use Ruffle for AVM2 playback and a purpose-built mock host for HUDModLoader,
+SharedHUDTools, ZFE, and xScal contracts. Use it for rapid UI, keybind, input, relay, screenshot,
+and failure-path testing.
+
+Do not name its output `zfe.log` or `xscal.log`: those names imply the native providers ran inside
+Fallout 76. Emit `sim-zfe.log`, `sim-xscal.log`, JSONL events, screenshots, and a manifest containing
+emulator and widget hashes.
+
+Keep a smaller native acceptance tier. If a legally licensed Scaleform GFx 4.6 SDK/player is
+available, add a custom GFx host between the simulator and the game. Otherwise use a dedicated
+Windows machine with the real game for scheduled, supervised ZFE/xScal smoke tests.
+
+## Feasibility and limits
+
+- The widget already isolates provider discovery/routing in `FcmNativeApi.hx`; most state machines
+  already have pure Haxe tests.
+- HUDModLoader and xScal are open source, so their object shapes and callbacks can be represented by
+  pinned contract fixtures.
+- Ruffle runs AVM2 SWFs and provides desktop/web runners, headless screenshots, trace assertions,
+  and browser tests for ExternalInterface behavior.
+- Autodesk's GFx API supports host-to-movie invocation, movie-to-host callbacks, and explicit key
+  and character event injection, making a licensed custom host technically viable.
+
+A standalone player cannot generate authentic provider logs: the native DLLs must run inside the
+real Fallout 76 process. Ruffle is not Bethesda's Scaleform build, so font metrics,
+`scaleform.gfx.Extensions`, focus, clipping, and text layout can differ. Mock SharedHUDTools verifies
+FCM's response to its contract, not actual HUDMenu forwarding or ControlMap suppression. A dummy
+`Fallout76.exe` can test only the desktop overlay's process detector; it cannot load this HUD mod.
+
+## Architecture
+
+```text
+Playwright scenarios
+  ├─ key/character events and provider profile
+  ├─ scripted relay replies, latency, disconnects and malformed data
+  └─ screenshots/video, state probes and JSONL traces
+                    │
+                    ▼
+Ruffle web player + FCM harness host
+  ├─ exact built FCMChatWidget.swf
+  ├─ MockSharedHUDTools (editor, menu, named HUD events)
+  ├─ MockZFE (__ZFE.call and native-input fallback)
+  ├─ MockXScal (chatInterface and generic Input.* dispatcher)
+  └─ deterministic clock, relay queue, config store and log sink
+```
+
+The harness stays outside the production BA2. Any widget hooks must require an explicit
+`fcm_harness` compile define, with a packaging test proving they are absent from production.
+
+Provide two host modes:
+
+1. **Contract host** — lightweight deterministic mocks, used by CI.
+2. **Local loader-stack host** — attempts to load the user's locally extracted `hudmenu.swf`,
+   `hudmodloader.swf`, and `HUDTools.swf`, with mocks only at game/native boundaries. These assets
+   are proprietary/local inputs: never commit or upload them. Failure in Ruffle remains an emulator
+   compatibility result, not evidence that the game files are defective.
+
+Neither mode should be described as “running Fallout 76.” They emulate the widget's observed host
+contracts. Only M5 runs Fallout 76.
+
+## Milestones
+
+### M0 — one-day compatibility spike
+
+Pin a Ruffle release and SHA, load the current normalized SWF unchanged, capture its first rendered
+frame and AVM2 trace, inventory missing APIs, and compare basic text bounds against an in-game
+400×260 reference. Stop and choose the GFx-host route if required display/text primitives fail.
+
+Run a second spike against the locally extracted loader stack. Record every missing game object or
+callback needed to reach widget registration, rather than silently adding permissive mocks.
+
+Exit: deterministic trace and screenshot artifacts, plus a written go/no-go for M1.
+
+### M1 — provider contract simulator
+
+Implement pinned fixtures:
+
+- ZFE: `__ZFE.call(verb, JSON-string)` with runtime, auth, connect, poll, send, report, input,
+  storage, timeout, and malformed-response cases.
+- xScal: object/no-argument `chatInterface` methods plus a separate generic callback implementing
+  numeric `Input.RegisterKey`, `Input.IsKeyPressed`, and `Input.UnregisterKey` Boolean results.
+- SharedHUDTools: visible editor, balanced ownership, submit/cancel callbacks, menu actions, focus
+  loss, and missing-submit-callback recovery.
+
+Exit: identical scenarios pass for both profiles and prove provider calls never cross families.
+
+### M2 — programmable UI and input
+
+Automate Insert, text/space/punctuation, backspace/Delete, caret selection, Enter, Escape, Page
+Up/Down, row Up/Down, held/repeated/aliased key edges, F11 settings, every binding alias, mouse
+wheel, auto-hide, focus loss, reload, and stale callbacks. Cover ordinary/Discord/event links,
+emoji/link rows, selected-row colors, resize, wrapping, and clipping.
+
+Each scenario records key edges, mock calls, trace, semantic state, and screenshots. Use only a few
+stable golden images; do not make the suite depend on Ruffle font pixels.
+
+Exit: two clean headless runs produce identical semantic results.
+
+## Performance budgets
+
+Measure first, then gate regressions at the correct altitude:
+
+- Advance the movie on a deterministic 30 fps virtual clock; never use wall-clock sleeps for widget
+  assertions.
+- Keep one browser/context per worker and reset the movie between scenarios. Do not launch a new
+  Ruffle/browser process for every keypress or assertion.
+- Capture semantic probes continuously, but screenshots only at named checkpoints and video only on
+  failure or an explicit debug run.
+- Shard the suite by provider and scenario group. Initial CI target: no more than three minutes total,
+  1.5 GiB peak RSS per worker, and four workers; M0 records the baseline before these become gates.
+- Preserve the widget's existing six-row render slices and instrument each slice. Flag a simulator
+  regression above 8 ms or 20% over its pinned baseline, whichever is larger. Treat this as an FCM
+  regression signal—not a prediction of native GFx frame time.
+- Add 50/125/200/500-row scenarios, long wrapped messages, emoji-heavy rows, and rapid incoming
+  batches. Report p50/p95/max render-slice duration, heap/RSS, dropped virtual frames, and artifact
+  size.
+- Block unexpected external network access. Use in-process fixtures by default; when testing the
+  local backend, bind only to loopback on an OS-assigned port.
+
+The local native log reviewed for this plan recorded 78–79-row snapshot completion around 95–99 ms
+across scheduled slices and individual poll/render work around 67–68 ms. Those are end-to-end native
+observations, not per-frame simulator thresholds; retain them as comparison evidence.
+
+## Automatic teardown contract
+
+Every run receives an unguessable run ID, dedicated temporary directory, exact child-process list,
+and OS-assigned ports. Teardown runs from `finally` locally and an `if: always()` CI step:
+
+1. stop scenario input and flush structured logs;
+2. capture failure screenshots/video and the run manifest;
+3. close pages, browser contexts, and the browser through their owning APIs;
+4. request graceful shutdown from the loopback server and Ruffle process;
+5. after a five-second deadline, terminate only PIDs recorded for that run, never by broad process
+   name;
+6. verify every owned PID exited and every allocated port can be rebound;
+7. delete the run's temporary directory after artifact copying;
+8. fail the test if children, ports, locks, or temporary files remain.
+
+Add a startup orphan audit for prior harness run directories/PID manifests. It may clean only a
+validated harness-owned directory and a still-matching recorded process command line. Containerized
+CI should use a read-only source mount, writable temporary/artifact mounts, resource limits, and
+automatic container removal.
+
+The real-game tier is different: it must not stop `Fallout76`, the production overlay, Steam, ZFE,
+or xScal unless the user explicitly authorized that exact test run and the runner recorded the exact
+process it launched. On timeout without that authority, stop sending input, collect evidence, mark
+the run blocked, and leave the user's applications untouched.
+
+### M3 — relay and recovery laboratory
+
+Use the local backend or deterministic relay fixture for delays, disconnect/reconnect, cursor gaps,
+duplicates, retries, rate limits, limited accounts, room changes, and browser-open handoff. Provide
+a live panel showing simulated calls/logs while a developer drives the HUD manually.
+
+Exit: every scenario in `hud-recovery.md` is automated or explicitly native-only.
+
+### M4 — optional licensed GFx host
+
+If a licensed Scaleform SDK exists, build a Windows host that loads/advances the production SWF,
+injects mock bridge functions, supplies ExternalInterface, translates Windows keydown/up and
+character input into `GFx::KeyEvent`/`GFx::CharEvent`, sets the exact viewport, and captures frames.
+This improves renderer fidelity but still does not certify Bethesda HUDMenu, provider hooks, fonts,
+or ControlMap. Never acquire or redistribute proprietary GFx binaries without a valid license.
+
+### M5 — bounded real-game smoke runner
+
+Use a dedicated Windows QA machine, real installation, test account, and exactly one provider at a
+time. Keep it supervised until Bethesda/provider policy and account safety are reviewed. It may
+launch the already-installed game, send bounded keys to the game window, capture video/screenshots,
+and tail sanitized native logs. It must not read memory, inject code, scan ports, alter gameplay
+state, or kill `Fallout76` outside an explicitly owned test run.
+
+The compact matrix is: boot, open/type/edit/submit/cancel, channels/rows, one relay message, one
+link, F11 persistence, reload/unload, and provider identification. Native logs are authoritative.
+
+## CI artifacts
+
+After M2, add a non-game `hud-simulator` CI job. On failure upload:
+
+- manifest with commit, source/SWF SHA-256, Ruffle version/SHA, and profile;
+- sanitized `events.jsonl`;
+- `sim-zfe.log` or `sim-xscal.log` headed `SIMULATED — NOT NATIVE PROVIDER OUTPUT`;
+- screenshot/short recording, console trace, and failed assertions.
+
+Use generated fixtures only—no tokens, real messages, stable account IDs, or real membership.
+
+## Local game-file audit (read-only, 2026-09-14)
+
+Confirmed on the mounted Steam installation:
+
+- `Fallout76.exe`: 99,230,048 bytes; SHA-256
+  `9def7201736a1d1d6c3833aebfb2d6e1ac9dfc2a6d3ac127cf8443c2d3b1d593`.
+- `HUDModLoader.ba2`: BTDX v1 GNRL with exactly `interface/hudmenu.swf`,
+  `interface/hudmodloader.swf`, and `interface/HUDTools.swf`.
+- Extracted host artifacts validate as: HUDMenu CWS v15/3 frames; HUDModLoader CWS v17/1 frame;
+  HUDTools CWS v17/1 frame. Their SHA-256 values are respectively
+  `130c1e16dbfc7901adf129d3c7df7318293994a7da13095853ab0511b4364fd4`,
+  `e24d707799ba1bd7c58ce2e297ebab2d8f72a19c55a74042adecdfaabf4f3843`, and
+  `c0fdaa0f54f0d36c4e84516e2941cc1ead31fa2867a32d5ff18a030eb1dbb5a3`.
+- `hudmodloader.ini` registers one `FCMChatWidget` child.
+- The active `dxgi.dll` contains xScal/chat capability markers; `xscal.ini` enables chat and points
+  at the production relay. The current xScal log identifies Fallout runtime `1.7.25.39`.
+- The installed widget archive is BTDX v1 GNRL with one `interface/FCMChatWidget.swf`; that SWF is
+  FWS v32 and identifies widget `2.10.85`. The workspace candidate is newer, so this installed copy
+  must not be used as evidence for current-source behavior.
+- The existing native ZFE log proves real SharedHUDTools editor focus, HUD named key down/up events,
+  relay polling, and sliced row rendering occurred in-game. Sanitized timings above came from it.
+
+This review supports the contract-host design and supplies real assets for the private loader-stack
+spike. It does not make Ruffle equivalent to Fallout 76, and no local game file was changed.
+
+## Authority matrix
+
+| Surface | Ruffle simulator | Licensed GFx host | Real game |
+| --- | --- | --- | --- |
+| FCM state/relay logic | authoritative | corroborating | smoke |
+| Visual layout | approximate | high fidelity | authoritative |
+| SharedHUDTools | simulated | simulated | authoritative |
+| Key/character sequences | deterministic | deterministic GFx | authoritative smoke |
+| ControlMap suppression | unavailable | unavailable | authoritative |
+| ZFE/xScal calls | contract simulation | contract simulation | authoritative |
+| Provider logs | simulated labels | simulated labels | authentic |
+| General CI | suitable | licensed runner only | unsuitable |
+
+## Evidence anchors
+
+- Autodesk Scaleform player/launcher:
+  <https://help.autodesk.com/cloudhelp/ENU/Scaleform-Help/scaleform_help/getting_started/installation_usage/using_scaleform_launcher.html>
+- Autodesk GFx keyboard/character events:
+  <https://help.autodesk.com/cloudhelp/ENU/Scaleform-Help/scaleform_help/integration_tutorial/integration_game_engine/integration_processing.html>
+- Autodesk GFx host/movie communication:
+  <https://help.autodesk.com/cloudhelp/ENU/Scaleform-Help/scaleform_help/game_communication.html>
+- HUDModLoader: <https://github.com/GitCrazy-wc/hudmodloader>
+- xScal: <https://github.com/DCHoaxer/xScal>
+- Ruffle: <https://github.com/ruffle-rs/ruffle>

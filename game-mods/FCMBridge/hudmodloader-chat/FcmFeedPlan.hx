@@ -36,14 +36,21 @@ class FcmFeedPlan {
     /**
      * Stable identity key for prefix-reuse comparison. Prefers the durable
      * messageId, falls back to the optimistic localSendId transaction token,
-     * mirroring the widget's ACK reconciliation (never body/sender fallback).
+     * mirroring the widget's ACK reconciliation (never body/sender fallback
+     * for identity). The rendered content fingerprint (body + linkUrl) is
+     * always appended so in-place updates under a stable identity — e.g.
+     * compact HUD-event replacement or ACK cosmetic completion — invalidate
+     * reuse instead of serving a stale row.
      */
-    public static function recordKey(channel:String, messageId:String, localSendId:String, pending:Bool):String {
+    public static function recordKey(channel:String, messageId:String, localSendId:String, pending:Bool,
+            ?body:String, ?linkUrl:String):String {
         var mid:String = messageId == null ? "" : messageId;
         var txn:String = localSendId == null ? "" : localSendId;
         var ch:String = channel == null ? "" : channel;
-        if (mid.length > 0) return ch + "\x1fM" + mid;
-        if (txn.length > 0) return ch + "\x1fT" + txn + (pending ? "\x1fp" : "\x1ff");
+        var content:String = "\x1fB" + (body == null ? "" : body)
+            + "\x1fU" + (linkUrl == null ? "" : linkUrl);
+        if (mid.length > 0) return ch + "\x1fM" + mid + content;
+        if (txn.length > 0) return ch + "\x1fT" + txn + (pending ? "\x1fp" : "\x1ff") + content;
         // Records without any identity cannot be reused safely; give each call
         // site a non-matching key so prefix reuse stops before them.
         return ch + "\x1fX";

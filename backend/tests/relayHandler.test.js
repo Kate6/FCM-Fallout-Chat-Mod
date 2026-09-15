@@ -1525,7 +1525,8 @@ describe('relay WebSocket ops', () => {
     await waitForMsg(ws, msgs, () => send(ws, { op: 'subscribe', token }));
     // The notice is pushed right after 'subscribed'; allow it to land, then scan.
     await new Promise((r) => setTimeout(r, 300));
-    const notice = msgs.find((m) => m && m.op === 'event' && m.event && m.event.channel === 'system');
+    const notice = msgs.find((m) => m && m.op === 'event' && m.event
+      && m.event.channel === 'system' && /enter code:/i.test(String(m.event.body)));
     expect(notice).toBeTruthy();
     expect(String(notice.event.body)).toMatch(/enter code:/i);
     ws.close();
@@ -2060,6 +2061,11 @@ describe('relay WebSocket ops', () => {
       cursor: 1,
       event: { id: 1, channel: 'global', body: 'hist' },
     });
+    const completion = msgsSub.filter((msg) =>
+      msg.op === 'event' && msg.event?.body === 'FCMCTL/1/HISTORY-DONE',
+    );
+    expect(completion).toHaveLength(1);
+    expect(msgsSub.indexOf(completion[0])).toBeGreaterThan(msgsSub.indexOf(historyEvent));
     wsSub.close();
   });
 
@@ -2101,8 +2107,10 @@ describe('relay WebSocket ops', () => {
 
     const channels = new Set(msgsSub
       .filter((msg) => msg.op === 'event' && msg.event?.kind === 'chat.message')
+      .filter((msg) => msg.event?.body !== 'FCMCTL/1/HISTORY-DONE')
       .map((msg) => msg.event.channel));
     expect([...channels].sort()).toEqual(['events', 'global', 'infests', 'raids', 'trade']);
+    expect(msgsSub.filter((msg) => msg.event?.body === 'FCMCTL/1/HISTORY-DONE')).toHaveLength(1);
     wsSub.close();
   });
 
@@ -2171,9 +2179,13 @@ describe('relay WebSocket ops', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     const initial = msgsSub.filter((msg) =>
-      msg.op === 'event' && msg.event?.kind === 'chat.message',
+      msg.op === 'event' && msg.event?.kind === 'chat.message'
+        && msg.event?.body !== 'FCMCTL/1/HISTORY-DONE',
     );
     expect(initial).toHaveLength(125);
+    const completion = msgsSub.filter((msg) => msg.event?.body === 'FCMCTL/1/HISTORY-DONE');
+    expect(completion).toHaveLength(1);
+    expect(msgsSub.indexOf(completion[0])).toBeGreaterThan(msgsSub.indexOf(initial.at(-1)));
     const counts = initial.reduce((result, msg) => {
       const channel = msg.event.channel;
       result[channel] = (result[channel] || 0) + 1;

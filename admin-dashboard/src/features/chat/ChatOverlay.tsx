@@ -1479,6 +1479,7 @@ interface MinervaMetadata {
   nextStartUtc: string | null;
   sourceName?: string;
   sourceUrl?: string;
+  inventory?: string[];
 }
 export const MINERVA_SOURCE_URL = 'https://www.falloutbuilds.com/fo76/minerva';
 interface CardShareMetadata {
@@ -2013,18 +2014,64 @@ export function classifyMedia(url: string): 'image' | 'video' | null {
   return null;
 }
 
+export function hudOpenUrlFromFrame(frame: unknown, overlayShell: boolean): string | null {
+  if (!overlayShell || !frame || typeof frame !== 'object') return null;
+  const candidate = frame as { type?: unknown; payload?: { url?: unknown } };
+  if (candidate.type !== 'hud:open-url' || typeof candidate.payload?.url !== 'string') return null;
+  try {
+    const parsed = new URL(candidate.payload.url);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      && !parsed.username && !parsed.password ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
 type Part = {
   text: string;
-  kind: 'plain' | 'mention' | 'url' | 'emoji';
+  kind: 'plain' | 'mention' | 'url' | 'emoji' | 'channel';
   url?: string;
+  discordId?: string;
   /** For emoji kind: the name portion of <:name:id> */
   emojiName?: string;
 };
 
 /** Split content into plain / @mention / url / emoji segments so each can render its own way. */
-export function splitParts(content: string): Part[] {
-  type Span = { start: number; end: number; kind: 'mention' | 'url' | 'emoji'; url?: string; emojiName?: string };
+type ChatEntity =
+  | { type: 'user'; discordId: string; label: string }
+  | { type: 'channel'; discordId: string; label: string; url: string };
+
+export function chatEntities(metadata: ChatMessageMetadata): ChatEntity[] {
+  if (!metadata || !('entities' in metadata) || !Array.isArray(metadata.entities)) return [];
+  return metadata.entities.filter((value: unknown): value is ChatEntity => {
+    if (!value || typeof value !== 'object') return false;
+    const entity = value as Record<string, unknown>;
+    if (!/^\d{16,22}$/.test(typeof entity.discordId === 'string' ? entity.discordId : '')) return false;
+    if (typeof entity.label !== 'string' || entity.label.length === 0 || entity.label.length > 100) return false;
+    return entity.type === 'user'
+      || (entity.type === 'channel' && typeof entity.url === 'string' && /^https:\/\/discord(?:app)?\.com\/channels\//i.test(entity.url));
+  });
+}
+
+export function splitParts(content: string, entities: readonly ChatEntity[] = []): Part[] {
+  type Span = { start: number; end: number; kind: 'mention' | 'url' | 'emoji' | 'channel'; url?: string; emojiName?: string; discordId?: string; priority?: number };
   const spans: Span[] = [];
+  for (const entity of entities) {
+    const token = `${entity.type === 'user' ? '@' : '#'}${entity.label}`;
+    let from = 0;
+    while (from < content.length) {
+      const start = content.indexOf(token, from);
+      if (start < 0) break;
+      spans.push({
+        start, end: start + token.length,
+        kind: entity.type === 'user' ? 'mention' : 'channel',
+        discordId: entity.discordId,
+        url: entity.type === 'channel' ? entity.url : undefined,
+        priority: 1,
+      });
+      from = start + token.length;
+    }
+  }
   for (const m of content.matchAll(MENTION_RE))
     spans.push({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length, kind: 'mention' });
   for (const m of content.matchAll(URL_RE))
@@ -2046,14 +2093,17 @@ export function splitParts(content: string): Part[] {
       emojiName: name,
     });
   }
-  spans.sort((a, b) => a.start - b.start);
+  spans.sort((a, b) => a.start - b.start || (b.priority ?? 0) - (a.priority ?? 0) || b.end - a.end);
 
   const parts: Part[] = [];
   let pos = 0;
   for (const s of spans) {
     if (s.start < pos) continue; // overlapping spans (e.g. URL inside mention text)
     if (s.start > pos) parts.push({ text: content.slice(pos, s.start), kind: 'plain' });
-    parts.push({ text: content.slice(s.start, s.end), kind: s.kind, url: s.url, emojiName: s.emojiName });
+    parts.push({
+      text: content.slice(s.start, s.end), kind: s.kind, url: s.url, emojiName: s.emojiName,
+      ...(s.discordId ? { discordId: s.discordId } : {}),
+    });
     pos = s.end;
   }
   if (pos < content.length) parts.push({ text: content.slice(pos), kind: 'plain' });
@@ -2144,7 +2194,10 @@ export function messageTriggersNotify(
   content: string,
   myNames: string[],
   keywords: string[],
+  entities: readonly ChatEntity[] = [],
+  viewerDiscordId?: string,
 ): boolean {
+  if (viewerDiscordId && entities.some(entity => entity.type === 'user' && entity.discordId === viewerDiscordId)) return true;
   if (myNames.some(n => contentMentionsName(content, n))) return true;
   return keywords.some(k => contentMatchesKeyword(content, k));
 }
@@ -3701,6 +3754,7 @@ export default function ChatOverlay() {
   // ── @mention: unread badges + jump-to-mention ──
   const [unreadMentions, setUnreadMentions] = useState<Record<string, number>>({});
   const myNamesRef  = useRef<string[]>([]);
+  const myDiscordIdRef = useRef<string>('');
   // Notification keywords (#422), read by msgMentionsMe through a ref so the
   // callback identity stays stable while the list stays live.
   const notifyKeywordsRef = useRef<string[]>([]);
@@ -3764,6 +3818,7 @@ export default function ChatOverlay() {
       .map(n => n.trim());
     myNamesRef.current  = [...new Set(ns)];
     myUserIdRef.current = user?.id || '';
+    myDiscordIdRef.current = user?.discordId || '';
   }, [user]);
   useEffect(() => {
     mutedPartyIdsRef.current = new Set(
@@ -5145,6 +5200,11 @@ export default function ChatOverlay() {
                 setBridgeState(next);
                 return;
               }
+              if (frame.type === 'hud:open-url') {
+                const hudUrl = hudOpenUrlFromFrame(frame, overlayShell);
+                if (hudUrl) openUrl(hudUrl);
+                return;
+              }
               if (frame.type === 'bridge:history' || frame.type === 'bridge:message') {
                 const state = bridgeStateRef.current;
                 const rows = Array.isArray(frame.payload?.messages) ? frame.payload.messages.filter((row: unknown) => {
@@ -5260,7 +5320,7 @@ export default function ChatOverlay() {
                   );
                   const mentionsMe = frame.payload.userId !== myUserIdRef.current
                     && !mutedParty
-                    && messageTriggersNotify(content, myNamesRef.current, notifyKeywordsRef.current);
+                    && messageTriggersNotify(content, myNamesRef.current, notifyKeywordsRef.current, chatEntities(frame.payload.metadata ?? null), myDiscordIdRef.current);
                   if (mentionsMe && chId) {
                     const v = viewCtxRef.current;
                     const inView = v.feedId
@@ -7049,7 +7109,7 @@ export default function ChatOverlay() {
   // immediately without rebuilding this callback (and re-rendering the feed).
   const msgMentionsMe = useCallback((m: ChatMessage) =>
     m.userId !== myUserIdRef.current
-      && messageTriggersNotify(m.content, myNamesRef.current, notifyKeywordsRef.current),
+      && messageTriggersNotify(m.content, myNamesRef.current, notifyKeywordsRef.current, chatEntities(m.metadata), myDiscordIdRef.current),
   []);
   // Show the jump button only when there is at least one visible mention whose
   // message id has NOT yet been dismissed. dismissedMentionEpoch is bumped each
@@ -7194,17 +7254,31 @@ export default function ChatOverlay() {
     () => new Map<string, React.ReactNode>(),
     [primaryText, glowEnabled, primaryColor, textAlpha],
   );
-  const renderContent = useCallback((content: string, inPartyView = false): React.ReactNode => {
-    const ck = (inPartyView ? 'p|' : 'c|') + content;
+  const renderContent = useCallback((content: string, inPartyView = false, metadata: ChatMessageMetadata = null): React.ReactNode => {
+    const entities = chatEntities(metadata);
+    const ck = (inPartyView ? 'p|' : 'c|') + content + '|' + JSON.stringify(entities);
     const cached = renderContentCache.get(ck);
     if (cached !== undefined) return cached;
-    const out = splitParts(content).map((p, i) => {
+    const out = splitParts(content, entities).map((p, i) => {
       if (p.kind === 'mention') {
         return (
           <span key={i} style={{
             color: primaryText, fontWeight: 'bold',
             textShadow: glowEnabled ? `0 0 4px ${hexAlpha(primaryColor, 0.5 * textAlpha)}` : 'none',
-          }}>{p.text}</span>
+          }} data-discord-user-id={p.discordId}>{p.text}</span>
+        );
+      }
+      if (p.kind === 'channel' && p.url) {
+        return (
+          <a key={i} href={p.url} target="_blank" rel="noopener noreferrer"
+            title={`Open ${p.text} in Discord`}
+            onClick={e => e.stopPropagation()}
+            style={{
+              color: primaryText, fontWeight: 'bold', textDecoration: 'none',
+              borderBottom: `1px solid ${hexAlpha(primaryColor, 0.55)}`,
+              textShadow: glowEnabled ? `0 0 4px ${hexAlpha(primaryColor, 0.5 * textAlpha)}` : 'none',
+            }}
+          >{p.text}</a>
         );
       }
       if (p.kind === 'url' && p.url) {
@@ -8500,9 +8574,15 @@ export default function ChatOverlay() {
                   const mvAccent = '#F1C40F';
                   const minervaSourceUrl = mv.sourceUrl || MINERVA_SOURCE_URL;
                   const minervaSourceName = mv.sourceName || 'Fallout Builds';
-                  const fmtDate = (iso: string) => new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                  const fmtDate = (iso: string) => {
+                    const date = new Date(iso);
+                    return Number.isNaN(date.getTime())
+                      ? 'Unknown'
+                      : date.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                  };
                   const fmtDuration = (iso: string) => {
                     const diffMs = new Date(iso).getTime() - Date.now();
+                    if (Number.isNaN(diffMs)) return 'Unknown';
                     if (diffMs <= 0) return 'ending soon';
                     const totalMins = Math.floor(diffMs / 60000);
                     const days = Math.floor(totalMins / 1440);
@@ -8524,6 +8604,9 @@ export default function ChatOverlay() {
                       { label: 'NEXT', value: `${mv.nextLocation}${mv.nextIsSuperSale ? ' ★' : ''} — List #${mv.nextListNumber}` },
                       { label: 'NEXT STARTS', value: fmtDate(mv.nextStartUtc!) },
                     ] : []),
+                    ...(Array.isArray(mv.inventory) && mv.inventory.length > 0
+                      ? [{ label: 'FOR SALE', value: mv.inventory.slice(0, 10).join('\n') }]
+                      : []),
                   ];
                   return (
                     <div key={msg.id} style={{ padding: '2px 8px' }}>
@@ -8891,7 +8974,7 @@ export default function ChatOverlay() {
                         verticalAlign: 'middle',
                         textShadow: glowEnabled ? `0 0 2px ${hexAlpha(primaryColor, 0.3 * textAlpha)}, ${textOutline}` : textOutline,
                       }}>
-                        {inlineContent ?? renderContent(msg.content, activeMainId === PARTY_MAIN_ID && partyView !== 'browser')}
+                        {inlineContent ?? renderContent(msg.content, activeMainId === PARTY_MAIN_ID && partyView !== 'browser', msg.metadata)}
                         {msg.editedAt && <span style={{ color: hexAlpha(dimText, 0.8), fontSize: '0.82em', fontWeight: 'normal', marginLeft: '4px' }} title="Edited">(edited)</span>}
                       </span>
                     </span>

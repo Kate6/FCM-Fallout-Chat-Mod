@@ -37,6 +37,7 @@ class FcmConfig {
     public var channelTagColor:Int  = 0x8FBC8F;
     public var tabActiveColor:Int   = 0xF5CB5B;
     public var tabInactiveColor:Int = 0xB49544;
+    public var selectedRowColor:Int = 0xF5CB5B;
     public var promptColor:Int      = 0xAC9043;
     public var tabRowColor:Int      = 0x080705;
     public var inputBgColor:Int     = 0x080705;
@@ -44,12 +45,12 @@ class FcmConfig {
 
     public static var COLOR_FIELDS(default, null):Array<String> = [
         "bgColor", "tabRowColor", "inputBgColor", "borderColor", "textColor",
-        "inputTextColor", "senderColor", "tabActiveColor", "tabInactiveColor", "promptColor"
+        "inputTextColor", "senderColor", "tabActiveColor", "tabInactiveColor", "selectedRowColor", "promptColor"
     ];
     public static var COLOR_LABELS(default, null):Array<String> = [
         "Panel background", "Tab box background", "Input box background", "Border",
         "Message text", "Input text", "Default name text", "Active tab text",
-        "Inactive tab text", "Hint text"
+        "Inactive tab text", "Selected message", "Hint text"
     ];
     public static var COLOR_VALUES(default, null):Array<Int> = [
         0x080705, 0x303030, 0xF5CB5B, 0x5AB0FF, 0x6AD46A, 0xFFFFFF, 0xFAF4DA, 0xB49544,
@@ -126,6 +127,7 @@ class FcmConfig {
     public var scrollUpKey:String     = "Up";
     public var scrollDownKey:String   = "Down";
     public var scrollBottomKey:String = "";
+    public var activateLinkKey:String = "ENTER";
     public var hideKey:String        = "DELETE";  // idle hide; suspended while an editor owns input
 
     // ── Feed toggles ───────────────────────────────────────────────────────────
@@ -617,6 +619,25 @@ class FcmConfig {
         return fallback;
     }
 
+    /**
+     * Apply ZFE-persisted appearance/layout without allowing an older stored snapshot to
+     * override environment-owned routing and safety settings from the active FCMChat.ini.
+     */
+    public static function mergePersistedCustomization(environment:FcmConfig, storedText:String):FcmConfig {
+        var stored = parse(storedText);
+        stored.linkUrl = environment.linkUrl;
+        stored.openKey = environment.openKey;
+        stored.channelNextKey = environment.channelNextKey;
+        stored.channelPrevKey = environment.channelPrevKey;
+        stored.scrollUpKey = environment.scrollUpKey;
+        stored.scrollDownKey = environment.scrollDownKey;
+        stored.scrollBottomKey = environment.scrollBottomKey;
+        stored.activateLinkKey = environment.activateLinkKey;
+        stored.hideKey = environment.hideKey;
+        stored.hideInHUDModes = environment.hideInHUDModes.copy();
+        return stored;
+    }
+
     /** Parse an int with fallback (Std.parseInt returns null on garbage). */
     static function parseIntOr(s:String, fallback:Int):Int {
         if (s == null) return fallback;
@@ -686,6 +707,7 @@ class FcmConfig {
                 case "sendercolor":     cfg.senderColor = parseHexColor(val, cfg.senderColor);
                 case "tabactivecolor":  cfg.tabActiveColor = parseHexColor(val, cfg.tabActiveColor);
                 case "tabinactivecolor": cfg.tabInactiveColor = parseHexColor(val, cfg.tabInactiveColor);
+                case "selectedrowcolor": cfg.selectedRowColor = parseHexColor(val, cfg.selectedRowColor);
                 case "promptcolor":     cfg.promptColor = parseHexColor(val, cfg.promptColor);
                 case "inputbgcolor":    cfg.inputBgColor = parseHexColor(val, cfg.inputBgColor);
                 case "inputtextcolor":  cfg.inputTextColor = parseHexColor(val, cfg.inputTextColor);
@@ -705,6 +727,7 @@ class FcmConfig {
                 case "scrollupkey":     cfg.scrollUpKey = validScrollKey(val, cfg.scrollUpKey);
                 case "scrolldownkey":   cfg.scrollDownKey = validScrollKey(val, cfg.scrollDownKey);
                 case "scrollbottomkey": cfg.scrollBottomKey = validScrollKey(val, "");
+                case "activatelinkkey": cfg.activateLinkKey = validScrollKey(val, "ENTER");
                 case "hidekey":         cfg.hideKey = validAction(val, "DELETE");
                 case "showhints":       cfg.showHints = parseBool(val, cfg.showHints);
                 case "autobroadcastworldevents":
@@ -883,6 +906,7 @@ class FcmConfig {
         s.add("senderColor=" + h(senderColor) + "\n");
         s.add("tabActiveColor=" + h(tabActiveColor) + "\n");
         s.add("tabInactiveColor=" + h(tabInactiveColor) + "\n");
+        s.add("selectedRowColor=" + h(selectedRowColor) + "\n");
         s.add("promptColor=" + h(promptColor) + "\n");
         s.add("inputBgColor=" + h(inputBgColor) + "\n");
         s.add("inputTextColor=" + h(inputTextColor) + "\n");
@@ -898,6 +922,7 @@ class FcmConfig {
         s.add("scrollUpKey=" + scrollUpKey + "\n");
         s.add("scrollDownKey=" + scrollDownKey + "\n");
         s.add("scrollBottomKey=" + scrollBottomKey + "\n");
+        s.add("activateLinkKey=" + activateLinkKey + "\n");
         s.add("hideKey=" + hideKey + "\n");
         s.add("showHints=" + b(showHints) + "\n");
         s.add("hideInHUDModes=" + hideInHUDModes.join(",") + "\n");

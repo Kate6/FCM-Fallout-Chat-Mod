@@ -39,6 +39,7 @@ class FcmCommand {
      */
     public static function physicalKeyAction(keyCode:Int):String {
         switch (keyCode) {
+            case 0x0D: return "Enter";
             case 0x21: return "PageUp";
             case 0x22: return "PageDown";
             case 0x24: return "Home";
@@ -64,6 +65,7 @@ class FcmCommand {
             case "left", "arrowleft": return 0x25;
             case "right", "arrowright": return 0x27;
             case "escape", "esc": return 0x1B;
+            case "enter", "return": return 0x0D;
             case "tab": return 0x09;
             case "space": return 0x20;
             case "f1": return 0x70;
@@ -142,6 +144,14 @@ class FcmCommand {
     /** Feed navigation is scoped to an active, visible Insert-open editor session. */
     public static function feedNavigationEnabled(inputOpen:Bool, hidden:Bool):Bool {
         return inputOpen && !hidden;
+    }
+
+    /** Link activation is an editor-owned action, never an idle gameplay hotkey. */
+    public static function linkActivationEnabled(raw:String, configured:String,
+            inputOpen:Bool, selectedHasLink:Bool):Bool {
+        if (!inputOpen || !selectedHasLink) return false;
+        var binding:String = StringTools.trim(configured == null ? "" : configured);
+        return binding.length > 0 && sameAction(normalizeAction(raw), binding);
     }
 
     /** A configured hide action is inactive while an editor owns keyboard input. */
@@ -230,6 +240,22 @@ class FcmCommand {
             if (previous.indexOf(name) >= 0) return false;
         }
         return true;
+    }
+
+    /**
+     * Bound automatic roster network calls. Provider snapshots fluctuate as Fallout
+     * menus update; overlapping membership churn is not a new room and must not
+     * trigger synchronous native traffic. Never perform that traffic while the
+     * player owns the chat editor.
+     */
+    public static function shouldSendRoster(automaticTransportSafe:Bool, inputOpen:Bool,
+            serverSessionReady:Bool, elapsedSinceSend:Float, hasSent:Bool,
+            rosterChanged:Bool):Bool {
+        if (!automaticTransportSafe) return false;
+        if (inputOpen) return false;
+        if (!hasSent) return true;
+        if (serverSessionReady) return elapsedSinceSend >= 30000;
+        return elapsedSinceSend >= 10000;
     }
 
     /**

@@ -24,7 +24,7 @@ sockets, then re-checked on reconnect and in REST auth.
 | Action | Route | Sets | Duration | Live enforcement | Role |
 |---|---|---|---|---|---|
 | **Kick** | `POST /api/moderation/kicks` | `users.kickedUntil = now+5m` | 5-min cooldown (`KICK_COOLDOWN_MS`) | `notifyAndDisconnect` → `user:kicked` frame + force-close 4002 (`handlers.ts:1135`) | moderator+ |
-| **Mute** | `POST /api/moderation/mutes` | `isMuted`, `muteExpiresAt`, `muteReason/Category`, `mutedById` | 60s … **30d** cap (`MAX_MUTE_MS`) | `markClientMuted(true)` → `user:muted` frame, send blocked at `ingestMessage.ts:159` (no disconnect) | moderator+ |
+| **Mute** | `POST /api/moderation/mutes` | `isMuted`, `muteExpiresAt`, `muteReason/Category`, `mutedById` | 60s … **30d** cap (`MAX_MUTE_MS`; Discord slash input is capped at 28d) | `markClientMuted(true)` → `user:muted` frame, send blocked at `ingestMessage.ts:159` (no disconnect) | moderator+ |
 | **Unmute** | `DELETE /api/moderation/mutes/:id` | clears mute fields | — | `markClientMuted(false)` → `user:unmuted` | moderator+ |
 | **Ban** | `POST /api/moderation/bans` (multipart) | `bans` row + `users.isBanned/bannedUntil/banReason/banCategory`, evidence | temp (`bannedUntil`) or **permanent** (`null`) | `notifyAndDisconnect` → `user:banned` + force-close; **permanent** also revokes `devices` + Discord guild-ban | moderator+ |
 | **Reverse ban** | `POST /api/moderation/bans/:id/reverse` | `bans.reversedAt/By/Reason`, clears user flags | — | restores Discord roles (`savedDiscordRoles`) + lifts guild ban | moderator+ |
@@ -41,12 +41,14 @@ Key properties (all in `moderationActionsService.ts`):
 - **Evidence required for bans** (≥1 text/image; images in MinIO, magic-byte validated, served
   `nosniff`/`inline`). Evidence is access-scoped: owners/admins see all; other staff see only bans
   they issued (denial = 404, not 403, to avoid an existence oracle).
-- **Audit + announce.** Every action writes `audit_logs`, posts a General-channel system message,
-  and a `#vault-security` Discord mod-log embed. `bans` is the source of truth for history (not the
-  denormalized `users` flags).
+- **Private confirmation + staff audit.** Every action writes `audit_logs` and a `#vault-security`
+  Discord mod-log embed; it does not post a public General-channel system message. Dashboard and
+  overlay responses remain private to the acting moderator, and Discord uses ephemeral interaction
+  replies. `bans` is the source of truth for history (not the denormalized `users` flags).
 - **Discord propagation.** Mute → Discord timeout (≤28d cap); permanent ban → role-strip + guild
-  ban; reverse → restore roles. HUD/in-game moderation calls the same service, so it receives the
-  same propagation and audit behavior.
+  ban; Discord slash-ban applies that guild ban for temporary bans too, and slash-kick removes the
+  member from the guild. Reverse/expiry restores roles and lifts the guild ban. HUD/in-game
+  moderation calls the same service, so it receives the same propagation and audit behavior.
 
 The **FCMHUD/1** in-game path uses `HudIdentityBlock` (keyed on
 `identityHash = HMAC(secret, fo76AccountName)`) checked at `HELLO` (ban → destroy socket) and `SEND`

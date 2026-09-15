@@ -24,6 +24,7 @@ HUD_KEY_DEFAULTS = {
     "scrollUpKey": "Up",
     "scrollDownKey": "Down",
     "scrollBottomKey": "",
+    "activateLinkKey": "ENTER",
     "hideKey": "DELETE",
 }
 
@@ -100,7 +101,9 @@ def main() -> None:
     )
     assert "FcmCommand.configuredHideAction(action, _cfg.hideKey, _inputOpen)" in source_hx \
         and '"hide ignored while editor owns input"' in source_hx \
-        and "_cfg.scrollBottomKey, _cfg.hideKey" in source_hx, (
+        and "_cfg.scrollBottomKey" in source_hx \
+        and "_cfg.activateLinkKey" in source_hx \
+        and "_cfg.hideKey" in source_hx, (
         "configured hide keys must remain text-edit keys while either provider owns input"
     )
     assert "startXscalWarmup" in source_hx and "becameAuthenticated" in source_hx and "startZfeInitialHistoryDrain" in source_hx and '_history.needsRecovery(_authState == "authenticated", flash.Lib.getTimer())' in source_hx, (
@@ -114,6 +117,12 @@ def main() -> None:
     )
     assert "scheduleHistoryResyncFallback" in source_hx and "HISTORY_RESYNC_FALLBACK_MS" in source_hx, (
         "Shared RESYNC must be delayed until an empty or dropped initial poll"
+    )
+    assert "flash.Lib.getURL(new URLRequest(url), \"_blank\")" in source_hx and "OPEN_URL_PREFIX" not in source_hx, (
+        "Selected links must open directly through GFx instead of synchronously blocking on the relay/desktop overlay"
+    )
+    assert "_history.authenticationChanged()" in source_hx, (
+        "A completed account link must re-arm history recovery after a pre-auth permission denial"
     )
     legacy_bridge = (ROOT.parent / "FCMBridge.hx").read_text(encoding="utf-8")
     assert "startInitialHistoryDrain" in legacy_bridge and "MAX_MSGS:Int     = 125" in legacy_bridge, (
@@ -200,14 +209,14 @@ def main() -> None:
                 override = archive.read("examples/ZFE/zfe.ini.example")
                 assert f"[TextChat]\nEndpoint={expected['endpoint']}\n".encode() in override
                 assert b"OpenChatKey=INSERT" in override
-                assert b"Keep OpenChatKey identical to Data/FCMChat.ini openKey" in override
+                assert b"FCMChat.ini openKey is synchronized after widget discovery" in override
                 assert b"Do not replace the whole file" in override
                 assert b"examples/ZFE/zfe.ini.example" in archive.read("INSTALL.txt")
                 assert "CUSTOMIZATION.txt" in names
                 assert "KEYBINDS.txt" in names
                 keybinds = archive.read("KEYBINDS.txt")
                 assert b"PROVIDER KEYBIND CONTRACT" in keybinds
-                assert b"ZFE       effective [TextChat] OpenChatKey + matching openKey" in keybinds
+                assert b"ZFE       Data/FCMChat.ini openKey" in keybinds
                 assert b"xScal     Data/FCMChat.ini openKey only" in keybinds
                 assert b"`hello` remains five characters" in keybinds
                 assert b"openKey=DELETE" in keybinds

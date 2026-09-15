@@ -12,8 +12,9 @@ describe('HUD keybind guide', () => {
 
     expect(within(guide).getByText('ZFE OPEN-CHAT KEY')).toBeInTheDocument();
     expect(within(guide).getByText('xSCAL OPEN-CHAT KEY')).toBeInTheDocument();
-    expect(guide).toHaveTextContent('OpenChatKey=DELETE');
-    expect(guide).toHaveTextContent('Data/configuration/zfe.ini');
+    expect(guide).toHaveTextContent('openKey=DELETE');
+    expect(guide).toHaveTextContent('activateLinkKey=ENTER');
+    expect(guide).toHaveTextContent('active only after Open Chat owns the editor');
     expect(guide).toHaveTextContent('Input.RegisterKey');
     expect(guide).toHaveTextContent('does not suppress keyboard input');
     expect(guide).toHaveTextContent('scrollUpKey=Up / scrollDownKey=Down');

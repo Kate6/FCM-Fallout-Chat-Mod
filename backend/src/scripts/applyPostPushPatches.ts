@@ -13,6 +13,13 @@ export interface PostPushPatchClient {
 
 export const POST_PUSH_PATCHES = [
   {
+    // Prisma's schema DSL cannot express PostgreSQL extensions. Keep required
+    // extensions here because baseline deployments reconcile migration history
+    // instead of replaying raw-SQL migrations on every database.
+    name: 'required-pg-trgm-extension',
+    sql: 'CREATE EXTENSION IF NOT EXISTS pg_trgm;',
+  },
+  {
     name: 'messages-source-check',
     sql: `
 DO $$
@@ -87,6 +94,61 @@ BEGIN
     VALUES ('chat_profanity_literal_cleanup_v1', 'applied', NOW())
     ON CONFLICT ("key") DO NOTHING;
   END IF;
+END $$;`,
+  },
+  {
+    name: 'embed-assets-normalize-status',
+    sql: `
+UPDATE "embed_assets" SET "status" = 'ready' WHERE "status" NOT IN ('pending', 'ready');`,
+  },
+  {
+    name: 'embed-assets-remove-invalid-pending',
+    sql: `DELETE FROM "embed_assets" WHERE "status" = 'pending' AND ("claim_token" IS NULL OR "lease_expires_at" IS NULL);`,
+  },
+  {
+    name: 'embed-assets-clear-ready-leases',
+    sql: `UPDATE "embed_assets" SET "claim_token" = NULL, "lease_expires_at" = NULL WHERE "status" = 'ready';`,
+  },
+  {
+    name: 'embed-assets-status-constraint',
+    sql: `DO $$ BEGIN
+  ALTER TABLE "embed_assets" ADD CONSTRAINT "embed_assets_status_check"
+    CHECK ("status" IN ('pending', 'ready'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;`,
+  },
+  {
+    name: 'embed-assets-pending-lease-constraint',
+    sql: `DO $$ BEGIN
+  ALTER TABLE "embed_assets" ADD CONSTRAINT "embed_assets_pending_lease_check" CHECK (
+    ("status" = 'pending' AND "claim_token" IS NOT NULL AND "lease_expires_at" IS NOT NULL)
+    OR ("status" = 'ready' AND "claim_token" IS NULL AND "lease_expires_at" IS NULL)
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;`,
+  },
+  {
+    name: 'mcp-oauth-s256-constraint',
+    sql: `DO $$ BEGIN
+  ALTER TABLE "mcp_oauth_codes" ADD CONSTRAINT "mcp_oauth_codes_s256_check"
+    CHECK ("code_challenge_method" = 'S256');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;`,
+  },
+  {
+    name: 'mcp-oauth-code-scopes-constraint',
+    sql: `DO $$ BEGIN
+  ALTER TABLE "mcp_oauth_codes" ADD CONSTRAINT "mcp_oauth_codes_scopes_check"
+    CHECK ("scopes" <@ ARRAY['fcm:read','fcm:discord:write','fcm:moderation:write']::TEXT[]);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;`,
+  },
+  {
+    name: 'mcp-oauth-grant-scopes-constraint',
+    sql: `DO $$ BEGIN
+  ALTER TABLE "mcp_oauth_grants" ADD CONSTRAINT "mcp_oauth_grants_scopes_check"
+    CHECK ("scopes" <@ ARRAY['fcm:read','fcm:discord:write','fcm:moderation:write']::TEXT[]);
+EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;`,
   },
 ] as const;

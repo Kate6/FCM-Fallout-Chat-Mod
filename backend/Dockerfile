@@ -47,6 +47,11 @@ COPY backend/releases.json ./releases.json
 # resolves them under /app/Packaging/* (relative to dist/ as ../Packaging/*).
 COPY Packaging/linux ./Packaging/linux
 COPY Packaging/windows ./Packaging/windows
-RUN chmod +x baseline-migrations.sh && mkdir -p /app/downloads
+# A Windows runner may check shell scripts out with CRLF. Normalize the runtime
+# entrypoint inside the Linux image so its shebang always resolves to /bin/sh.
+RUN sed -i 's/\r$//' baseline-migrations.sh \
+ && chmod +x baseline-migrations.sh \
+ && test "$(head -n 1 baseline-migrations.sh)" = '#!/bin/sh' \
+ && mkdir -p /app/downloads
 EXPOSE 7676
 CMD ["sh", "-c", "./baseline-migrations.sh && node dist/server.js"]

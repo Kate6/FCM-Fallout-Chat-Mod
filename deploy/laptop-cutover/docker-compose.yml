@@ -1,0 +1,121 @@
+name: ${COMPOSE_PROJECT_NAME:?set a unique Compose project name}
+
+services:
+  postgres:
+    image: ${TIMESCALE_IMAGE:?pin the Timescale image by digest}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:?set DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:?set DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: ${REDIS_IMAGE:?pin the Redis image by digest}
+    restart: unless-stopped
+    command: >
+      redis-server --appendonly yes --appendfsync everysec
+      --maxmemory 256mb --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  minio:
+    image: ${MINIO_IMAGE:?pin the MinIO image by digest}
+    restart: unless-stopped
+    command: server /data --address ":9700" --console-address ":9701"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9700/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    image: ${FCM_BACKEND_IMAGE:?set a pinned production-equivalent backend image}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    env_file:
+      - path: ./config/runtime.env
+        required: true
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      MINIO_ENDPOINT: http://minio:9700
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      PORT: 7676
+      TRUST_PROXY: "true"
+    ports:
+      - "127.0.0.1:${ORIGIN_PORT:?set a unique localhost origin port}:7676"
+    networks:
+      default:
+        aliases:
+          # A remotely managed tunnel resolves its configured origin inside the
+          # connector's Docker network. Dev currently requires `backend-dev`.
+          - ${TUNNEL_ORIGIN_ALIAS:-backend}
+    volumes:
+      - releases_downloads:/app/downloads
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    tmpfs: ["/tmp"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7676/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  cloudflared:
+    image: ${CLOUDFLARED_IMAGE:?pin the cloudflared image by digest}
+    restart: unless-stopped
+    profiles: ["edge"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    env_file:
+      - path: ./config/edge.env
+        required: true
+    command: tunnel --no-autoupdate run
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/tmp"]
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  releases_downloads:

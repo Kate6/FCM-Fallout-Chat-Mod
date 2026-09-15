@@ -1,0 +1,8 @@
+--main FCMHarness
+--class-path haxe
+--class-path ..
+--class-path ../..
+--swf public/FCMHarness.swf
+--swf-version 32
+-D haxeJSON
+-D fcm_harness

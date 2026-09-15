@@ -30,6 +30,13 @@ add `reactionRoles` mappings, and send — the bot posts the embed, adds the
 configured emoji reactions, and registers the panel in one operation
 (`moderationController.ts:475-521`).
 
+Production MCP clients can perform the same workflow with
+`fcm_embeds_send`. Call `fcm_discord_context_get` first and pass the returned
+stable role and custom-emoji snowflake IDs; the server revalidates both against
+the live bot context at send time. Custom emoji input uses `customEmojiId`, not
+a caller-supplied name or Discord tag. Reads require `fcm:read`; sending and
+panel deletion require `fcm:discord:write` plus `confirm: true`.
+
 ---
 
 ## Emoji matching (`matchKey`)
@@ -135,3 +142,9 @@ set of roles that Discord will actually allow the bot to assign.
 2. Removes from the in-memory cache.
 3. Best-effort: fetches the original message and calls
    `reactions.removeAll()` so the emoji buttons no longer invite clicks.
+
+The MCP equivalent, `fcm_reaction_role_panels_delete`, deactivates the panel
+but preserves the posted Discord message. MCP panel creation is strict: if any
+reaction fails, the database/cache panel is rolled back and reactions are
+cleared best-effort. The already-posted message remains and the tool returns a
+partial result containing its message ID, so callers must not blindly retry.

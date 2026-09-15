@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FCM HUD Simulator</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div><span class="eyebrow">SIMULATED HOST — NOT FALLOUT 76</span><h1>FCM HUD laboratory</h1></div>
+        <div id="status" data-state="starting">Starting…</div>
+      </header>
+      <section class="workspace">
+        <div class="stage-shell">
+          <div id="player" aria-label="FCM HUD SWF stage"></div>
+        </div>
+        <aside>
+          <h2>Run evidence</h2>
+          <dl>
+            <div><dt>Widget</dt><dd id="widget-version">unknown</dd></div>
+            <div><dt>Host mode</dt><dd id="host-mode">unknown</dd></div>
+            <div><dt>Provider</dt><dd id="provider-mode">unknown</dd></div>
+            <div><dt>Hosted DEV</dt><dd id="hosted-dev-mode">checking…</dd></div>
+            <div><dt>SWF SHA-256</dt><dd id="swf-hash">calculating…</dd></div>
+            <div><dt>Ruffle</dt><dd>0.6.0</dd></div>
+            <div><dt>Elapsed</dt><dd id="elapsed">0 ms</dd></div>
+            <div><dt>Long tasks</dt><dd id="long-tasks">0</dd></div>
+          </dl>
+          <h2>Input probe</h2>
+          <label for="provider-select">Script extender</label>
+          <select id="provider-select"><option value="xscal">xScal</option><option value="zfe">ZFE</option></select>
+          <details id="keybind-editor" open>
+            <summary>Simulator keybind profile</summary>
+            <div id="keybind-fields"></div>
+            <p id="keybind-error" role="alert"></p>
+            <button id="apply-keybinds" type="button">Apply &amp; reload</button>
+            <button id="reset-keybinds" type="button">Reset defaults</button>
+          </details>
+          <p>Buttons and physical keys emit the configured named HUD action and numeric extender VK. Type in the focused HUD field, then press Enter to send or Escape to cancel.</p>
+          <button id="focus-stage" data-binding="openKey" type="button">Open chat</button>
+          <button data-binding="scrollUpKey" type="button">Scroll up</button>
+          <button data-binding="scrollDownKey" type="button">Scroll down</button>
+          <button data-binding="channelPrevKey" type="button">Previous channel</button>
+          <button data-binding="channelNextKey" type="button">Next channel</button>
+          <button data-binding="scrollBottomKey" type="button">Newest</button>
+          <button data-binding="activateLinkKey" type="button">Open selected link</button>
+          <button data-binding="hideKey" type="button">Hide</button>
+          <button id="clear-log" type="button">Clear log</button>
+          <pre id="log" aria-live="polite"></pre>
+        </aside>
+      </section>
+    </main>
+    <script src="/ruffle/ruffle.js"></script>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

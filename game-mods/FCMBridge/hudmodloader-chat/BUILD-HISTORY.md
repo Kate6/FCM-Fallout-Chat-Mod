@@ -1,5 +1,64 @@
 # Archived HUD build notes
 
+## Terminal subscribe-history candidate 2.10.93
+
+- Subscribe-time relay history ends with exactly one `FCMCTL/1/HISTORY-DONE` system frame after
+  the bounded snapshot and queued live frames.
+- ZFE drains full 16-event batches immediately instead of waiting for an impossible 64-event poll.
+- Recovery remains armed until the terminal marker arrives; receiving one static row is no longer
+  treated as a complete snapshot.
+- Adds backend ordering/uniqueness coverage and a multi-poll ZFE Ruffle scenario.
+
+## ZFE synchronous-roster stability candidate 2.10.92
+
+- Disables automatic Server-room roster and leave controls on ZFE. In-game logs showed failed
+  roster controls blocking Fallout's Scaleform thread for about 15 seconds; repeated retries looked
+  like a recurring freeze/crash loop.
+- Keeps ordinary ZFE chat, authentication, static-channel history, input, and direct browser-link
+  activation enabled. xScal retains automatic Server-room binding.
+- Adds policy tests for editor suppression, bounded retries, membership churn, and unsafe synchronous
+  transports.
+
+## Local direct-link/history-recovery candidate 2.10.91
+
+- Selected HTTP(S) links now use GFx `navigateToURL` directly, avoiding the synchronous ZFE relay
+  call that could block Fallout 76's UI thread for the network timeout and required a connected
+  desktop overlay.
+- A `LINK COMPLETE` identity transition re-arms bounded history recovery, so a pre-link
+  `permission_denied` RESYNC cannot leave the newly linked HUD with only live messages.
+
+## Local bindable-link candidate 2.10.90
+
+Added `activateLinkKey` (Enter by default) across the INI, persisted-environment merge, named and
+physical provider paths, focused SharedHUDTools editor, simulator profile, package validation, and
+documentation. The action is fail-closed unless OpenChat owns an editor and the selected row has a
+validated HTTP(S) target.
+
+## Local tab/keybind/container-safety candidate 2.10.89
+
+Applied active/inactive tab colors with exact TextFormat character ranges, kept file-defined
+keybinds and HUD-mode guards authoritative over persisted appearance, synchronized ZFE's native
+watcher after discovery, and blocked input acquisition in ContainerMode so a T binding cannot
+steal Fallout's Deposit All action. The browser harness can load the locally installed game's
+Roboto Condensed font library without checking it into or distributing it with FCM.
+
+## Local ordinary-link parity candidate 2.10.88
+
+Applied URL abbreviation before emoji planning so messages containing both ordinary HTTP(S) links
+and emoji retain correct decoration offsets. Selection keeps the original full first URL as its
+action target and is repainted after feed snapshot replacement.
+
+## Local link-selection candidate 2.10.86
+
+Added row-based Up/Down selection, a selected-row highlight, bounded URL abbreviation, and empty
+Enter activation. Browser opening is handed to the linked user's connected Electron overlay over
+the existing authenticated relay; the HUD mod itself has no browser or independent network API.
+
+## Local selection-color candidate 2.10.87
+
+Made the row highlight color independent from the active-tab color. It is selectable from the
+existing F11 color palette, serialized as `selectedRowColor`, and included in xScal layout sync.
+
 > Historical snapshot preserved during the 2026-09-12 documentation audit. Statements such as
 > “current,” “installed,” “pending,” and “not yet deployed” below refer to their original test
 > session, not today's state. This file is an investigation record, not an active runbook.

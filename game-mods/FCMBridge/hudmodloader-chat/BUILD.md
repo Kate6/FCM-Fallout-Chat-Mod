@@ -1,6 +1,6 @@
 # FCMChatWidget build, install, and verification
 
-**Widget version:** 2.10.85. Local review candidate, audited 2026-09-13.
+**Widget version:** 2.10.93. Local review candidate, audited 2026-09-14.
 This is the explicit opt-in HUD-mod track. The desktop overlay never installs or modifies it.
 
 ## Status and scope
@@ -196,7 +196,7 @@ operation and must not claim success on a rejected reset. Credentials remain ext
 ## In-game acceptance checklist
 
 1. Record game distribution/version, provider version/probe, loader registration, archive order,
-   effective endpoint, and actual `chatv1-widget-v2.10.85` startup marker. Compare the installed
+   effective endpoint, and actual `chatv1-widget-v2.10.88` startup marker. Compare the installed
    BA2's decoded SWF with the reviewed build. Do not infer target from a fragment alone.
 2. Confirm exactly one FCM renderer. Test linked and limited states, late account data, correct
    public account handle, invalid-token recovery, and relink failure/success.
@@ -210,7 +210,12 @@ operation and must not claim success on a rejected reset. Credentials remain ext
    bindings, blank newest binding, cancel, Pip-Boy transitions, rapid edges, and unload/reload.
 6. Test short/wrapped/localized names, supporter stars, known/custom/unsupported emoji, independent
    colors, narrow/wide resize, clipped history, and new-message count while scrolled.
-7. Exercise delayed render failure and stale callbacks across rebuild/reload; fallback stays
+7. Select raw-link, Discord-channel, and scheduled-event rows
+   using Up/Down. Confirm the highlight follows the row, the HUD displays a shortened URL, and
+   empty Enter opens the full HTTP(S) target. Confirm unsafe schemes are inert and a missing desktop
+   overlay produces the bounded prompt. Change `Selected message` through the F11 color submenu,
+   restart both provider paths, and confirm the chosen color persists.
+8. Exercise delayed render failure and stale callbacks across rebuild/reload; fallback stays
    readable and old work cannot overwrite the new feed. Confirm settings persistence separately
    on each provider with the matching backend.
 

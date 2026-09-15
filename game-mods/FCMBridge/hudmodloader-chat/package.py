@@ -40,6 +40,7 @@ HUD_KEY_DEFAULTS = (
     "scrollUpKey=Up\n"
     "scrollDownKey=Down\n"
     "scrollBottomKey=\n"
+    "activateLinkKey=ENTER\n"
     "hideKey=DELETE\n"
 )
 
@@ -116,8 +117,8 @@ def install_instructions(
         "ZFE setup\n"
         "---------\n"
         f"{zfe_copy}{zfe_destination_note}\n"
-        "  The fragment supplies the relay endpoint and OpenChatKey. Keep\n"
-        "  Data/FCMChat.ini openKey equal to OpenChatKey (INSERT by default).\n"
+        "  The fragment supplies the relay endpoint and ZFE's startup OpenChatKey.\n"
+        "  FCMChat.ini openKey is authoritative after widget discovery (INSERT by default).\n"
         "  If Data/configuration/zfe.ini contains [TextChat], it overrides the fragment.\n"
         "  Merge settings into that existing section; do not replace the file or duplicate keys.\n"
         "  If you use an override, set:\n\n"
@@ -235,6 +236,8 @@ Key defaults
 The shipped Data/FCMChat.ini [FCMChat] key map is:
 {HUD_KEY_DEFAULTS}
 Insert opens the input; Enter sends; Escape cancels; Page Up/Page Down switch channels.
+activateLinkKey opens a selected HTTP(S) row only while that input session is active; Enter is
+the default and a custom value does not become a global gameplay hotkey.
 If the host editor loses its final callback, FCM recovers an Enter send once or cancels the stale
 session so Insert can open chat again.
 scrollUpKey=Up and scrollDownKey=Down (Arrow Up / Down) scroll after Insert opens the input.
@@ -368,6 +371,7 @@ def build_package(
             "scrollUpKey / scrollDownKey values scroll the feed (Arrow Up / Down\n"
             "are the defaults). scrollBottomKey is blank by default; set it in\n"
             "Data/FCMChat.ini to Home, End, F12, or a forwarded action if desired.\n"
+            "activateLinkKey=ENTER opens the selected link only while OpenChat owns input.\n"
             "hideKey=DELETE hides while idle and edits text while input is open.\n"
             "Before Insert, configured feed keys remain game controls. FCM -> Scroll\n"
             "to newest is always available from the F11 menu. Type /g, /t, /e, /i,\n"
@@ -419,7 +423,7 @@ def build_package(
                 "; Optional endpoint override for Data/configuration/zfe.ini.\n"
                 "; Merge these keys into the existing [TextChat] section; preserve other settings.\n"
                 "; Do not replace the whole file. xScal users do not install this example.\n"
-                "; Keep OpenChatKey identical to Data/FCMChat.ini openKey. See KEYBINDS.txt.\n"
+                "; Startup default; FCMChat.ini openKey is synchronized after widget discovery.\n"
                 "[TextChat]\n"
                 f"Endpoint={TARGETS[target]['endpoint']}\n"
                 "OpenChatKey=INSERT\n",

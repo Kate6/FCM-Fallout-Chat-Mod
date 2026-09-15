@@ -3,7 +3,7 @@ import prisma from '../../config/prisma';
 export const HUD_LAYOUT_CONTROL = 'FCMCTL/1/LAYOUT/';
 export const HUD_LAYOUT_EVENT = 'FCMLAYOUT/1;';
 const HUD_COLOR_FIELDS = ['bgColor', 'tabRowColor', 'inputBgColor', 'borderColor', 'textColor',
-  'inputTextColor', 'senderColor', 'tabActiveColor', 'tabInactiveColor', 'promptColor'] as const;
+  'inputTextColor', 'senderColor', 'tabActiveColor', 'tabInactiveColor', 'selectedRowColor', 'promptColor'] as const;
 type HudColorSettings = Partial<Record<typeof HUD_COLOR_FIELDS[number], number>>;
 export interface HudLayout extends HudColorSettings { bgAlpha?: number; x: number; y: number; width: number; height: number; fontSize?: number; inputHeight?: number; inputFontSize?: number; autoHideSec?: number; autoHideEnabled?: boolean }
 

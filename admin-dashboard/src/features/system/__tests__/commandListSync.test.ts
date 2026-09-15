@@ -129,7 +129,7 @@ describe('command list drift guards', () => {
   it('documents the HUD start-typing controls and channel command set', () => {
     const start = HUD_KEYBIND_ROWS.find(row => row.key === 'Insert');
     expect(start?.config).toContain('openKey=INSERT');
-    expect(start?.config).toContain('OpenChatKey=INSERT');
+    expect(start?.config).not.toContain('OpenChatKey=INSERT');
     expect(start?.description).toMatch(/start typing/i);
     expect(HUD_KEYBIND_ROWS.map(row => row.key)).toEqual(
       expect.arrayContaining(['Enter', 'Escape', 'Arrow Up / Down', 'Optional newest key', 'Page Down', 'Page Up', 'F11']),

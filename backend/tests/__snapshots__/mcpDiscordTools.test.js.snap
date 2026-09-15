@@ -1,0 +1,148 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`remote MCP Discord tools publishes stable schemas and all required annotations from one catalog 1`] = `
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "properties": {
+    "channelId": {
+      "pattern": "^\\d{17,20}$",
+      "type": "string",
+    },
+    "confirm": {
+      "const": true,
+      "type": "boolean",
+    },
+    "embed": {
+      "additionalProperties": false,
+      "properties": {
+        "authorIconUrl": {
+          "format": "uri",
+          "maxLength": 2048,
+          "type": "string",
+        },
+        "authorName": {
+          "maxLength": 256,
+          "type": "string",
+        },
+        "authorUrl": {
+          "format": "uri",
+          "maxLength": 2048,
+          "type": "string",
+        },
+        "color": {
+          "anyOf": [
+            {
+              "pattern": "^#?[0-9a-fA-F]{6}$",
+              "type": "string",
+            },
+            {
+              "maximum": 16777215,
+              "minimum": 0,
+              "type": "integer",
+            },
+          ],
+        },
+        "content": {
+          "maxLength": 2000,
+          "type": "string",
+        },
+        "description": {
+          "maxLength": 4096,
+          "type": "string",
+        },
+        "fields": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "inline": {
+                "type": "boolean",
+              },
+              "name": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string",
+              },
+              "value": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "name",
+              "value",
+            ],
+            "type": "object",
+          },
+          "maxItems": 25,
+          "type": "array",
+        },
+        "footerIconUrl": {
+          "format": "uri",
+          "maxLength": 2048,
+          "type": "string",
+        },
+        "footerText": {
+          "maxLength": 2048,
+          "type": "string",
+        },
+        "imageUrl": {
+          "format": "uri",
+          "maxLength": 2048,
+          "type": "string",
+        },
+        "thumbnailUrl": {
+          "format": "uri",
+          "maxLength": 2048,
+          "type": "string",
+        },
+        "timestamp": {
+          "type": "boolean",
+        },
+        "title": {
+          "maxLength": 256,
+          "type": "string",
+        },
+        "url": {
+          "format": "uri",
+          "maxLength": 2048,
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "reactionRoles": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "customEmojiId": {
+            "pattern": "^\\d{17,20}$",
+            "type": "string",
+          },
+          "emoji": {
+            "minLength": 1,
+            "type": "string",
+          },
+          "roleId": {
+            "pattern": "^\\d{17,20}$",
+            "type": "string",
+          },
+        },
+        "required": [
+          "roleId",
+        ],
+        "type": "object",
+      },
+      "maxItems": 20,
+      "type": "array",
+    },
+  },
+  "required": [
+    "channelId",
+    "embed",
+    "confirm",
+  ],
+  "type": "object",
+}
+`;

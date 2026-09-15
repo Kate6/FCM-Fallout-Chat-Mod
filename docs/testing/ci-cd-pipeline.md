@@ -33,7 +33,7 @@ the labels API).
 Source of truth for the test-tooling decisions cited here is the five-agent subsystem mapping.
 Key constraints it surfaced:
 
-- BACKEND keeps **Jest 29** for its compiled `backend/tests/**/*.test.js` supertest suites, plus
+- BACKEND uses **Jest 30.4.2** for its compiled `backend/tests/**/*.test.js` supertest suites, plus
   a hand-rolled `backend/src/testRunner.ts` (node:test + tsx) for newer TS unit suites under
   `backend/src/services/__tests__/*.test.ts`. CI must run **both** paths.
 - OVERLAY (`cross-platform-overlay`) and DASHBOARD (`admin-dashboard`) both use **Vitest + RTL +
@@ -96,24 +96,27 @@ push / ci-approved label
         ▼
    [authorize]
         │
-   ┌────┼─────────────────────────────────┐
-   ▼    ▼         ▼           ▼           ▼
-lint  backend  unit-vitest  overlay-launch  overlay-build
-check  -jest   (matrix)     -smoke-linux    -windows-nsis
+   ┌────┼────────────────────────────────────────────────────────┐
+   ▼    ▼       ▼           ▼          ▼              ▼           ▼
+lint  backend  mcp       gamemod    unit-vitest  overlay-launch  overlay-build
+check  -jest   -contract  -anchors   (matrix)     -smoke-linux    -windows-nsis
         │
         ▼ (all of the above)
    [ci-summary]   ← the single required branch-protection check
 ```
 
-## Job list (8 jobs total)
+## Job list (10 jobs total)
 
 | Job | Runner (default) | Required? | Notes |
 | --- | ---------------- | --------- | ----- |
 | `authorize` | `ubuntu-latest` | **Gate** | Skipped for unlabeled PRs → fails `ci-summary` |
 | `osv-scan` | `ubuntu-latest` | **Not required** (`continue-on-error: true`) | OSV (osv.dev) vulnerability scan of every lockfile (`osv-scanner scan source -r .`); advisory only — results in the job log, PR step summary, and an `osv-report` artifact. NON-BLOCKING pilot; see [Dependency scanning](#dependency-scanning-osv--dependabot) |
 | `lint-typecheck` | `ubuntu-latest` | **Required** | `tsc --noEmit` matrix over backend, admin-dashboard, cross-platform-overlay |
-| `backend-jest` | `ubuntu-latest` | **Required** | `postgres:16` + `redis:7` service containers; service containers on `localhost` (hosted) or `docker` hostname (self-hosted DinD); `prisma generate` + `db push`; `npm run build` then `npm test` + `npm run test:unit` |
+| `backend-jest` | `ubuntu-latest` | **Required** | `postgres:16` + `redis:7`; validates Prisma and runs `db push`, executes both MCP/asset migration SQL files twice against PostgreSQL, asserts their constraints/indexes exist, then runs backend build, the official MCP Inspector smoke, all Jest integration suites, and TS `node:test` units |
+| `mcp-contract` | `ubuntu-latest` | **Required** | Clean-installs the standalone MCP package, type-checks/builds it, and freezes legacy dev/prod tool schemas, result envelopes, confirmation semantics, routes, and supported protocol versions |
 | `unit-vitest` | `ubuntu-latest` | **Required** | **Consolidated matrix** (`cross-platform-overlay`, `admin-dashboard`); replaced the former `overlay-unit-component` + `dashboard-unit-component` jobs |
+| `gamemod-anchors` | `ubuntu-latest` | **Required** | Verifies promotion-critical sources, SWF/BA2 anchors and packaging, then compiles and tests the Haxe game-mod surfaces |
+| `hud-ruffle` | `ubuntu-latest` | **Required** | Builds the normalized HUD widget and runs the complete Ruffle/Playwright xScal + ZFE regression harness with failure artifacts |
 | `overlay-launch-smoke-linux` | `ubuntu-latest` | **Required** | Validates the Linux installer decision path (`bash -n`, `--help`, `--print-plan`), then builds once and runs packaged-launch smoke (`ci-launch-smoke.mjs`); the former auto-update E2E step was removed when auto-update was retired; replaced former `overlay-e2e-linux` |
 | `overlay-build-windows-nsis` | `windows-latest` | **Required** (prod+PRs) | Builds the NSIS installer and portable `.exe` **natively** on `windows-latest` (no Wine/Docker/GHCR); runs `.github/scripts/win-artifacts-check.mjs` — asserts unpacked, installer, and portable executables are present and that `app-update.yml` / `latest*.yml` are **absent** (the overlay no longer auto-updates); renamed from `overlay-autoupdate-e2e-windows` |
 | `ci-summary` | `ubuntu-latest` | **The single required gate** | `if: always()`; fails if any listed job is `failure`, `cancelled`, or `skipped` |
@@ -129,7 +132,7 @@ the two Linux overlay jobs (`overlay-launch-smoke`, `overlay-autoupdate-e2e`) me
 was retired; the placeholder `dashboard-playwright` job was removed; the `osv-scan` job was later added
 (non-blocking); `overlay-autoupdate-e2e-windows` was renamed `overlay-build-windows-nsis`; and the
 native-Windows `overlay-autoupdate-e2e-windows-exec` job was removed when auto-update was retired.
-Result: 8 jobs.
+The required `mcp-contract` build-and-test job was then added for the standalone MCP package. Result: 10 jobs.
 
 ## Dependency scanning (OSV + Dependabot)
 
@@ -368,7 +371,8 @@ Notes:
 
 **GitHub-hosted runner migration (active).** All CI jobs now default to GitHub-hosted runners
 (`ubuntu-latest` / `windows-latest`). Self-hosted runners remain available via `CI_RUNNER` /
-`CI_RUNNER_WINDOWS` repo variables. All 8 jobs are wired and blocking. The
+`CI_RUNNER_WINDOWS` repo variables. All required jobs are wired and blocking (ten jobs total,
+including the advisory `osv-scan`). The
 `overlay-build-windows-nsis` job builds the NSIS installer natively on `windows-latest`
 (no Wine/Docker) and asserts no auto-update feed files are emitted (auto-update was retired).
 

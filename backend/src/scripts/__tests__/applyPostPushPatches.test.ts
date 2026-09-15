@@ -6,22 +6,45 @@ test('post-push patch set is static, ordered, and complete', () => {
   assert.deepEqual(
     POST_PUSH_PATCHES.map((patch) => patch.name),
     [
+      'required-pg-trgm-extension',
       'messages-source-check',
       'default-targeted-automod-policy',
       'ai-moderation-safe-defaults',
       'remove-legacy-broad-chat-profanity-filters',
+      'embed-assets-normalize-status',
+      'embed-assets-remove-invalid-pending',
+      'embed-assets-clear-ready-leases',
+      'embed-assets-status-constraint',
+      'embed-assets-pending-lease-constraint',
+      'mcp-oauth-s256-constraint',
+      'mcp-oauth-code-scopes-constraint',
+      'mcp-oauth-grant-scopes-constraint',
     ],
   );
 
-  const sourceSql = POST_PUSH_PATCHES[0].sql;
+  assert.match(POST_PUSH_PATCHES[0].sql, /CREATE EXTENSION IF NOT EXISTS pg_trgm/);
+  const sourceSql = POST_PUSH_PATCHES[1].sql;
   for (const source of ['game', 'discord', 'hud', 'relay', 'mcp', 'ws']) {
     assert.match(sourceSql, new RegExp(`'${source}'`));
   }
-  assert.match(POST_PUSH_PATCHES[1].sql, /require_target/);
-  assert.match(POST_PUSH_PATCHES[2].sql, /ON CONFLICT/);
-  assert.match(POST_PUSH_PATCHES[3].sql, /fuck/);
-  assert.match(POST_PUSH_PATCHES[3].sql, /assh/);
-  assert.match(POST_PUSH_PATCHES[3].sql, /chat_profanity_literal_cleanup_v1/);
+  assert.match(POST_PUSH_PATCHES[2].sql, /require_target/);
+  assert.match(POST_PUSH_PATCHES[3].sql, /ON CONFLICT/);
+  assert.match(POST_PUSH_PATCHES[4].sql, /fuck/);
+  assert.match(POST_PUSH_PATCHES[4].sql, /assh/);
+  assert.match(POST_PUSH_PATCHES[4].sql, /chat_profanity_literal_cleanup_v1/);
+  for (const constraint of [
+    'embed_assets_status_check',
+    'embed_assets_pending_lease_check',
+  ]) {
+    assert.ok(POST_PUSH_PATCHES.some((patch) => new RegExp(constraint).test(patch.sql)));
+  }
+  for (const constraint of [
+    'mcp_oauth_codes_s256_check',
+    'mcp_oauth_codes_scopes_check',
+    'mcp_oauth_grants_scopes_check',
+  ]) {
+    assert.ok(POST_PUSH_PATCHES.some((patch) => new RegExp(constraint).test(patch.sql)));
+  }
 });
 
 test('applyPostPushPatches executes every patch exactly once', async () => {

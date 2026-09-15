@@ -31,6 +31,26 @@ No host ports are published for the backend in production — it is reachable on
 
 ### Standby / Failover
 
+For temporary laptop cutovers, use the isolated, fail-closed manifest in
+[`deploy/laptop-cutover/`](../../deploy/laptop-cutover/README.md). Dev and
+Production use separate Compose project names, localhost origin ports, secrets,
+backups, checkpoints, and Docker volumes. The laptop manifest does not use the
+local-development override or the VPS-only `dokploy-network`; its tunnel
+connector is isolated behind an opt-in Compose `edge` profile so edge movement
+remains an explicitly approved step.
+
+While laptop Dev is authoritative, `.github/workflows/deploy-laptop-dev.yml`
+provides Dokploy-equivalent auto-deployment for pushes to `dev`. It requires both
+the repository variable `LAPTOP_DEV_AUTODEPLOY=true` and the laptop-local
+`CUTOVER_ACTIVE` marker, uses a dedicated Windows runner label, updates only the
+backend, health-checks it, and rolls back the image on failure. Disable the
+repository variable and remove the marker before Dev failback.
+Hosted and laptop auto-deploy must never be enabled together: turn off Dokploy
+Compose auto-deploy before enabling the laptop variable, and restore the reverse
+state only after hosted Dev has passed failback validation. Dokploy's displayed
+`composeStatus` is deployment history, not proof of live container state; use SSH
+Manager to verify the authoritative writer and connector set.
+
 `dokploy-standby.yml` defines a `backend-standby` service that polls the primary backend at `$PRIMARY_URL/api/health`. When the primary is down it starts its own `node dist/server.js` process; when the primary recovers it kills it. The standby connects to the same Postgres and Redis over the shared Docker network. An Nginx config (`backend/infra/failover.conf`) shows the intended upstream pool:
 
 ```
