@@ -50,6 +50,12 @@
     Optional. Release notes text prepended to the Nexus file description and sent
     in the POST /admin/releases body.
 
+.PARAMETER ReleaseTarget
+    Required before publishing. Choose Overlay, Hud, or Both. When omitted, the
+    script prompts interactively before it uploads or registers a release. The
+    selected target controls the Discord embed title and which opt-in role is
+    notified; the release flow never uses @everyone.
+
 .PARAMETER SkipBuild
     Skip the electron-builder step (step 1). Use when dist-electron artifacts are
     already built (e.g. after a partial run). Linux artifact check still runs.
@@ -81,6 +87,7 @@
 param(
     [Parameter(Mandatory = $true)] [string]$Version,
     [string]$ReleaseNotes  = "",
+    [ValidateSet('Overlay', 'Hud', 'Both')] [string]$ReleaseTarget = "",
     [switch]$SkipBuild,
     [switch]$DryRun,
     [switch]$SkipWindowsNexus,
@@ -109,6 +116,17 @@ function Import-DotEnv($path) {
 $repoRootForEnv = Split-Path $PSScriptRoot -Parent
 Import-DotEnv (Join-Path $repoRootForEnv ".env")
 Import-DotEnv (Join-Path $repoRootForEnv ".env.local")
+
+# A release target is intentionally selected by a human operator. Do not infer
+# it from which artifacts happened to be built: a HUD package can be rebuilt
+# alongside an overlay-only release, and vice versa.
+if (-not $ReleaseTarget) {
+    $ReleaseTarget = Read-Host "Release target (Overlay, Hud, or Both)"
+}
+$ReleaseTarget = $ReleaseTarget.Trim().ToLowerInvariant()
+if ($ReleaseTarget -notin @('overlay', 'hud', 'both')) {
+    throw "ReleaseTarget must be Overlay, Hud, or Both."
+}
 
 # ---- Helpers ------------------------------------------------------------------
 
@@ -498,11 +516,21 @@ Step-Banner 7 "Register release (POST /admin/releases)"
 $winZipUrlName = "Fallout%20Chat%20Mod%20Setup%20$Version%20(Windows).zip"
 $downloadUrl   = "$baseUrl/$winZipUrlName"
 
-$notesEscaped = $ReleaseNotes -replace '\\', '\\\\' -replace '"', '\"' -replace "`r`n", '\n' -replace "`n", '\n' -replace "`r", '\n'
-$body = "{`"version`":`"$Version`",`"downloadUrl`":`"$downloadUrl`",`"hudModVersion`":`"$hudModVersion`",`"hudModUrl`":`"$hudModUrl`",`"releaseNotes`":`"$notesEscaped`"}"
+$releaseBody = @{
+    version = $Version
+    downloadUrl = $downloadUrl
+    releaseNotes = $ReleaseNotes
+    releaseTarget = $ReleaseTarget
+}
+if ($ReleaseTarget -ne 'overlay') {
+    $releaseBody.hudModVersion = $hudModVersion
+    $releaseBody.hudModUrl = $hudModUrl
+}
+$body = $releaseBody | ConvertTo-Json -Compress
 
 Write-Host "[step 7] POST https://falloutchatmod.com/admin/releases"
-Write-Host "         version=$Version  downloadUrl=$downloadUrl  hudModVersion=$hudModVersion  hudModUrl=$hudModUrl"
+Write-Host "         version=$Version  target=$ReleaseTarget  downloadUrl=$downloadUrl"
+if ($ReleaseTarget -ne 'overlay') { Write-Host "         hudModVersion=$hudModVersion  hudModUrl=$hudModUrl" }
 
 try {
     $resp = Invoke-RestMethod -Uri "https://falloutchatmod.com/admin/releases" -Method Post `

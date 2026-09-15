@@ -1,6 +1,6 @@
 import express from 'express';
 import { authorizationServerMetadata, authorize, consent, discordCallback, protectedResourceMetadata, register, revoke, token } from '../controllers/mcpOAuthController';
-import { authLimiter } from '../middleware/rateLimiter';
+import { mcpOAuthLimiter } from '../middleware/rateLimiter';
 import env from '../config/environment';
 import type { NextFunction, Request, Response } from 'express';
 
@@ -45,10 +45,10 @@ function jsonOnly(maxBytes: number) {
 }
 router.get('/.well-known/oauth-protected-resource/mcp', protectedResourceMetadata);
 router.get('/.well-known/oauth-authorization-server', authorizationServerMetadata);
-router.post('/oauth/register', authLimiter, express.json({ limit: '32kb' }), jsonOnly(32 * 1024), register);
-router.get('/oauth/authorize', authLimiter, authorize);
-router.get('/oauth/discord/callback', authLimiter, discordCallback);
-router.post('/oauth/authorize/consent', authLimiter, express.urlencoded({ extended: false, limit: '8kb' }), formOnly(8 * 1024), consent);
-router.post('/oauth/token', authLimiter, express.urlencoded({ extended: false, limit: '8kb' }), formOnly(8 * 1024), token);
-router.post('/oauth/revoke', authLimiter, express.urlencoded({ extended: false, limit: '8kb' }), formOnly(8 * 1024), revoke);
+router.post('/oauth/register', mcpOAuthLimiter, express.json({ limit: '32kb' }), jsonOnly(32 * 1024), register);
+router.get('/oauth/authorize', mcpOAuthLimiter, authorize);
+router.get('/oauth/discord/callback', mcpOAuthLimiter, discordCallback);
+router.post('/oauth/authorize/consent', mcpOAuthLimiter, express.urlencoded({ extended: false, limit: '8kb' }), formOnly(8 * 1024), consent);
+router.post('/oauth/token', mcpOAuthLimiter, express.urlencoded({ extended: false, limit: '8kb' }), formOnly(8 * 1024), token);
+router.post('/oauth/revoke', mcpOAuthLimiter, express.urlencoded({ extended: false, limit: '8kb' }), formOnly(8 * 1024), revoke);
 export default router;

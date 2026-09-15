@@ -73,7 +73,9 @@ Data/configuration/zfe.ini [TextChat] supplies ZFE's startup value and overrides
   Data/ZFE/TextChat/fragments/FCMChatWidget.ini
 
 The packaged fragment also contains OpenChatKey=INSERT as its default. Once FCMChatWidget loads,
-its `FCMChat.ini` value is pushed to the active watcher and wins for FCM chat.
+its `FCMChat.ini` value is pushed to the active watcher when ZFE accepts that token. The widget
+also registers the mapped physical open key through Input.*, covering F-keys rejected by the
+narrower native watcher.
 
 OTHER HUD ACTIONS
 -----------------
@@ -96,12 +98,12 @@ open-chat key owns a visible input session; before then the game keeps the contr
 HUDModLoader menu's **Scroll to newest** item remains available regardless of this optional
 binding.
 
-For ZFE, use Fallout control-map action names that the loader forwards. For xScal, a token
-with a documented Windows virtual-key mapping (Home, End, F12, a letter or digit, etc.) is
-also registered through `Input.RegisterKey`/`Input.IsKeyPressed`; the named-action path remains
+For either provider, use a Fallout control-map action that the loader forwards or a token
+with a documented Windows virtual-key mapping (Home, End, F12, a letter or digit, etc.). Mapped
+tokens are registered through `Input.RegisterKey`/`Input.IsKeyPressed`; the named-action path remains
 available for control-map actions. Registration is polling bookkeeping and does not suppress the
 underlying keyboard action. Test any bare gameplay key for conflicts. The physical fallback uses
-the same configured values for ZFE when its compatibility Input.* surface is available.
+the same configured values for ZFE and xScal.
 
 INPUT-OPEN KEY PRIORITY
 -----------------------

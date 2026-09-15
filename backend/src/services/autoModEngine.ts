@@ -44,7 +44,7 @@
 
 import prisma from '../config/prisma';
 import logger from '../config/logger';
-import { postModAlert } from './discordService';
+import * as discordService from './discordService';
 import { filterContent, detectSpam } from './autoModService';
 import { muteUser } from './moderationActionsService';
 import { isProtectedTarget } from './userRoleService';
@@ -343,7 +343,7 @@ async function executeActions(
             MENTION_SPAM: '#FFD700',
             LINK: '#FF0000',
           };
-          await postModAlert({
+          await discordService.postModAlert({
             title: `🛡️ Auto-Mod Triggered — ${rule.name}`,
             color: colorMap[rule.triggerType] || '#FF0000',
             fields: [

@@ -260,7 +260,10 @@ describe('editDiscordRelayMessage', () => {
     );
 
     expect(changed).toBe(true);
-    expect(edit).toHaveBeenCalledWith({ content: '**[General]** **VaultEller**: corrected text\u200b' });
+    expect(edit).toHaveBeenCalledWith({
+      content: '**[General]** **VaultEller**: corrected text\u200b',
+      allowedMentions: { parse: [], users: [], roles: [] },
+    });
   });
 
   it('waits briefly for a relay link created by the outbound send queue', async () => {
@@ -289,6 +292,9 @@ describe('editDiscordRelayMessage', () => {
 
     expect(changed).toBe(true);
     expect(mockDiscordMessageLinkFindUnique).toHaveBeenCalledTimes(2);
-    expect(edit).toHaveBeenCalledWith({ content: '**[General]** **VaultEller**: corrected after send\u200b' });
+    expect(edit).toHaveBeenCalledWith({
+      content: '**[General]** **VaultEller**: corrected after send\u200b',
+      allowedMentions: { parse: [], users: [], roles: [] },
+    });
   });
 });

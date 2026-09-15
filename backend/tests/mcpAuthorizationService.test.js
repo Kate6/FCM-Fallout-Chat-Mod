@@ -28,6 +28,18 @@ describe('mcpAuthorizationService', () => {
       resource: 'https://falloutchatmod.com/mcp', pkceChallenge: '', codeChallengeMethod: 'plain', scopes: ['fcm:read'] })).rejects.toMatchObject({ code: 'invalid_grant' });
   });
 
+  it('returns one deterministically bound code for repeated consent approval', async () => {
+    prisma.mcpOAuthCode.upsert.mockImplementation(async ({ create }) => ({ ...create }));
+    const input = { clientId: client.clientId, discordId: '42', redirectUri: client.redirectUris[0],
+      resource: 'https://falloutchatmod.com/mcp', pkceChallenge: pkceS256(verifier), codeChallengeMethod: 'S256',
+      scopes: ['fcm:read'], consentIdempotencyKey: 'a'.repeat(43) };
+    const first = await service().issueAuthorizationCode(input);
+    const second = await service().issueAuthorizationCode(input);
+    expect(second.code).toBe(first.code);
+    expect(prisma.mcpOAuthCode.upsert).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(prisma.mcpOAuthCode.upsert.mock.calls)).not.toContain(first.code);
+  });
+
   it.each(['replayed', 'expired', 'wrong PKCE', 'wrong audience', 'cross-client'])(
     'rejects a %s authorization code atomically', async () => {
       prisma.mcpOAuthCode.findUnique.mockResolvedValue({ clientId: 'client-a', discordId: '42',
@@ -98,6 +110,13 @@ describe('mcpAuthorizationService', () => {
       redirectUri: 'https://evil.example/callback', resource: 'https://falloutchatmod.com/mcp',
       pkceChallenge: pkceS256(verifier), codeChallengeMethod: 'S256', scopes: ['fcm:read'] }))
       .rejects.toMatchObject({ code: 'invalid_client' });
+  });
+
+  it('accepts an ephemeral port for a portless registered HTTP loopback callback', async () => {
+    prisma.mcpOAuthClient.findUnique.mockResolvedValue({ ...client, redirectUris: ['http://127.0.0.1/callback/CkPYkR2KjUtX'] });
+    await expect(service().issueAuthorizationCode({ clientId: client.clientId, discordId: '42',
+      redirectUri: 'http://127.0.0.1:40301/callback/CkPYkR2KjUtX', resource: 'https://falloutchatmod.com/mcp',
+      pkceChallenge: pkceS256(verifier), codeChallengeMethod: 'S256', scopes: ['fcm:read'] })).resolves.toMatchObject({ code: expect.any(String) });
   });
 
   it('rejects non-S256 challenge methods and malformed verifiers', async () => {

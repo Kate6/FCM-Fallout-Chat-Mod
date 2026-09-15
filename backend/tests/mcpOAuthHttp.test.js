@@ -1,5 +1,12 @@
 const state = new Map();
-const redis = { set: jest.fn(async (key, value) => { state.set(key, value); }), getDel: jest.fn(async key => { const value = state.get(key); state.delete(key); return value ?? null; }) };
+const redis = {
+  set: jest.fn(async (key, value, options = {}) => {
+    if (options.NX && state.has(key)) return null;
+    state.set(key, value); return 'OK';
+  }),
+  get: jest.fn(async key => state.get(key) ?? null),
+  getDel: jest.fn(async key => { const value = state.get(key); state.delete(key); return value ?? null; }),
+};
 const authz = { issueAuthorizationCode: jest.fn(async () => ({ code: 'issued-code' })), exchangeAuthorizationCode: jest.fn(async () => ({ accessToken: 'at', refreshToken: 'rt', tokenType: 'Bearer', expiresIn: 600, scopes: ['fcm:read'] })), refresh: jest.fn(), revokeToken: jest.fn(async () => {}) };
 const mockRoleAuth = jest.fn(async () => ({ authorized: true, role: 'admin' }));
 const clients = { redirectUris: ['https://claude.ai/api/mcp/auth_callback'], metadata: { client_name: 'Claude' }, disabledAt: null };
@@ -7,9 +14,23 @@ const mockRegister = jest.fn(async body => { if (Object.prototype.hasOwnProperty
 const mockResolveClient = jest.fn(async () => clients);
 
 jest.mock('../src/config/redis', () => ({ getRedisClient: async () => redis }));
-jest.mock('../src/middleware/rateLimiter', () => ({ authLimiter: (_req, _res, next) => next() }));
+jest.mock('../src/middleware/rateLimiter', () => ({ mcpOAuthLimiter: (_req, _res, next) => next() }));
 jest.mock('../src/services/mcpAuthorizationService', () => ({ MCP_SCOPES: ['fcm:read', 'fcm:discord:write', 'fcm:moderation:write'], McpOAuthError: class McpOAuthError extends Error { constructor(code, message) { super(message); this.code = code; } }, mcpAuthorizationService: authz }));
-jest.mock('../src/services/mcpClientMetadataService', () => ({ McpClientMetadataError: class extends Error {}, registerOAuthClient: mockRegister, resolveOAuthClient: mockResolveClient }));
+jest.mock('../src/services/mcpClientMetadataService', () => ({
+  McpClientMetadataError: class extends Error {},
+  registerOAuthClient: mockRegister,
+  resolveOAuthClient: mockResolveClient,
+  matchesRegisteredRedirectUri: (registeredUris, requested) => {
+    if (registeredUris.includes(requested)) return true;
+    const callback = new URL(requested);
+    return registeredUris.some(registered => {
+      const metadata = new URL(registered);
+      return callback.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(callback.hostname) && callback.port
+        && metadata.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(metadata.hostname) && !metadata.port
+        && metadata.hostname === callback.hostname && metadata.pathname === callback.pathname && metadata.search === callback.search;
+    });
+  },
+}));
 jest.mock('../src/services/mcpRoleService', () => ({ mcpRoleService: { authorize: mockRoleAuth } }));
 
 const express = require('express');
@@ -79,11 +100,52 @@ describe('MCP OAuth HTTP routes', () => {
     global.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: 'discord-token' }) }).mockResolvedValueOnce({ ok: true, json: async () => ({ id: '123456789012345678' }) });
     const callback = await agent.get('/oauth/discord/callback').query({ code: 'discord-code', state: oauthState });
     expect(callback.status).toBe(200); expect(callback.text).toContain('Authorize Claude');
+    expect(callback.text).toContain('type="hidden" name="decision" value="approve"');
+    expect(callback.text).toContain('type="submit" value="Authorize"');
     expect((await agent.get('/oauth/discord/callback').query({ code: 'discord-code', state: oauthState })).status).toBe(403);
     const consentToken = callback.text.match(/name="consent_token" value="([^"]+)"/)[1];
     const consent = await agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' });
     const redirect = new URL(consent.headers.location); expect(redirect.origin + redirect.pathname).toBe(clients.redirectUris[0]); expect(redirect.searchParams.get('state')).toBe('client-state'); expect(redirect.searchParams.get('code')).toBe('issued-code');
-    expect((await agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' })).status).toBe(500);
+    const repeatedConsent = await agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' });
+    expect(repeatedConsent.status).toBe(302); expect(new URL(repeatedConsent.headers.location).searchParams.get('code')).toBe('issued-code');
+  });
+
+  test('concurrent duplicate approvals return the same callback instead of racing', async () => {
+    const agent = request.agent(app());
+    const response = await agent.get('/oauth/authorize').query({ client_id: 'registered', redirect_uri: clients.redirectUris[0], resource: env.MCP_RESOURCE_URL, response_type: 'code', code_challenge_method: 'S256', code_challenge: 'a'.repeat(43), scope: 'fcm:read', state: 'client-state' });
+    const oauthState = new URL(response.headers.location).searchParams.get('state');
+    global.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: 'discord-token' }) }).mockResolvedValueOnce({ ok: true, json: async () => ({ id: '123456789012345678' }) });
+    const callback = await agent.get('/oauth/discord/callback').query({ code: 'discord-code', state: oauthState });
+    const consentToken = callback.text.match(/name="consent_token" value="([^"]+)"/)[1];
+    authz.issueAuthorizationCode.mockImplementationOnce(async () => {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      return { code: 'issued-code' };
+    });
+
+    const [first, second] = await Promise.all([
+      agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' }),
+      agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' }),
+    ]);
+
+    expect(first.status).toBe(302); expect(second.status).toBe(302);
+    expect(new URL(first.headers.location).searchParams.get('code')).toBe('issued-code');
+    expect(new URL(second.headers.location).searchParams.get('code')).toBe('issued-code');
+  });
+
+  test('a consent decision cannot be changed after it is bound', async () => {
+    const agent = request.agent(app());
+    const response = await agent.get('/oauth/authorize').query({ client_id: 'registered', redirect_uri: clients.redirectUris[0], resource: env.MCP_RESOURCE_URL, response_type: 'code', code_challenge_method: 'S256', code_challenge: 'a'.repeat(43), scope: 'fcm:read' });
+    const oauthState = new URL(response.headers.location).searchParams.get('state');
+    global.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: 'discord-token' }) }).mockResolvedValueOnce({ ok: true, json: async () => ({ id: '123456789012345678' }) });
+    const callback = await agent.get('/oauth/discord/callback').query({ code: 'discord-code', state: oauthState });
+    const consentToken = callback.text.match(/name="consent_token" value="([^"]+)"/)[1];
+
+    expect((await agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' })).status).toBe(302);
+    const conflict = await agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'deny' });
+    expect(conflict.status).toBe(302);
+    const conflictRedirect = new URL(conflict.headers.location);
+    expect(conflictRedirect.searchParams.get('error')).toBe('invalid_request');
+    expect(conflictRedirect.searchParams.get('error_description')).toBe('Consent decision is already final');
   });
 
   test('does not redirect an unvalidated redirect and redirects post-validation errors', async () => {
@@ -91,6 +153,21 @@ describe('MCP OAuth HTTP routes', () => {
     expect(untrusted.status).toBe(400); expect(untrusted.headers.location).toBeUndefined();
     const trusted = await request(app()).get('/oauth/authorize').query({ client_id: 'registered', redirect_uri: clients.redirectUris[0], resource: env.MCP_RESOURCE_URL, response_type: 'code', code_challenge_method: 'S256', code_challenge: 'a'.repeat(43), scope: 'bad', state: 'kept' });
     expect(trusted.status).toBe(302); expect(trusted.headers.location).toContain('state=kept'); expect(trusted.headers.location).toContain('error=invalid_scope');
+  });
+
+  test('accepts repeated identical resource indicators but rejects conflicting ones', async () => {
+    const base = { client_id: 'registered', redirect_uri: clients.redirectUris[0], response_type: 'code', code_challenge_method: 'S256', code_challenge: 'a'.repeat(43) };
+    const accepted = await request(app()).get('/oauth/authorize').query({ ...base, resource: [env.MCP_RESOURCE_URL, env.MCP_RESOURCE_URL] });
+    expect(accepted.status).toBe(302); expect(accepted.headers.location).toContain('discord.com/api/oauth2/authorize');
+    const rejected = await request(app()).get('/oauth/authorize').query({ ...base, resource: [env.MCP_RESOURCE_URL, 'https://evil.example/mcp'] });
+    expect(rejected.status).toBe(302); expect(rejected.headers.location).toContain('error=invalid_request');
+  });
+
+  test('accepts Codex ephemeral loopback ports from portless client metadata', async () => {
+    clients.redirectUris = ['http://127.0.0.1/callback/CkPYkR2KjUtX'];
+    const response = await request(app()).get('/oauth/authorize').query({ client_id: 'registered', redirect_uri: 'http://127.0.0.1:40301/callback/CkPYkR2KjUtX', resource: env.MCP_RESOURCE_URL, response_type: 'code', code_challenge_method: 'S256', code_challenge: 'a'.repeat(43) });
+    expect(response.status).toBe(302); expect(response.headers.location).toContain('discord.com/api/oauth2/authorize');
+    clients.redirectUris = ['https://claude.ai/api/mcp/auth_callback'];
   });
 
   test('callback fails closed on browser-session mismatch and redirects a validated role denial', async () => {

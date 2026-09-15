@@ -97,6 +97,8 @@ docs/CODE-SIGNING.md
 .playwright-mcp/
 measure.js
 *.png
+!marketing/photos/
+!marketing/photos/*.png
 !game-mods/FCMBridge/hudmodloader-chat/assets/supporter-star-*.png
 !game-mods/FCMBridge/hudmodloader-chat/emoji/images/*.png
 _arcwright-output/

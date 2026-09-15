@@ -13,7 +13,7 @@ test.afterEach(async ({ page, request }) => {
 test('loads the exact production widget artifact and records browser key delivery', async ({ page }) => {
   await page.goto('/?mode=artifact');
   await expect(page.locator('#status')).toHaveAttribute('data-state', 'ready', { timeout: 20_000 });
-  await expect(page.locator('#widget-version')).toHaveText('2.10.93');
+  await expect(page.locator('#widget-version')).toHaveText('2.10.96');
   await page.locator('#focus-stage').click();
   await page.keyboard.press('Insert');
   await page.keyboard.press('ArrowUp');
@@ -163,6 +163,7 @@ test('keeps xScal object calls and ZFE JSON dispatch as separate contracts', asy
   expect(zfeSource).toContain('Reflect.setField(out, "call"');
   expect(zfeSource).toContain('haxe.Json.parse(Std.string(payload))');
   expect(zfeSource).toContain('zfe-chat-online-v1');
+  expect(zfeSource).toContain('zfe-chat-async-send-v1');
   expect(zfeSource).toContain('verb == "consumeChatInputSubmitted"');
   expect(zfeSource).toContain('handleKey(keyCode:Int, charCode:Int, down:Bool)');
 });
@@ -281,3 +282,41 @@ for (const provider of ['xscal', 'zfe']) {
     await request.post('/__fcm/keybinds/reset', { data: {} });
   });
 }
+
+test('releases every old provider key before installing a complete rebound profile', async ({ page }) => {
+  const rebound = normalizeKeybinds({
+    openKey: 'F2', channelNextKey: 'F3', channelPrevKey: 'F4',
+    scrollUpKey: 'F5', scrollDownKey: 'F6', scrollBottomKey: 'F7',
+    activateLinkKey: 'F8', hideKey: 'F12',
+  });
+  const oldCodes = Object.values(defaultKeybinds).filter(Boolean).map(key => browserKey(key)!.keyCode);
+  const newCodes = Object.values(rebound).filter(Boolean).map(key => browserKey(key)!.keyCode);
+
+  await page.goto('/');
+  await expect(page.locator('#status')).toHaveAttribute('data-state', 'ready', { timeout: 20_000 });
+  const result = await page.evaluate(({ oldCodes, newCodes }) => {
+    const host = window.__INSTALLED_XSCAL__!;
+    const oldRegistered = oldCodes.every(key => host.call('Input.RegisterKey', key));
+    const oldReleased = oldCodes.every(key => host.call('Input.UnregisterKey', key));
+    const oldInactive = oldCodes.every(key => !host.setPressed(key, true)
+      && !host.call('Input.IsKeyPressed', key));
+    const newRegistered = newCodes.every(key => host.call('Input.RegisterKey', key));
+    const newActive = newCodes.every(key => host.setPressed(key, true)
+      && host.call('Input.IsKeyPressed', key));
+    return { oldRegistered, oldReleased, oldInactive, newRegistered, newActive };
+  }, { oldCodes, newCodes });
+  expect(result).toEqual({ oldRegistered: true, oldReleased: true, oldInactive: true,
+    newRegistered: true, newActive: true });
+
+  const [widgetSource, zfeSource] = await Promise.all([
+    readFile(new URL('../../FCMChatWidget.hx', import.meta.url), 'utf8'),
+    readFile(new URL('../haxe/MockZfe.hx', import.meta.url), 'utf8'),
+  ]);
+  expect(widgetSource.indexOf('stopPhysicalNavigation();')).toBeLessThan(
+    widgetSource.indexOf('for (keyCode in keyCodes)'));
+  expect(widgetSource).toContain('_physicalOpenKey = FcmCommand.virtualKeyCode(_cfg.openKey);');
+  expect(widgetSource).not.toContain('_api.provider == FcmNativeApi.XSCAL\n            ? FcmCommand.virtualKeyCode(_cfg.openKey) : 0;');
+  expect(widgetSource).toContain('callTop("updateChatHotkey", _cfg.openKey)');
+  expect(zfeSource).toContain('if (verb == "updateChatHotkey") { hotkey = Std.string(payload); hotkeyDown = false;');
+  expect(zfeSource).toContain('if (keyCode == FcmCommand.virtualKeyCode(hotkey)) hotkeyDown = down;');
+});

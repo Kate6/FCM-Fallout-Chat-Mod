@@ -167,9 +167,10 @@ binding. For xScal and the ZFE Input.* compatibility path, physical tokens with 
 virtual-key mapping are registered and polled through `Input.RegisterKey`/`Input.IsKeyPressed`.
 Registration does not suppress the underlying keyboard action, so test bare gameplay keys.
 
-Two open-key bindings must agree: `Data/ZFE/TextChat/fragments/FCMChatWidget.ini` `OpenChatKey`
-(authoritative native key) and `FCMChat.ini` `openKey` (the `HUDMod::UserEvent` path) — both
-default `INSERT`. Full key catalog (colors / geometry / opacity / limits / toggles / keybinds):
+Keep `Data/ZFE/TextChat/fragments/FCMChatWidget.ini` `OpenChatKey` aligned with `FCMChat.ini`
+`openKey`; both default to `INSERT`. The widget registers mapped physical open keys through
+`Input.*` for either provider, so keys such as F12 still work when ZFE's narrower native watcher
+rejects the runtime update. Full key catalog (colors / geometry / opacity / limits / toggles / keybinds):
 see [zfe/ingame-chat-appearance.md](zfe/ingame-chat-appearance.md) and the commented
 `Data/FCMChat.ini`.
 
@@ -192,6 +193,13 @@ gamepad buttons, so test the chosen key for gameplay conflicts. The widget unreg
 when it unloads. Do not add a fabricated `OpenChatKey` entry to `xscal.ini`. See the
 [xScal Input interface, Nexus article 268](https://www.nexusmods.com/fallout76/articles/268)
 for the provider's registration, polling, and suppression scope.
+
+The verified xScal rebind flow is: exit Fallout 76, keep `[Chat] enabled=true` and the correct
+`relayEndpoint` in the root `xscal.ini`, change the existing keys in `Data/FCMChat.ini`, then fully
+restart the game. Do not add `OpenChatKey` to `xscal.ini`. On 2026-09-15, FCMChatWidget 2.10.96
+accepted and manually exercised a complete rotated profile—F2 open, F3/F4 channels, F5/F6 scroll,
+F7 newest, F8 selected-link activation, and F12 hide—against hosted Dev. `xscal.log` recorded
+accepted VKs 113–119 and 123, `provider=xscal`, and completed the multi-poll history replay.
 
 ---
 

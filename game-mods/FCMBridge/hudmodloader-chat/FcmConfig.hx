@@ -660,6 +660,15 @@ class FcmConfig {
         return fallback;
     }
 
+    /** Accept a forwarded Fallout action or a key representable by provider Input.*. */
+    static function validBindableAction(s:String, fallback:String):String {
+        if (s == null) return fallback;
+        var t:String = StringTools.trim(s);
+        if (t.length == 0) return fallback;
+        for (a in ACTIONS) if (a == t) return t;
+        return FcmCommand.virtualKeyCode(t) > 0 ? t : fallback;
+    }
+
     /**
      * Validate a user-supplied navigation token. The loader action vocabulary varies
      * between Fallout builds, so scroll bindings intentionally accept any printable
@@ -722,13 +731,13 @@ class FcmConfig {
                     // token; anything with &/</> etc. falls back to default (crash rule #2 guard).
                     var ok:String = StringTools.trim(val);
                     cfg.openKey = (ok.length > 0 && ~/^[A-Za-z0-9_]+$/.match(ok)) ? ok : cfg.openKey;
-                case "channelnextkey":  cfg.channelNextKey = validAction(val, cfg.channelNextKey);
-                case "channelprevkey":  cfg.channelPrevKey = validAction(val, cfg.channelPrevKey);
+                case "channelnextkey":  cfg.channelNextKey = validBindableAction(val, cfg.channelNextKey);
+                case "channelprevkey":  cfg.channelPrevKey = validBindableAction(val, cfg.channelPrevKey);
                 case "scrollupkey":     cfg.scrollUpKey = validScrollKey(val, cfg.scrollUpKey);
                 case "scrolldownkey":   cfg.scrollDownKey = validScrollKey(val, cfg.scrollDownKey);
                 case "scrollbottomkey": cfg.scrollBottomKey = validScrollKey(val, "");
                 case "activatelinkkey": cfg.activateLinkKey = validScrollKey(val, "ENTER");
-                case "hidekey":         cfg.hideKey = validAction(val, "DELETE");
+                case "hidekey":         cfg.hideKey = validBindableAction(val, "DELETE");
                 case "showhints":       cfg.showHints = parseBool(val, cfg.showHints);
                 case "autobroadcastworldevents":
                     cfg.autoBroadcastWorldEvents = parseBool(val, cfg.autoBroadcastWorldEvents);

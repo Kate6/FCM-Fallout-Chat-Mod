@@ -244,7 +244,7 @@ describe('POST /admin/releases — successful publish refreshes cache', () => {
     const res = await request(app)
       .post('/admin/releases')
       .set('Authorization', `Bearer ${RELEASE_TOKEN}`)
-      .send({ version: VALID_VERSION, downloadUrl: VALID_DOWNLOAD_URL, releaseNotes: 'Test release' });
+      .send({ version: VALID_VERSION, downloadUrl: VALID_DOWNLOAD_URL, releaseNotes: 'Test release', releaseTarget: 'overlay' });
 
     // The route verification fetches succeed and Discord post succeeds → 200
     expect(res.status).toBe(200);
@@ -263,7 +263,7 @@ describe('POST /admin/releases — successful publish refreshes cache', () => {
     await request(app)
       .post('/admin/releases')
       .set('Authorization', `Bearer ${RELEASE_TOKEN}`)
-      .send({ version: VALID_VERSION, downloadUrl: VALID_DOWNLOAD_URL, releaseNotes: 'Test release' });
+      .send({ version: VALID_VERSION, downloadUrl: VALID_DOWNLOAD_URL, releaseNotes: 'Test release', releaseTarget: 'overlay' });
 
     // The controller no longer calls global.broadcast for release:published
     expect(broadcastSpy).not.toHaveBeenCalledWith(
@@ -279,15 +279,15 @@ describe('POST /admin/releases — successful publish refreshes cache', () => {
     await request(app)
       .post('/admin/releases')
       .set('Authorization', `Bearer ${RELEASE_TOKEN}`)
-      .send({ version: VALID_VERSION, downloadUrl: VALID_DOWNLOAD_URL, releaseNotes: 'Test release' });
+      .send({ version: VALID_VERSION, downloadUrl: VALID_DOWNLOAD_URL, releaseNotes: 'Test release', releaseTarget: 'overlay' });
 
     // The download link is derived env-aware inside the announcement, and the
-    // controller makes the channel-wide mention policy explicit.
+    // controller makes the release target explicit.
     expect(discordService.postReleaseAnnouncement).toHaveBeenCalledWith(
       VALID_VERSION,
       'Test release',
       undefined,
-      { mentionEveryone: true, suppressNotifications: false },
+      { target: 'overlay', suppressNotifications: false },
     );
   });
 
@@ -303,6 +303,7 @@ describe('POST /admin/releases — successful publish refreshes cache', () => {
         hudModVersion: VALID_HUD_MOD_VERSION,
         hudModUrl: VALID_HUD_MOD_URL,
         releaseNotes: 'HUD package included',
+        releaseTarget: 'both',
       });
 
     expect(res.status).toBe(200);
@@ -314,7 +315,7 @@ describe('POST /admin/releases — successful publish refreshes cache', () => {
       VALID_VERSION,
       'HUD package included',
       { url: VALID_HUD_MOD_URL, version: VALID_HUD_MOD_VERSION },
-      { mentionEveryone: true, suppressNotifications: false },
+      { target: 'both', suppressNotifications: false },
     );
     expect(prismaMock.release.upsert).toHaveBeenCalledWith(expect.objectContaining({
       update: expect.objectContaining({
@@ -336,6 +337,7 @@ describe('POST /admin/releases — announce flag (quiet publish)', () => {
         version: VALID_VERSION,
         downloadUrl: VALID_DOWNLOAD_URL,
         releaseNotes: 'Quiet code-signing release',
+        releaseTarget: 'overlay',
         announce: false,
       });
 
@@ -343,48 +345,43 @@ describe('POST /admin/releases — announce flag (quiet publish)', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.version).toBe(VALID_VERSION);
     expect(latestVersionMock.setLatestVersion).toHaveBeenCalledWith(VALID_VERSION);
-    // …but NO @everyone Discord post fires.
+    // …but no Discord post fires.
     expect(discordService.postReleaseAnnouncement).not.toHaveBeenCalled();
   });
 
-  it('announces by default when announce is omitted', async () => {
+  it('announces the selected target when announce is omitted', async () => {
     const discordService = require('../src/services/discordService');
 
     await request(app)
       .post('/admin/releases')
       .set('Authorization', `Bearer ${RELEASE_TOKEN}`)
-      .send({ version: VALID_VERSION, downloadUrl: VALID_DOWNLOAD_URL, releaseNotes: 'Normal release' });
+      .send({ version: VALID_VERSION, downloadUrl: VALID_DOWNLOAD_URL, releaseNotes: 'Normal release', releaseTarget: 'overlay' });
 
     expect(discordService.postReleaseAnnouncement).toHaveBeenCalledWith(
       VALID_VERSION,
       'Normal release',
       undefined,
-      { mentionEveryone: true, suppressNotifications: false },
+      { target: 'overlay', suppressNotifications: false },
     );
   });
 
-  it('passes mentionEveryone=false through to the Discord announcement', async () => {
+  it('rejects a release that does not state its target', async () => {
     const discordService = require('../src/services/discordService');
 
-    await request(app)
+    const res = await request(app)
       .post('/admin/releases')
       .set('Authorization', `Bearer ${RELEASE_TOKEN}`)
       .send({
         version: VALID_VERSION,
         downloadUrl: VALID_DOWNLOAD_URL,
-        releaseNotes: 'Dev release without a channel-wide mention',
-        mentionEveryone: false,
+        releaseNotes: 'Ambiguous release',
       });
 
-    expect(discordService.postReleaseAnnouncement).toHaveBeenCalledWith(
-      VALID_VERSION,
-      'Dev release without a channel-wide mention',
-      undefined,
-      { mentionEveryone: false, suppressNotifications: false },
-    );
+    expect(res.status).toBe(400);
+    expect(discordService.postReleaseAnnouncement).not.toHaveBeenCalled();
   });
 
-  it('passes a silent @everyone announcement through to Discord', async () => {
+  it('passes silent notification delivery through to the selected role announcement', async () => {
     const discordService = require('../src/services/discordService');
 
     await request(app)
@@ -393,16 +390,16 @@ describe('POST /admin/releases — announce flag (quiet publish)', () => {
       .send({
         version: VALID_VERSION,
         downloadUrl: VALID_DOWNLOAD_URL,
-        releaseNotes: 'Silent channel-wide HUD announcement',
-        mentionEveryone: true,
+        releaseNotes: 'Silent overlay announcement',
+        releaseTarget: 'overlay',
         suppressNotifications: true,
       });
 
     expect(discordService.postReleaseAnnouncement).toHaveBeenCalledWith(
       VALID_VERSION,
-      'Silent channel-wide HUD announcement',
+      'Silent overlay announcement',
       undefined,
-      { mentionEveryone: true, suppressNotifications: true },
+      { target: 'overlay', suppressNotifications: true },
     );
   });
 });

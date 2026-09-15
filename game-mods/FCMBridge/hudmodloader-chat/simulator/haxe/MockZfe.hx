@@ -27,7 +27,7 @@ class MockZfe {
             }
             if (verb == "chat.v1.getRuntimeInfo") {
                 return haxe.Json.stringify({success:true, runtime:"ZFE Chat", version:"sim-zfe-1",
-                    protocol:1, capabilities:["zfe-chat-online-v1"]});
+                    protocol:1, capabilities:["zfe-chat-online-v1","zfe-chat-async-send-v1"]});
             }
             if (verb == "chat.v1.log" || verb == "log") {
                 MockXscal.SimLog.emit(Std.string(payload));

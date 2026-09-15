@@ -7,7 +7,9 @@ native chat bridge and FCM's `/relay`. It is independent of the desktop overlay.
 the editor. The selected row has a configurable outline and translucent fill; users can change
 `Selected message` under F11 → Customize → Colors, or set `selectedRowColor` in `FCMChat.ini`.
 `activateLinkKey` (Enter by default) opens that row's
-first HTTP(S) link directly in the operating system browser through GFx; no desktop overlay or
+first HTTP(S) link through a user-initiated activation. Ruffle verifies selection and activation,
+but Fallout's GFx host has not opened the operating-system browser through `getURL`; a sanctioned
+native extender URL-opening capability is still required. No desktop overlay or
 relay round trip is required. URLs are
 shown as a bounded `host/...` label while the full validated target is retained. Discord channel
 mentions and scheduled-event cards receive their native Discord URL through the existing HUD
@@ -19,6 +21,9 @@ For stability, 2.10.92 does not issue automatic Server-room roster/leave control
 Those calls are synchronous on Fallout's UI thread and a failed relay connection can stall the game
 for the native timeout. Ordinary ZFE chat and static-channel history remain enabled; automatic
 Server-room binding remains available through xScal while a non-blocking ZFE request API is pending.
+From 2.10.94, ordinary ZFE sends are also accepted only when runtime info advertises
+`zfe-chat-async-send-v1`; older synchronous builds show an update-required message instead of
+allowing a stalled network call to block Fallout's Scaleform thread.
 
 The feed builds delayed row batches in a hidden
 snapshot and swaps them into view only after positioning is complete, preventing the overlapping
@@ -82,7 +87,11 @@ The shipped key map is `openKey=INSERT`, `channelNextKey=NextPage`, `channelPrev
 `hideKey=DELETE`. Insert opens chat; Enter sends a non-empty draft and, when it is the configured
 link key, opens a selected link from an empty draft. Escape cancels. A custom link key acts only
 while the OpenChat-owned editor is active and a link row is selected; it is inert during gameplay.
-A missing host callback cannot leave Insert permanently latched.
+A missing host callback cannot leave Insert permanently latched. Provider-level physical keys are
+registered from the active profile only: reloading/reapplying a profile unregisters the previous
+set before installing the replacement set. Both providers include the configured open key in the
+physical registration set. ZFE also updates its dedicated native watcher when that watcher accepts
+the token; arbitrary mapped keys such as F12 continue through `Input.*` when it does not.
 Page Up/Down switch channels while idle or editing. Up/Down moves the highlighted row selection
 only while chat owns the visible editor and keeps it in view. The blank newest value leaves
 Home/End as game controls.

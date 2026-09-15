@@ -86,6 +86,14 @@ spacing) is always rendered. The component only branches on `overlayShell`
 (window chrome, settings routing, CSS-var opacity) and `isPublicMode` (lockdown
 rules, data source, input visibility).
 
+### Custom Discord emojis
+
+Message content supports Discord custom-emoji tokens (`<:name:id>` and
+`<a:name:id>`). On the website and Electron overlay, the renderer first loads
+the asset from `cdn.discordapp.com`, retries `media.discordapp.net` if that
+edge fails, and finally shows the readable `:name:` label instead of a broken
+image icon. Animated tokens keep Discord's animated WebP form on both hosts.
+
 ## Public Mode Lockdown Rules
 
 Server enforcement is primary; these client-side checks are a backstop.
@@ -700,10 +708,10 @@ event card by stable event code. Attendee identity and viewer-specific native
 state are never placed in shared cached metadata.
 
 Posting the URL of a scheduled event in a mapped Discord chat resolves the
-existing mirror and uses this same card rather than displaying a bare URL. User
-and channel mentions use `metadata.entities` to preserve Discord snowflakes:
-user mentions render as highlighted `@name` text and channel mentions as a
-consistent `#channel` link that opens Discord. Labels are presentation only;
+existing mirror and uses this same card rather than displaying a bare URL. User,
+role, and channel mentions use `metadata.entities` to preserve Discord snowflakes:
+user and role mentions render as highlighted `@name` text and channel mentions
+as a consistent `#channel` link that opens Discord. Labels are presentation only;
 cross-surface identity and ping routing always use the Discord ID.
 
 ## Related

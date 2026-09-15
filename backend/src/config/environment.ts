@@ -38,6 +38,10 @@ export interface Environment {
   // Scheduled-event mirroring is always registered when the Discord bot runs.
   // The bot does not create an Events channel or mutate native Interested state.
   DISCORD_EVENTS_CHANNEL_ID: string;
+  /** Opt-in role pinged for desktop overlay release announcements. */
+  OVERLAY_UPDATE_NOTIFICATION_ROLE_ID: string;
+  /** Opt-in role pinged for in-game HUD mod release announcements. */
+  HUD_MOD_UPDATE_NOTIFICATION_ROLE_ID: string;
   DISCORD_REDIRECT_URI: string;
   DISCORD_LINK_REDIRECT_URI: string;
   OWNER_ROLE_ID: string;
@@ -246,6 +250,8 @@ const env: Environment = {
   DISCORD_CLIENT_SECRET: process.env.DISCORD_CLIENT_SECRET || '',
   DISCORD_SERVER_ID: process.env.DISCORD_SERVER_ID || '',
   DISCORD_EVENTS_CHANNEL_ID: process.env.DISCORD_EVENTS_CHANNEL_ID || '',
+  OVERLAY_UPDATE_NOTIFICATION_ROLE_ID: process.env.OVERLAY_UPDATE_NOTIFICATION_ROLE_ID || '',
+  HUD_MOD_UPDATE_NOTIFICATION_ROLE_ID: process.env.HUD_MOD_UPDATE_NOTIFICATION_ROLE_ID || '',
   DISCORD_REDIRECT_URI: process.env.DISCORD_REDIRECT_URI || 'http://localhost:7076/auth/discord/callback',
   DISCORD_LINK_REDIRECT_URI: process.env.DISCORD_LINK_REDIRECT_URI || '',
   OWNER_ROLE_ID: process.env.OWNER_ROLE_ID || '',

@@ -17,7 +17,7 @@ class TestFcmNativeApi {
         zfe.call = function(verb:String, payload:String):String {
             zCalls.push(verb + "|" + payload);
             if (verb == "chat.v1.getRuntimeInfo") {
-                return '{"success":true,"capabilities":["zfe-chat-online-v1"]}';
+                return '{"success":true,"capabilities":["zfe-chat-online-v1","zfe-chat-async-send-v1"]}';
             }
             return '{"success":true,"provider":"zfe"}';
         };
@@ -28,12 +28,21 @@ class TestFcmNativeApi {
         check("routes canonical ZFE verb", Std.string(zApi.call("chat.v1.sendMessage", "{}"))
             .indexOf('"provider":"zfe"') >= 0);
         check("ZFE uses native input", zApi.supportsNativeInput());
+        check("ZFE async-send capability permits non-blocking sends",
+            zApi.probeChatCapability() && zApi.supportsNonBlockingSend());
         check("ZFE widget requests retained-subscriber history resync",
             FcmNativeApi.widgetMustRequestHistoryResync(FcmNativeApi.ZFE));
-        check("ZFE capability probe uses the ZFE chat verb", zCalls.length == 2
-            && zCalls[0] == "chat.v1.getRuntimeInfo|{}");
+        check("ZFE capability probe uses the ZFE chat verb", zCalls.length == 3
+            && zCalls[0] == "chat.v1.getRuntimeInfo|{}"
+            && zCalls[2] == "chat.v1.getRuntimeInfo|{}");
         check("ZFE verb and payload preserved", zCalls[1] == "chat.v1.sendMessage|{}");
         check("rejects an unrecognized host object", FcmNativeApi.fromExposed({}) == null);
+
+        var syncZfe:FcmNativeApi = FcmNativeApi.fromZfe({call: function(verb:String, payload:Dynamic):String {
+            return '{"success":true,"capabilities":["zfe-chat-online-v1"]}';
+        }});
+        check("legacy synchronous ZFE send fails the safety capability gate",
+            syncZfe != null && syncZfe.probeChatCapability() && !syncZfe.supportsNonBlockingSend());
 
         // ZFE's explicit chat bridge and its legacy BRG_OBJ compatibility callback can coexist.
         // Input.* must use the generic callback with the native integer VK argument, while chat
@@ -62,8 +71,7 @@ class TestFcmNativeApi {
             && zInputCalls[1] == "Input.IsKeyPressed|34"
             && zInputCalls[2] == "Input.UnregisterKey|34");
         check("ZFE chat dispatcher never receives Input.* calls",
-            zCalls.length == 3
-            && zCalls[2].indexOf("Input.") < 0);
+            !Lambda.exists(zCalls, function(call:String):Bool return call.indexOf("Input.") >= 0));
 
         // The real generic compatibility bridge may return null for a successful
         // RegisterKey/UnregisterKey call. The native wrapper's callSucceeded

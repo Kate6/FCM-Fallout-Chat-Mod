@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import env from '../config/environment';
 import { getRedisClient } from '../config/redis';
 import { McpOAuthError, MCP_SCOPES, mcpAuthorizationService } from '../services/mcpAuthorizationService';
-import { McpClientMetadataError, registerOAuthClient, resolveOAuthClient } from '../services/mcpClientMetadataService';
+import { matchesRegisteredRedirectUri, McpClientMetadataError, registerOAuthClient, resolveOAuthClient } from '../services/mcpClientMetadataService';
 import { mcpRoleService } from '../services/mcpRoleService';
 import logger from '../config/logger';
 import { classifyMcpRoleDenial, noteMcpSecurityEvent, recordMcpMetric } from '../services/mcpAuditService';
@@ -13,6 +13,15 @@ const headers = (res: Response) => res.set({ 'Cache-Control': 'no-store', Pragma
 const issuer = () => env.MCP_ISSUER_URL.replace(/\/$/, '');
 const oauthError = (res: Response, status: number, error: string, description: string) => { recordMcpMetric('oauth', { outcome: 'failure' }); return res.status(status).json({ error, error_description: description }); };
 const scalar = (value: unknown): string | undefined => typeof value === 'string' ? value : undefined;
+// Codex currently repeats the same resource indicator when both its local
+// server configuration and protected-resource discovery provide it. OAuth
+// resource indicators can be repeated, but this server authorizes one
+// resource only: accept duplicate byte-identical values and reject conflicts.
+const resourceIndicator = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value) || !value.length || value.some(item => typeof item !== 'string') || value.some(item => item !== value[0])) return undefined;
+  return value[0];
+};
 const logContext = (req: Request, error: unknown) => ({ routeRequestId: scalar(req.headers['x-request-id']) || 'unavailable', errorType: error instanceof Error ? error.name : typeof error });
 const sign = (payload: string) => createHmac('sha256', env.MCP_OAUTH_STATE_SECRET).update(payload).digest('base64url');
 const seal = (value: object) => { const payload = Buffer.from(JSON.stringify(value)).toString('base64url'); return `${payload}.${sign(payload)}`; };
@@ -47,7 +56,7 @@ export async function register(req: Request, res: Response) {
 }
 
 export async function authorize(req: Request, res: Response) {
-  const clientId = scalar(req.query.client_id), redirectUri = scalar(req.query.redirect_uri), resource = scalar(req.query.resource);
+  const clientId = scalar(req.query.client_id), redirectUri = scalar(req.query.redirect_uri), resource = resourceIndicator(req.query.resource);
   const challenge = scalar(req.query.code_challenge), method = scalar(req.query.code_challenge_method), responseType = scalar(req.query.response_type);
   let trustedRedirect: string | undefined; let clientState: string | undefined;
   try {
@@ -57,7 +66,7 @@ export async function authorize(req: Request, res: Response) {
     // always receives a local JSON error and never a redirect.
     if (!clientId || !redirectUri) throw new McpClientMetadataError('client_id and redirect_uri are required');
     const client = await resolveOAuthClient(clientId);
-    if (!client.redirectUris.includes(redirectUri)) throw new McpClientMetadataError('redirect_uri is not registered exactly');
+    if (!matchesRegisteredRedirectUri(client.redirectUris, redirectUri)) throw new McpClientMetadataError('redirect_uri is not registered exactly');
     trustedRedirect = redirectUri; clientState = scalar(req.query.state);
     if (!responseType) { redirectOAuthError(res, trustedRedirect, clientState, 'invalid_request', 'response_type is required'); return; }
     if (responseType !== 'code') { redirectOAuthError(res, trustedRedirect, clientState, 'unsupported_response_type', 'Only code response_type is supported'); return; }
@@ -112,7 +121,7 @@ export async function discordCallback(req: Request, res: Response) {
     const name = escapeHtml(metadata.client_name || pending.clientId);
     const scopeFields = pending.scopes.map(scope => `<li>${escapeHtml(scope)}</li>`).join('');
     recordMcpMetric('oauth', { outcome: 'success' });
-    res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><title>Authorize FCM MCP</title></head><body><main><h1>Authorize ${name}</h1><p>Signed in as an authorized ${role.role}.</p><ul>${scopeFields}</ul><form method="post" action="/oauth/authorize/consent"><input type="hidden" name="consent_token" value="${consent}"><button name="decision" value="approve">Authorize</button><button name="decision" value="deny">Deny</button></form></main></body></html>`);
+    res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><title>Authorize FCM MCP</title></head><body><main><h1>Authorize ${name}</h1><p>Signed in as an authorized ${role.role}.</p><ul>${scopeFields}</ul><form method="post" action="/oauth/authorize/consent"><input type="hidden" name="consent_token" value="${consent}"><input type="hidden" name="decision" value="approve"><input type="submit" value="Authorize"></form><form method="post" action="/oauth/authorize/consent"><input type="hidden" name="consent_token" value="${consent}"><input type="hidden" name="decision" value="deny"><input type="submit" value="Deny"></form></main></body></html>`);
   } catch (error) {
     const message = 'Authorization is temporarily unavailable'; logger.error({ ...logContext(req, error), route: 'oauth/discord/callback' }, 'Discord OAuth callback failed');
     if (pending) redirectOAuthError(res, pending.redirectUri, pending.clientState, 'access_denied', message);
@@ -126,14 +135,19 @@ export async function consent(req: Request, res: Response) {
   try {
     const consentToken = scalar(req.body.consent_token);
     if (!consentToken) throw new Error('Consent token is required');
-    const redis = await getRedisClient(); const raw = await redis.getDel(`mcp_oauth_consent:${consentToken}`);
-    if (!raw) throw new Error('Consent is invalid, expired, or already used');
+    const redis = await getRedisClient(); const raw = await redis.get(`mcp_oauth_consent:${consentToken}`);
+    if (!raw) throw new McpOAuthError('invalid_grant', 'Consent is invalid or expired');
     pending = unseal<Pending & { discordId: string }>(raw);
     if (pending.sessionId !== req.sessionID) throw new Error('Consent is not bound to this browser session');
+    const decision = scalar(req.body.decision);
+    if (decision !== 'approve' && decision !== 'deny') throw new McpOAuthError('invalid_grant', 'Consent decision is invalid');
+    const decisionKey = `mcp_oauth_consent_decision:${consentToken}`;
+    const claimed = await redis.set(decisionKey, decision, { EX: STATE_TTL, NX: true });
+    if (!claimed && await redis.get(decisionKey) !== decision) throw new McpOAuthError('invalid_grant', 'Consent decision is already final');
     const target = new URL(pending.redirectUri);
-    if (req.body.decision !== 'approve') { target.searchParams.set('error', 'access_denied'); recordMcpMetric('oauth', { outcome: 'failure' }); }
+    if (decision !== 'approve') { target.searchParams.set('error', 'access_denied'); recordMcpMetric('oauth', { outcome: 'failure' }); }
     else {
-      const grant = await mcpAuthorizationService.issueAuthorizationCode({ clientId: pending.clientId, discordId: pending.discordId, redirectUri: pending.redirectUri, resource: pending.resource, pkceChallenge: pending.pkceChallenge, codeChallengeMethod: 'S256', scopes: pending.scopes });
+      const grant = await mcpAuthorizationService.issueAuthorizationCode({ clientId: pending.clientId, discordId: pending.discordId, redirectUri: pending.redirectUri, resource: pending.resource, pkceChallenge: pending.pkceChallenge, codeChallengeMethod: 'S256', scopes: pending.scopes, consentIdempotencyKey: consentToken });
       target.searchParams.set('code', grant.code);
       recordMcpMetric('oauth', { outcome: 'success' });
     }

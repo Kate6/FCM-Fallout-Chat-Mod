@@ -22,6 +22,7 @@ class FcmNativeApi {
     // extender Input.* bookkeeping/polling surface.
     var _loggerRaw:Dynamic;
     var _inputRaw:Dynamic;
+    var _runtimeInfo:String = "";
 
     function new(raw:Dynamic, providerName:String, loggerRaw:Dynamic = null,
             inputRaw:Dynamic = null) {
@@ -110,6 +111,16 @@ class FcmNativeApi {
     /** xScal provides chat transport, not ZFE's native edit buffer. */
     public function supportsNativeInput():Bool {
         return provider == ZFE;
+    }
+
+    /**
+     * ZFE releases before its async-send contract perform WinHTTP on Fallout's
+     * Scaleform thread. A stalled relay can therefore freeze the whole game.
+     * xScal's chatInterface owns its own transport scheduling; only ZFE needs
+     * this explicit capability gate.
+     */
+    public function supportsNonBlockingSend():Bool {
+        return provider == XSCAL || _runtimeInfo.indexOf("zfe-chat-async-send-v1") >= 0;
     }
 
     /**
@@ -219,14 +230,16 @@ class FcmNativeApi {
     public function probeChatCapability():Bool {
         try {
             if (provider == ZFE) {
-                return isZfeChatRuntimeInfo(Std.string(call("chat.v1.getRuntimeInfo", "{}")));
+                _runtimeInfo = Std.string(call("chat.v1.getRuntimeInfo", "{}"));
+                return isZfeChatRuntimeInfo(_runtimeInfo);
             }
             if (!xscalRaw(_raw)
                 || !hasChatMethod("connect")
                 || !hasChatMethod("pollEvents")
                 || !hasChatMethod("sendMessage")) return false;
             if (!hasChatMethod("getRuntimeInfo")) return true;
-            return isXscalChatRuntimeInfo(Std.string(call("chat.v1.getRuntimeInfo", "{}")));
+            _runtimeInfo = Std.string(call("chat.v1.getRuntimeInfo", "{}"));
+            return isXscalChatRuntimeInfo(_runtimeInfo);
         } catch (e:Dynamic) {
             return false;
         }

@@ -1,9 +1,11 @@
 export type DiscordMessageEntity =
   | { type: 'user'; discordId: string; label: string }
+  | { type: 'role'; discordId: string; label: string }
   | { type: 'channel'; discordId: string; label: string; url: string };
 
 export type DiscordReferenceLabels = {
   users: ReadonlyMap<string, string>;
+  roles: ReadonlyMap<string, string>;
   channels: ReadonlyMap<string, string>;
   guildId: string | null;
 };
@@ -26,6 +28,16 @@ export function normalizeDiscordReferences(
     if (!seen.has(key)) {
       seen.add(key);
       entities.push({ type: 'user', discordId, label });
+    }
+    return `@${label}`;
+  });
+
+  normalized = normalized.replace(/<@&(\d{16,22})>/g, (_token, discordId: string) => {
+    const label = labels.roles.get(discordId) || 'role';
+    const key = `role:${discordId}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      entities.push({ type: 'role', discordId, label });
     }
     return `@${label}`;
   });
