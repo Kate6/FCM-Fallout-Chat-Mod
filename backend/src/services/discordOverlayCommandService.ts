@@ -43,13 +43,48 @@ const SPECIAL_COMMANDS = new Set(['wiki', 'camp', 'minerva', 'nukecodes', 'serve
 const RESERVED_COMMAND_NAMES = new Set([COMMAND_NAME, MODERATION_COMMAND, 'report', ...SPECIAL_COMMANDS]);
 const CATEGORY_CHOICES = REASON_CATEGORIES.map((name) => ({ name, value: name }));
 
-type CommandContext = { channelId: string; channelName: string; parentChannelId: string | null };
+type CommandContext = { channelId: string; channelName: string; parentChannelId: string | null; isLinked: boolean };
+type PrivateCommandResult = {
+  handled: true;
+  actionType: 'private';
+  botMessage: string;
+  targetChannelId: string;
+  metadata?: Record<string, unknown> | null;
+};
+type OverlayCardCommandResult = {
+  handled: true;
+  actionType: 'private' | 'message';
+  botMessage: string;
+  targetChannelId: string;
+  metadata: Record<string, unknown>;
+};
 
 /** Converts an overlay event trigger to a valid, non-reserved Discord command name. */
 export function discordEventShortcutName(trigger: string): string | null {
   const name = trigger.startsWith('/') ? trigger.slice(1).toLowerCase() : '';
   if (!/^[a-z0-9_-]{1,32}$/.test(name) || RESERVED_COMMAND_NAMES.has(name)) return null;
   return name;
+}
+
+/**
+ * Discord card commands belong to the channel where their interaction runs.
+ * A started giveaway is the sole exception: its public announcement belongs in
+ * FCM General so overlay users can join it.
+ */
+export function shouldRelayDiscordResultToOverlay(
+  raw: string,
+  result: CommandResult,
+): result is PrivateCommandResult {
+  return raw.startsWith('/giveaway start ') && result.handled && result.actionType === 'private';
+}
+
+/** A rich card mirrors to FCM only when its Discord channel has an FCM link. */
+export function shouldMirrorDiscordCardToOverlay(
+  isLinked: boolean,
+  result: CommandResult,
+): result is OverlayCardCommandResult {
+  if (!isLinked || !result.handled || (result.actionType !== 'private' && result.actionType !== 'message')) return false;
+  return result.metadata != null && buildDiscordOverlayCard(result.metadata) !== null;
 }
 
 function clip(value: string, limit = 1_900): string {
@@ -80,11 +115,13 @@ async function resolveContext(discordChannelId: string): Promise<CommandContext 
       select: { id: true, name: true, parentId: true },
     })
     : null;
+  let isLinked = channel !== null;
   if (!channel) {
     channel = await prisma.channel.findFirst({
       where: { discordChannelId },
       select: { id: true, name: true, parentId: true },
     });
+    isLinked = channel !== null;
   }
   if (!channel) {
     // First-class slash commands are allowed in every Discord channel where
@@ -95,7 +132,7 @@ async function resolveContext(discordChannelId: string): Promise<CommandContext 
       select: { id: true, name: true, parentId: true },
     });
   }
-  return channel ? { channelId: channel.id, channelName: channel.name, parentChannelId: channel.parentId } : null;
+  return channel ? { channelId: channel.id, channelName: channel.name, parentChannelId: channel.parentId, isLinked } : null;
 }
 
 async function requireLinkedUser(interaction: ChatInputCommandInteraction) {
@@ -187,7 +224,7 @@ async function handleOverlayCommand(interaction: ChatInputCommandInteraction): P
   if (!raw?.startsWith('/')) return;
   const [user, mappedContext] = await Promise.all([requireLinkedUser(interaction), resolveContext(interaction.channelId)]);
   if (!user) return;
-  const context = mappedContext ?? { channelId: interaction.channelId, channelName: 'Discord', parentChannelId: null };
+  const context = mappedContext ?? { channelId: interaction.channelId, channelName: 'Discord', parentChannelId: null, isLinked: false };
   const displayName = user.chatName ?? user.discordDisplayName ?? user.discordUsername ?? user.username;
   const result = await tryHandleCommand(raw, user.id, displayName, context.channelId, context.channelName, null, 0, context.parentChannelId);
   if (result.handled && result.actionType === 'relay') {
@@ -200,24 +237,18 @@ async function handleOverlayCommand(interaction: ChatInputCommandInteraction): P
       waitForPersistence: true,
     });
   }
-  if (raw.startsWith('/giveaway start ') && result.handled && result.actionType === 'private') {
+  if (shouldRelayDiscordResultToOverlay(raw, result)) {
     await finalizeMessage({ userId: user.id, channelId: '00000000-0000-0000-0000-000000000005', content: result.botMessage, displayName, source: 'discord', waitForPersistence: true });
   }
   await replyForCommand(interaction, result);
-  const metadata = result.handled && (result.actionType === 'private' || result.actionType === 'message')
-    ? result.metadata
-    : null;
-  if (result.handled && (result.actionType === 'private' || result.actionType === 'message') && metadata && buildDiscordOverlayCard(metadata)) {
-    // The interaction reply is already the one public Discord copy. Mirror its
-    // typed metadata into the overlay/HUD once, under the bot name, without
-    // re-sending another Discord message or exposing the invoking user.
+  if (shouldMirrorDiscordCardToOverlay(context.isLinked, result)) {
     await finalizeMessage({
       userId: user.id,
       channelId: result.targetChannelId,
       content: result.botMessage,
       displayName: 'FCM',
       source: 'discord',
-      metadata,
+      metadata: result.metadata,
       suppressDiscordRelay: true,
       waitForPersistence: true,
     });
@@ -254,7 +285,7 @@ async function runEventCommand(
   }
   const [user, mappedContext] = await Promise.all([requireLinkedUser(interaction), resolveContext(interaction.channelId)]);
   if (!user) return;
-  const context = mappedContext ?? { channelId: interaction.channelId, channelName: 'Discord', parentChannelId: null };
+  const context = mappedContext ?? { channelId: interaction.channelId, channelName: 'Discord', parentChannelId: null, isLinked: false };
   const displayName = user.chatName ?? user.discordDisplayName ?? user.discordUsername ?? user.username;
   const result = await tryHandleCommand(raw, user.id, displayName, context.channelId, context.channelName, null, 0, context.parentChannelId);
   if (!result.handled || result.actionType !== 'relay') {
