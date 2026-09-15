@@ -21,7 +21,8 @@ game install:
 Any failing step blocks packaging and installation. New harness-testable HUD behavior must add
 Playwright coverage in the same change and run in the required `hud-ruffle` CI gate.
 
-Status: M0 and the installed-xScal 0.1.15 browser contract fixture are implemented, 2026-09-14;
+Status: M0, the Nexus xScal 0.2.16 browser contract fixture, and the ZFE 0.15.0 provider contract
+are implemented, updated 2026-09-15;
 rendered widget-to-provider integration remains pending.
 This does not claim native Fallout 76, ZFE, xScal, or GFx
 acceptance. It defines a layered simulator plus an optional real-game smoke runner.
@@ -83,12 +84,16 @@ The harness also exposes deterministic container/all HUD-mode transitions for te
 checks the compiled provider routes, key delivery, file-versus-persisted precedence, and both
 production HUD-mode guards. Ruffle 0.6.0 does not expose this AVM2 movie's inbound callbacks, so a
 browser test must not claim that an internal editor-state assertion is real-game acceptance.
+For the burst renderer, pure planning tests and simulator source-contract assertions enforce that
+prefix rows move only at commit, visual state invalidates reuse, and timer listeners are detached.
+The Ruffle suite still catches artifact-load and input regressions; visual continuity during a
+large sliced append remains a required GFx/in-game acceptance check.
 
 When a local Fallout 76 installation is found (or `FCM_FALLOUT76_DATA` points at its `Data`
 directory), preparation extracts `programs/fonts_programs.swf` from the installed Interface BA2
 into ignored, temporary simulator output and supplies it to Ruffle. Harness builds resolve the
-game aliases directly to `Roboto Condensed Light` and `Roboto Condensed Bold`, matching the local
-`fontconfig_en.txt`; production builds retain `$MAIN_Font_Light`/`$MAIN_Font_Bold`. No game font is
+game aliases directly to `Roboto Condensed` and `Roboto Condensed Bold`, matching the local
+`fontconfig_en.txt`; production builds retain `$MAIN_Font`/`$MAIN_Font_Bold`. No game font is
 committed or distributed, and Ruffle font metrics remain non-acceptance evidence.
 
 Harness mode has an explicit xScal/ZFE selector. xScal exposes the observed
@@ -105,9 +110,9 @@ The public xScal source at upstream commit `2c073777b8399960122c4971694f5b6e8be2
 was evaluated and deliberately not retained as an emulator dependency. It provides the MovieRoot
 hook, generic callback registry, and `GetXSRuntimeInfo`, but not the installed runtime's
 `chatInterface`, relay client, plugin/module system, or `Input.*` surface. The emulator must instead
-reproduce a sanitized, versioned contract observed from the locally installed xScal 0.1.15 DLL.
+reproduce a sanitized, versioned contract observed from the Nexus xScal 0.2.16 DLL.
 
-That fixture is `simulator/fixtures/installed-xscal-0.1.15.json`. It records the installed DLL's
+That fixture is `simulator/fixtures/installed-xscal-0.2.16.json`. It records the Nexus DLL's
 version, SHA-256, byte size, supported Fallout runtime, exact chat method names, and numeric input
 callback names without copying the DLL, endpoint, messages, account identifiers, or credentials.
 The browser suite replays authentication gating, cursor polling, synthetic regular/Discord/event

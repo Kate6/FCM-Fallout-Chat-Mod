@@ -101,7 +101,7 @@ async function boot(): Promise<void> {
   player.ruffle().traceObserver = line => log('AVM2', line);
   document.querySelector('#swf-hash')!.textContent = await sha256(swfUrl);
   const manifest = await (await fetch('/sim-manifest.json', { cache: 'no-store' })).json();
-  const installedFixture = await (await fetch('/installed-xscal-0.1.15.json', { cache: 'no-store' })).json();
+  const installedFixture = await (await fetch('/installed-xscal-0.2.16.json', { cache: 'no-store' })).json();
   window.__INSTALLED_XSCAL__ = new InstalledXscalHost(installedFixture);
   document.querySelector('#widget-version')!.textContent = manifest.widgetVersion;
   document.querySelector('#host-mode')!.textContent = mode;

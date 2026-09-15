@@ -26,7 +26,7 @@ class MockZfe {
                 return Reflect.callMethod(xscal, Reflect.field(xscal, "call"), [verb, payload]);
             }
             if (verb == "chat.v1.getRuntimeInfo") {
-                return haxe.Json.stringify({success:true, runtime:"ZFE Chat", version:"sim-zfe-1",
+                return haxe.Json.stringify({success:true, runtime:"ZFE Chat", version:"0.15.0",
                     protocol:1, capabilities:["zfe-chat-online-v1","zfe-chat-async-send-v1"]});
             }
             if (verb == "chat.v1.log" || verb == "log") {

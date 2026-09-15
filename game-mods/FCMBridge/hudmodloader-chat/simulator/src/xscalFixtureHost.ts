@@ -27,8 +27,10 @@ export class InstalledXscalHost {
     if (!this.connected || !value.channel || !value.body || value.body.length > 500) return { success: false };
     return { success: true, messageId: `sim-send-${this.cursor + 1}` };
   }
-  call(name: string, virtualKey: number): boolean {
-    if (!this.fixture.inputCallbacks.includes(name) || virtualKey < 1 || virtualKey > 255) return false;
+  call(name: string, virtualKey = 0): boolean {
+    if (!this.fixture.inputCallbacks.includes(name)) return false;
+    if (name === 'Input.ClearKeys') { this.registered.clear(); this.pressed.clear(); return true; }
+    if (virtualKey < 1 || virtualKey > 255) return false;
     if (name === 'Input.RegisterKey') { if (this.registered.has(virtualKey)) return false; this.registered.add(virtualKey); return true; }
     if (name === 'Input.UnregisterKey') { this.pressed.delete(virtualKey); return this.registered.delete(virtualKey); }
     return this.registered.has(virtualKey) && this.pressed.has(virtualKey);

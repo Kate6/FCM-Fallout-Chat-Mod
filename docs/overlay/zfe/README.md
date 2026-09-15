@@ -52,6 +52,16 @@ website's `/link` page. Connection success alone does not establish a linked acc
 membership uses authenticated controls built from HUD-published account/world/roster data.
 See the [native relay guide](native-chat-relay/README.md) for the full data path.
 
+### Current game font aliases (2.10.97)
+
+FCMChatWidget body text, prompt text, status text, and punctuation use `$MAIN_Font`; tab labels
+and sender names use `$MAIN_Font_Bold`. This is based on the active Fallout 76 English
+`interface/fontconfig_en.txt`, which maps those two aliases to Roboto Condensed faces. It does
+not map `$MAIN_Font_Light`. Using that nonexistent alias renders the body range as square
+placeholder glyphs, which can make the `Name: message` separator appear missing even though the
+serialized message includes it. The Ruffle harness uses the corresponding direct face names,
+`Roboto Condensed` and `Roboto Condensed Bold`.
+
 ### ZFE automatic roster safety (2.10.92)
 
 The visible widget fails closed on automatic Server-room roster/leave controls through ZFE. ZFE
@@ -171,6 +181,13 @@ Do not validate rebinds by editing persisted appearance storage alone, and do no
 from `updateChatHotkey` alone. `Data/FCMChat.ini` is authoritative; replacing the BA2 or fragment
 requires a full game restart.
 
+That 0.12.26 result remains historical in-game evidence. Nexus ZFE 0.15.0 targets Steam and
+Xbox/Game Pass runtime 1.7.26.10. Static artifact inspection on 2026-09-15 confirmed that it retains
+FCM's `__ZFE` dispatcher, `zfe-chat-online-v1`, `zfe-chat-async-send-v1`,
+`zfe-chat-async-control-v1`, storage, input, hotkey, and physical `Input.*` contracts. The Ruffle
+provider mock now identifies as 0.15.0. Fresh in-game acceptance is still required before treating
+that static and simulated result as native acceptance.
+
 ### Verified xScal rebind procedure
 
 In-game acceptance on 2026-09-15 with the installed xScal 0.1.15 contract and FCMChatWidget
@@ -187,6 +204,13 @@ Dev history across 16/16/10-event polls and emitted `replay completed` with 41 r
 Manual in-game testing confirmed the rotated actions worked. As with ZFE, exercise every action
 and verify superseded bindings are inactive; registration itself does not suppress an overlapping
 Fallout gameplay action.
+
+That 0.1.15 result remains historical in-game evidence. Nexus xScal 0.2.16 targets Fallout runtime
+1.7.26.10. Static artifact inspection on 2026-09-15 confirmed that it retains FCM's required
+`XSCALCHATV1`/`chatInterface` methods and `Input.RegisterKey`, `Input.IsKeyPressed`,
+`Input.UnregisterKey`, and `Input.ClearKeys` callbacks. The Ruffle contract fixture and suite now
+exercise 0.2.16. Fresh 1.7.26.10 in-game acceptance is still required before promoting that static
+and simulated compatibility result to native acceptance.
 
 Channel and scroll bindings always come from `FCMChat.ini`. Both providers use the visible
 SharedHUDTools editor; only ZFE can use the native draft buffer as a fallback. Provider acceptance

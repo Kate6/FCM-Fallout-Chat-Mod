@@ -1,6 +1,6 @@
 # FCMChatWidget build, install, and verification
 
-**Widget version:** 2.10.96. Local review candidate, audited 2026-09-15.
+**Widget version:** 2.10.97. Local review candidate, audited 2026-09-15.
 This is the explicit opt-in HUD-mod track. The desktop overlay never installs or modifies it.
 
 ## Status and scope
@@ -12,6 +12,10 @@ review. The production-target candidate is installed locally with ZFE for accept
 has not yet been tested in-game or published, and hosted CI is still required for promotion.
 Earlier desktop ZFE colors/emoji confirmation is
 recorded separately in [styling history](../../../docs/testing/hud-emoji-status.md).
+
+For current Fallout 76 English assets, body/feed/input text uses `$MAIN_Font` and headings/names
+use `$MAIN_Font_Bold`. `interface/fontconfig_en.txt` does not map `$MAIN_Font_Light`; do not restore
+that alias or body glyphs will render as square placeholders.
 
 [README.md](README.md) describes behavior. [BUILD-HISTORY.md](BUILD-HISTORY.md) preserves dated
 investigations and superseded runbooks; it is not a source for current install steps.

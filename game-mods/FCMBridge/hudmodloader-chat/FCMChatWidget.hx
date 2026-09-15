@@ -77,7 +77,7 @@ class FCMChatWidget extends MovieClip {
     // 2.10.0 is the first build that reports clientVersion to the relay. The relay
     // treats "no version reported" as "oldest possible client" and gates any new wire
     // field on this, so the version bump IS the capability signal.
-    static inline var VERSION:String  = "2.10.96"; // Physical-key rebinds across ZFE and xScal
+    static inline var VERSION:String  = "2.10.97"; // Canonical Fallout body-font alias after 1.7.26.10
     static inline var SETTINGS_PATH:String = "settings.ini";
     // This is a top-level ZFE command, not a relay operation. ZFE owns the DPAPI/local auth file
     // and must clear it; the SWF is not allowed to write arbitrary files from the HUD domain.
@@ -94,17 +94,17 @@ class FCMChatWidget extends MovieClip {
     var _disposed:Bool = false;
 
     // ── Font aliases — HUDModLoader engine-registered GFx fonts (NO embed) ────
-    // These are GFx aliases registered by HUDModLoader (HUDTools.as entry_tf uses
-    // "$MAIN_Font_Light"; HUDButton.as label TextFields use "$MAIN_Font_Bold").
+    // These are Fallout's active GFx aliases. The current English font config maps
+    // "$MAIN_Font" and "$MAIN_Font_Bold"; "$MAIN_Font_Light" is not a valid alias.
     // They resolve in child widget SWFs (ApplicationDomain.currentDomain) with
     // embedFonts=true — no @:font embed needed (GFx ignores child-SWF embedded TTFs).
     #if fcm_harness
     // The game resolves the aliases below through fontconfig_en.txt. Ruffle does not process
     // Bethesda's font config, so the harness addresses the same game font faces directly.
-    static inline var FONT_BODY:String = "Roboto Condensed Light";
+    static inline var FONT_BODY:String = "Roboto Condensed";
     static inline var FONT_BOLD:String = "Roboto Condensed Bold";
     #else
-    static inline var FONT_BODY:String = "$MAIN_Font_Light";  // body / feed / messages / prompts / notices
+    static inline var FONT_BODY:String = "$MAIN_Font";        // body / feed / messages / prompts / notices
     static inline var FONT_BOLD:String = "$MAIN_Font_Bold";   // tab labels / headers / sender names / active-tab
     #end
     // FALLBACK (do NOT ship unless aliases tofu in-game): re-add the @:font embed and
@@ -470,7 +470,7 @@ class FCMChatWidget extends MovieClip {
         if (_disposed || !_connected || _authState != "authenticated" || _outboxIdentity.length == 0) return;
         var dropped = _outbox.prune(_outboxIdentity, _serverSession.room, _serverSessionReady, flash.Lib.getTimer());
         for (id in dropped) removeOptimisticRecord(id);
-        if (dropped.length > 0) { renderRecords(); outboxStatus("Queued message expired or its server changed; please resend."); }
+        if (dropped.length > 0) { requestRender(); outboxStatus("Queued message expired or its server changed; please resend."); }
         var entry = _outbox.next(_outboxIdentity, _serverSession.room, _serverSessionReady, flash.Lib.getTimer());
         if (entry == null) return;
         runSendTransportSafely(entry.channel, entry.body, false, entry.id, entry.identity);
@@ -504,7 +504,7 @@ class FCMChatWidget extends MovieClip {
         }
         _outbox.remove(id);
         removeOptimisticRecord(id);
-        renderRecords();
+        requestRender();
         outboxStatus(code == "send_uncertain"
             ? "Delivery unconfirmed. Check history before sending again."
             : "Message not sent: " + code);
@@ -2089,6 +2089,10 @@ class FCMChatWidget extends MovieClip {
         var kids:Array<flash.display.DisplayObject> = [_bg, _tabTf, _subTf, _logTf, _feedLayer, _promptTf];
         for (c in kids) { try { if (c != null) removeChild(c); } catch (e:Dynamic) {} }
         _feedRows = [];
+        _renderedRecordKeys = [];
+        _renderedChanIdx = -1;
+        _renderedViewportWidth = -1;
+        _renderedVisualContext = "";
         _feedContentHeight = 0;
         _feedScrollY = 0;
         _feedMaxScrollY = 0;
@@ -2240,7 +2244,7 @@ class FCMChatWidget extends MovieClip {
     //
     //   1. FormatTextEdit(x,y,w,h,font,size,hexColor,bgHexColor,bgAlpha)
     //      → HUDTools stores entryFormats[VENDOR] via HUDMessageProvider IPC.
-    //      font arg is the engine body alias (FONT_BODY = $MAIN_Font_Light),
+    //      font arg is the engine body alias (FONT_BODY = $MAIN_Font),
     //      matching HUDTools' own entry_tf default — no embed needed.
     //
     //   2. FormatOnScreenKeyboard(oskX,oskY)
@@ -3077,7 +3081,7 @@ class FCMChatWidget extends MovieClip {
         for (i in 0..._records.length) {
             if (_records[i].messageId == messageId) {
                 _records.splice(i, 1);
-                renderRecords();
+                requestRender();
                 return;
             }
         }
@@ -3260,7 +3264,7 @@ class FCMChatWidget extends MovieClip {
             } catch (err:Dynamic) {
                 zfeLog("warn", "send", "deferred callback failed: " + clip200(Std.string(err)));
                 if (_canRetryHudSend) retryQueuedSend(localSendId, "deferred send exception");
-                else { _outbox.remove(localSendId); try { removeOptimisticRecord(localSendId); renderRecords(); } catch (_:Dynamic) {} }
+                else { _outbox.remove(localSendId); try { removeOptimisticRecord(localSendId); requestRender(); } catch (_:Dynamic) {} }
             }
         });
         _sendTimers.push(sendTimer);
@@ -3278,7 +3282,7 @@ class FCMChatWidget extends MovieClip {
             _outbox.remove(localSendId);
             try { removeOptimisticRecord(localSendId); } catch (_:Dynamic) {}
             try {
-                if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], slug)) renderRecords();
+                if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], slug)) requestRender();
             } catch (_:Dynamic) {}
         }
     }
@@ -3312,7 +3316,7 @@ class FCMChatWidget extends MovieClip {
             // leaving a permanent phantom message in the feed.
             _outbox.remove(localSendId);
             removeOptimisticRecord(localSendId);
-            if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], slug)) renderRecords();
+            if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], slug)) requestRender();
             return;
         }
 
@@ -3324,7 +3328,7 @@ class FCMChatWidget extends MovieClip {
                 ? ("Server chat is unavailable: " + _serverSessionError)
                 : "Server chat is initializing...");
             removeOptimisticRecord(localSendId);
-            if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], slug)) renderRecords();
+            if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], slug)) requestRender();
             zfeLog("warn", "server", "ordinary send blocked; session not ready");
             return;
         }
@@ -3407,7 +3411,7 @@ class FCMChatWidget extends MovieClip {
                 }
                 _outbox.remove(localSendId);
                 removeOptimisticRecord(localSendId);
-                if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], slug)) renderRecords();
+                if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], slug)) requestRender();
                 // Surface permanent rejections without retrying them.
                 // Failure only: the untruncated response. This is the line that finally exposed
                 // the v2.9.12 root cause after days of unreadable `raw={\` output.
@@ -3462,7 +3466,7 @@ class FCMChatWidget extends MovieClip {
             if (_canRetryHudSend) { retryQueuedSend(localSendId, "send transport exception"); return; }
             _outbox.remove(localSendId);
             removeOptimisticRecord(localSendId);
-            if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], slug)) renderRecords();
+            if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], slug)) requestRender();
             zfeLog("warn", "send", "sendMessage threw: " + Std.string(e));
             setLogText("Send failed (no relay).");
         }
@@ -4742,7 +4746,7 @@ class FCMChatWidget extends MovieClip {
         seedOwnCosmeticsFromHistory();
         if (newRecords) {
             if (_autoHideOn && _hidden) show();   // auto-hide: pop back up on a new message
-            renderRecords();
+            requestRender();
             bumpAutoHide();                        // any new message counts as activity
         }
         return parsedCount;
@@ -4880,7 +4884,7 @@ class FCMChatWidget extends MovieClip {
         rec.pendingAt = 0;
         rec.sendAccepted = false;
         rememberOwnCosmetics(rec.tag, rec.supporterStar, rec.starColor);
-        if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], channel)) renderRecords();
+        if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], channel)) requestRender();
         return true;
     }
 
@@ -4949,7 +4953,7 @@ class FCMChatWidget extends MovieClip {
         });
         while (_records.length > _cfg.maxMessages) _records.shift();
         if (_bScrolling && FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], channel)) _newWhileScrolled++;
-        if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], channel)) renderRecords();
+        if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], channel)) requestRender();
     }
 
     /** Apply the ACK to the exact transaction row; no text/identity search occurs here. */
@@ -4958,7 +4962,7 @@ class FCMChatWidget extends MovieClip {
         if (messageId != null && messageId.length > 0) {
             for (existing in _records) if (!existing.pending && existing.messageId == messageId) {
                 removeOptimisticRecord(localSendId);
-                renderRecords();
+                requestRender();
                 return true;
             }
         }
@@ -4978,7 +4982,7 @@ class FCMChatWidget extends MovieClip {
                 rememberOwnCosmetics(tag, supporterStar, starColor);
             }
             rec.sendAccepted = true;
-            if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], rec.channel)) renderRecords();
+            if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], rec.channel)) requestRender();
             return true;
         }
         return false;
@@ -5345,11 +5349,7 @@ class FCMChatWidget extends MovieClip {
 
     function formatFeedRange(tf:TextField, start:Int, end:Int, font:String, color:Int):Void {
         if (start < 0 || end <= start || end > tf.length) return;
-        var fmt = new TextFormat();
-        fmt.font = font;
-        fmt.size = _cfg.fontSize;
-        fmt.color = color;
-        tf.setTextFormat(fmt, start, end);
+        tf.setTextFormat(cachedFeedFormat(font, _cfg.fontSize, color), start, end);
     }
 
     function measuredFeedHeight(tf:TextField):Float {
@@ -5362,8 +5362,9 @@ class FCMChatWidget extends MovieClip {
 
     function measuredFeedLineHeight(tf:TextField):Float {
         // A single-line sample avoids an optional TextLineMetrics class dependency.
-        var sample = makeFeedTextField("Mg", 100, _cfg.fontSize + 8, false);
-        return Math.max(_cfg.fontSize + 2, Math.ceil(sample.textHeight + 2));
+        // Hoisted per render via cachedLineHeight(); the per-row call stays as a
+        // fallback for direct callers.
+        return cachedLineHeight();
     }
 
     /**
@@ -5397,10 +5398,8 @@ class FCMChatWidget extends MovieClip {
         var markerSize:Float = Math.max(8, Math.min(16, fs * 0.95));
         var markerSpaces:Int = 0;
         if (hasMarker) {
-            var spaceSample = makeFeedTextField('<font face="' + FONT_BOLD + '">M&#160;M</font>', 200, fs + 8, false);
-            var plainSample = makeFeedTextField('<font face="' + FONT_BOLD + '">MM</font>', 200, fs + 8, false);
             markerSpaces = FcmStarLayout.markerSpaces(markerSize, STAR_CONTENT_GAP,
-                spaceSample.textWidth - plainSample.textWidth, fs);
+                cachedNbspAdvance(fs), fs);
         }
         var runs = FcmFeedText.compose(channelLabel, moderationText, rawTag, rawUser,
             rawBody, markerSpaces, deliveryStatus);
@@ -5515,16 +5514,214 @@ class FCMChatWidget extends MovieClip {
     var _pendingVisibleRecords:Array<ChatRecord> = null;
     var _pendingContentY:Float = 0;
     var _renderGeneration:FcmRenderGeneration = new FcmRenderGeneration();
+    // Burst coalescing: rapid ingest/poll/ACK triggers collapse into one deferred
+    // render. Tab switches, resizes, and config changes still render immediately.
+    var _renderCoalescer:FcmRenderCoalescer = new FcmRenderCoalescer();
+    var _coalesceTimer:Timer = null;
+    // Snapshot identity for incremental append: parallel keys for the committed
+    // visible rows (notice row excluded). A matching prefix is reparented as-is.
+    var _renderedRecordKeys:Array<String> = [];
+    var _renderedChanIdx:Int = -1;
+    var _renderedViewportWidth:Float = -1;
+    var _renderedFontSize:Int = -1;
+    var _renderedVisualContext:String = "";
+    // Cached GFx measurements and TextFormat objects (invalidated on fontSize change).
+    var _cachedLineHeight:Float = -1;
+    var _cachedLineHeightFs:Int = -1;
+    var _cachedNbspAdvance:Float = -1;
+    var _cachedNbspFs:Int = -1;
+    var _formatCache:Map<String, TextFormat> = new Map();
+    var _formatCacheFs:Int = -1;
+    // Reused display objects: at most two staging layers (double-buffer). Only
+    // one slice timer may be live; its listener is detached at every terminal edge.
+    var _stagingPool:Array<Sprite> = [];
+    var _sliceTimer:Timer = null;
+    var _sliceTimerHandler:Dynamic = null;
 
     /** Invalidate delayed slices before replacing or detaching the feed display tree. */
     function cancelPendingRender():Void {
         _renderGeneration.invalidate();
+        _renderCoalescer.reset();
+        stopCoalesceTimer();
+        stopSliceTimer();
         discardPendingFeedSnapshot();
+    }
+
+    /**
+     * Coalesced render request for burst-prone tail-append traffic (ingest batches,
+     * optimistic echo, ACK reconciliation). Collapses N rapid triggers into one
+     * deferred renderRecords() on the next timer tick.
+     */
+    function requestRender():Void {
+        if (_disposed || _logTf == null || _feedLayer == null) return;
+        if (!_renderCoalescer.request()) return;
+        if (_coalesceTimer != null) return;
+        _coalesceTimer = new Timer(1, 1);
+        _coalesceTimer.addEventListener(TimerEvent.TIMER_COMPLETE, function(_:Dynamic) {
+            _coalesceTimer = null;
+            if (_disposed) { _renderCoalescer.reset(); return; }
+            if (!_renderCoalescer.consumeTick()) return;
+            try {
+                renderRecords();
+            } catch (err:Dynamic) {
+                renderRecordsFallback(err);
+            }
+        });
+        try { _coalesceTimer.start(); } catch (_:Dynamic) {
+            _coalesceTimer = null;
+            if (_renderCoalescer.consumeTick()) renderRecords();
+        }
+    }
+
+    function stopCoalesceTimer():Void {
+        if (_coalesceTimer != null) {
+            try { _coalesceTimer.stop(); } catch (_:Dynamic) {}
+            _coalesceTimer = null;
+        }
+    }
+
+    function stopSliceTimer():Void {
+        if (_sliceTimer != null) {
+            try { _sliceTimer.stop(); } catch (_:Dynamic) {}
+            if (_sliceTimerHandler != null) {
+                try { _sliceTimer.removeEventListener(TimerEvent.TIMER_COMPLETE, _sliceTimerHandler); }
+                catch (_:Dynamic) {}
+            }
+        }
+        _sliceTimer = null;
+        _sliceTimerHandler = null;
+    }
+
+    /** Stable identity keys for the currently visible snapshot (notice row excluded). */
+    function visibleRecordKeys(visible:Array<ChatRecord>):Array<String> {
+        var keys:Array<String> = [];
+        for (rec in visible) {
+            var queued = rec.pending ? _outbox.get(rec.localSendId) : null;
+            var delivery:String = queued == null ? "ready" : (queued.attempts > 0 ? "sending" : "queued");
+            var visual:String = visualPart(rec.user) + visualPart(rec.tag) + visualPart(rec.color)
+                + visualPart(rec.supporterStar ? "1" : "0") + visualPart(rec.starColor)
+                + visualPart(rec.body) + visualPart(rec.linkUrl) + visualPart(rec.senderUserId)
+                + visualPart(rec.pending ? "1" : "0") + visualPart(rec.sendAccepted ? "1" : "0")
+                + visualPart(delivery);
+            keys.push(FcmFeedPlan.recordKey(rec.channel, rec.messageId, rec.localSendId, visual));
+        }
+        return keys;
+    }
+
+    /** Length-prefix values so arbitrary chat text cannot make two visual keys collide. */
+    function visualPart(value:Dynamic):String {
+        var text:String = value == null ? "" : Std.string(value);
+        return text.length + ":" + text;
+    }
+
+    function feedVisualContext():String {
+        return (_canModerate ? "mod1" : "mod0")
+            + ":" + _cfg.textColor + ":" + _cfg.promptColor + ":" + _cfg.senderColor
+            + ":" + _cfg.tabActiveColor + ":" + _cfg.channelTagColor
+            + ":" + _cfg.chanColorGlobal + ":" + _cfg.chanColorTrade
+            + ":" + _cfg.chanColorEvents + ":" + _cfg.chanColorInfests
+            + ":" + _cfg.chanColorRaids + ":" + _cfg.chanColorServer;
+    }
+
+    function snapshotMatchesCommitted(newKeys:Array<String>, viewportWidth:Float):Bool {
+        if (_feedContentLayer == null || _feedRows.length == 0) return false;
+        if (_renderedChanIdx != _chanIdx) return false;
+        if (_renderedFontSize != _cfg.fontSize) return false;
+        if (_renderedViewportWidth != viewportWidth) return false;
+        if (_renderedVisualContext != feedVisualContext()) return false;
+        if (_renderedRecordKeys.length > newKeys.length) return false;
+        return FcmFeedPlan.prefixReuseCount(_renderedRecordKeys, newKeys) == _renderedRecordKeys.length;
+    }
+
+    function obtainStagingLayer():Sprite {
+        while (_stagingPool.length > 0) {
+            var layer:Sprite = _stagingPool.pop();
+            if (layer == null) continue;
+            try {
+                while (layer.numChildren > 0) layer.removeChildAt(0);
+            } catch (_:Dynamic) { continue; }
+            layer.visible = false;
+            layer.y = 0;
+            return layer;
+        }
+        var fresh:Sprite = new Sprite();
+        fresh.visible = false;
+        return fresh;
+    }
+
+    function recycleStagingLayer(layer:Sprite):Void {
+        if (layer == null) return;
+        if (_stagingPool.length >= 2) return;
+        try {
+            while (layer.numChildren > 0) layer.removeChildAt(0);
+        } catch (_:Dynamic) { return; }
+        layer.visible = false;
+        _stagingPool.push(layer);
+    }
+
+    function cachedFeedFormat(font:String, size:Int, color:Int):TextFormat {
+        if (_formatCacheFs != _cfg.fontSize) {
+            _formatCache = new Map();
+            _formatCacheFs = _cfg.fontSize;
+        }
+        var key:String = font + "|" + size + "|" + color;
+        var fmt:TextFormat = _formatCache.get(key);
+        if (fmt == null) {
+            fmt = new TextFormat();
+            fmt.font = font;
+            fmt.size = size;
+            fmt.color = color;
+            _formatCache.set(key, fmt);
+        }
+        return fmt;
+    }
+
+    function cachedNbspAdvance(fs:Int):Float {
+        if (_cachedNbspFs == fs && _cachedNbspAdvance >= 0) return _cachedNbspAdvance;
+        var spaceSample = makeFeedTextField('<font face="' + FONT_BOLD + '">M&#160;M</font>', 200, fs + 8, false);
+        var plainSample = makeFeedTextField('<font face="' + FONT_BOLD + '">MM</font>', 200, fs + 8, false);
+        var advance:Float = 0;
+        try { advance = spaceSample.textWidth - plainSample.textWidth; } catch (_:Dynamic) { advance = 0; }
+        if (!Math.isFinite(advance) || advance < 0) advance = 0;
+        _cachedNbspAdvance = advance;
+        _cachedNbspFs = fs;
+        return advance;
+    }
+
+    function cachedLineHeight():Float {
+        var fs:Int = _cfg.fontSize;
+        if (_cachedLineHeightFs == fs && _cachedLineHeight > 0) return _cachedLineHeight;
+        var sample = makeFeedTextField("Mg", 100, fs + 8, false);
+        var measured:Float = fs + 2;
+        try { measured = Math.max(fs + 2, Math.ceil(sample.textHeight + 2)); } catch (_:Dynamic) {}
+        _cachedLineHeight = measured;
+        _cachedLineHeightFs = fs;
+        return measured;
+    }
+
+    /**
+     * Single-pass row builder. The emoji planner runs only when the fast
+     * prefilter allows it; emoji rows are built once with the decorated text
+     * instead of plain-then-decorated. Failures keep the readable baseline.
+     */
+    function buildFeedRowSinglePass(rec:ChatRecord, viewportWidth:Float):FeedRowView {
+        if (!FcmFeedPlan.needsEmojiPass(rec.body == null ? "" : rec.body)) {
+            return buildFeedMessageRow(rec, viewportWidth);
+        }
+        _renderStep = "build-row";
+        try {
+            var decorated = buildEmojiFeedRow(rec, viewportWidth);
+            if (decorated != null) return decorated;
+        } catch (emojiError:Dynamic) {
+            zfeLog("warn", "emoji", "kept styled row; step=" + _renderStep + ": " + clip200(Std.string(emojiError)));
+        }
+        return buildFeedMessageRow(rec, viewportWidth);
     }
 
     function discardPendingFeedSnapshot():Void {
         if (_pendingFeedContentLayer != null && _feedLayer != null) {
             try { _feedLayer.removeChild(_pendingFeedContentLayer); } catch (_:Dynamic) {}
+            recycleStagingLayer(_pendingFeedContentLayer);
         }
         _pendingFeedContentLayer = null;
         _renderPending = false;
@@ -5534,16 +5731,44 @@ class FCMChatWidget extends MovieClip {
     }
 
     /** Commit one completed snapshot without exposing partially positioned rows. */
-    function commitFeedSnapshot(renderToken:Int, layer:Sprite, rows:Array<FeedRowView>, contentHeight:Float):Void {
+    function commitFeedSnapshot(renderToken:Int, layer:Sprite, rows:Array<FeedRowView>, contentHeight:Float,
+            ?recordKeys:Array<String>, viewportWidth:Float = -1, reuseCount:Int = 0):Void {
         if (!_renderGeneration.mayCommit(renderToken, _renderPending)
                 || _feedLayer == null || layer == null || layer != _pendingFeedContentLayer) return;
-        if (_feedContentLayer != null) {
-            try { _feedLayer.removeChild(_feedContentLayer); } catch (_:Dynamic) {}
+        var retired:Sprite = null;
+        if (_feedContentLayer != null && _feedContentLayer != layer) {
+            retired = _feedContentLayer;
         }
+        // Reparent a proven unchanged prefix only at the atomic commit edge. The
+        // old snapshot therefore remains complete and visible throughout every
+        // delayed suffix slice and is untouched if that render is cancelled.
+        var moved:Int = 0;
+        if (reuseCount > 0 && retired != null) {
+            try {
+                for (i in 0...reuseCount) {
+                    layer.addChildAt(rows[i].view, i);
+                    moved++;
+                }
+            } catch (moveError:Dynamic) {
+                for (i in 0...moved) {
+                    try { retired.addChildAt(rows[i].view, i); } catch (_:Dynamic) {}
+                }
+                throw moveError;
+            }
+        }
+        if (retired != null) try { _feedLayer.removeChild(retired); } catch (_:Dynamic) {}
         _feedContentLayer = layer;
         _pendingFeedContentLayer = null;
         _feedRows = rows;
+        if (retired != null) recycleStagingLayer(retired);
         if (_selectedRowIndex >= _feedRows.length) _selectedRowIndex = _feedRows.length - 1;
+        if (recordKeys != null) {
+            _renderedRecordKeys = recordKeys;
+            _renderedChanIdx = _chanIdx;
+            _renderedViewportWidth = viewportWidth;
+            _renderedFontSize = _cfg.fontSize;
+            _renderedVisualContext = feedVisualContext();
+        }
         _feedContentHeight = contentHeight;
         _feedMaxScrollY = Math.max(0, _feedContentHeight - _logTf.height);
         if (!_bScrolling) {
@@ -5564,6 +5789,9 @@ class FCMChatWidget extends MovieClip {
 
     function renderRecords():Void {
         var renderToken:Int = _renderGeneration.begin();
+        _renderCoalescer.reset();
+        stopCoalesceTimer();
+        stopSliceTimer();
         discardPendingFeedSnapshot();
         if (_logTf == null || _feedLayer == null) return;
 
@@ -5592,35 +5820,51 @@ class FCMChatWidget extends MovieClip {
             setLogText("No messages in " + CHAN_NAMES[_chanIdx] + " yet"); return;
         }
 
-        var stagingLayer:Sprite = new Sprite();
-        stagingLayer.visible = false;
+        var viewportWidth:Float = _logTf.width;
+        var newKeys:Array<String> = visibleRecordKeys(visibleRecords);
+        // Incremental append: a matching committed prefix is reparented as-is so
+        // burst tail-appends only construct the genuinely new suffix rows.
+        var reuseCount:Int = 0;
+        if (snapshotMatchesCommitted(newKeys, viewportWidth)) {
+            reuseCount = FcmFeedPlan.prefixReuseCount(_renderedRecordKeys, newKeys);
+            if (reuseCount > _feedRows.length) reuseCount = _feedRows.length;
+        }
+        var stagingLayer:Sprite = obtainStagingLayer();
         _pendingFeedContentLayer = stagingLayer;
         _feedLayer.addChild(stagingLayer);
         var stagingRows:Array<FeedRowView> = [];
-        // Small feeds render synchronously; larger feeds spend at most six rows per timer turn.
-        if (visibleRecords.length <= _renderSliceSize) {
-            var contentY:Float = 0;
+        var contentY:Float = 0;
+        if (reuseCount > 0 && _feedContentLayer != null) {
+            for (i in 0...reuseCount) {
+                var kept:FeedRowView = _feedRows[i];
+                // Do not reparent yet: these rows remain in the visible committed
+                // layer until commitFeedSnapshot performs the synchronous swap.
+                stagingRows.push(kept);
+                contentY += kept.height + FEED_ROW_GAP;
+            }
+        }
+        // Warm the hoisted line-height cache once per render, not once per row.
+        cachedLineHeight();
+        var remaining:Int = visibleRecords.length - reuseCount;
+        // Small feeds render synchronously; larger feeds spend a bounded slice per timer turn.
+        if (remaining <= _renderSliceSize) {
             var customNameColors:Int = 0;
-            for (rec in visibleRecords) {
+            for (idx in reuseCount...visibleRecords.length) {
+                var rec:ChatRecord = visibleRecords[idx];
                 _renderStep = "build-row";
                 if (FcmConfig.parseHexColor(rec.color, _cfg.senderColor) != _cfg.senderColor) customNameColors++;
-                var rendered:FeedRowView = buildFeedMessageRow(rec, _logTf.width);
-                try {
-                    var decorated = buildEmojiFeedRow(rec, _logTf.width);
-                    if (decorated != null) rendered = decorated;
-                } catch (emojiError:Dynamic) {
-                    zfeLog("warn", "emoji", "kept styled row; step=" + _renderStep + ": " + clip200(Std.string(emojiError)));
-                }
+                var rendered:FeedRowView = buildFeedRowSinglePass(rec, viewportWidth);
                 rendered.contentY = contentY;
                 rendered.view.y = contentY;
                 stagingRows.push(rendered);
                 stagingLayer.addChild(rendered.view);
                 contentY += rendered.height + FEED_ROW_GAP;
             }
-            zfeLog("info", "name-colors", "rows=" + visibleRecords.length + " differentFromTheme=" + customNameColors);
+            zfeLog("info", "name-colors", "rows=" + visibleRecords.length + " differentFromTheme=" + customNameColors
+                + " reused=" + reuseCount);
             if (_bScrolling && _newWhileScrolled > 0) {
                 var notice:FeedRowView = buildFeedNoticeRow(
-                    "v " + _newWhileScrolled + " new - wheel down or F11 Scroll to newest", _logTf.width);
+                    "v " + _newWhileScrolled + " new - wheel down or F11 Scroll to newest", viewportWidth);
                 notice.contentY = contentY;
                 notice.view.y = contentY;
                 stagingRows.push(notice);
@@ -5628,16 +5872,21 @@ class FCMChatWidget extends MovieClip {
                 contentY += notice.height + FEED_ROW_GAP;
             }
             _renderPending = true;
-            commitFeedSnapshot(renderToken, stagingLayer, stagingRows, contentY);
+            commitFeedSnapshot(renderToken, stagingLayer, stagingRows, contentY, newKeys, viewportWidth, reuseCount);
         } else {
-            // Chunked path — six rows per timer turn based on the Windows 10 frame-time trace.
+            // Chunked path — bounded rows per timer turn based on the Windows 10 frame-time trace.
+            // The slice size adapts to measured construction cost to hold the UI-work budget.
             var pendingRecords:Array<ChatRecord> = visibleRecords;
-            var pendingContentY:Float = 0;
+            var pendingContentY:Float = contentY;
             _pendingVisibleRecords = pendingRecords;
-            _pendingContentY = 0;
+            _pendingContentY = pendingContentY;
             _renderPending = true;
-            var renderedCount:Int = 0;
+            var renderedCount:Int = reuseCount;
             var customNameColorsChunk:Int = 0;
+            for (idx in 0...reuseCount) {
+                var seen:ChatRecord = pendingRecords[idx];
+                if (FcmConfig.parseHexColor(seen.color, _cfg.senderColor) != _cfg.senderColor) customNameColorsChunk++;
+            }
             var tChunkStart:Float = flash.Lib.getTimer();
             var doSlice:Dynamic = null;
             doSlice = function():Void {
@@ -5654,19 +5903,14 @@ class FCMChatWidget extends MovieClip {
                     }
                     return;
                 }
+                var sliceStart:Float = flash.Lib.getTimer();
                 var start:Int = renderedCount;
                 var end:Int = Std.int(Math.min(pendingRecords.length, start + _renderSliceSize));
                 for (idx in start...end) {
                     var rec:ChatRecord = pendingRecords[idx];
                     _renderStep = "build-row";
                     if (FcmConfig.parseHexColor(rec.color, _cfg.senderColor) != _cfg.senderColor) customNameColorsChunk++;
-                    var rendered:FeedRowView = buildFeedMessageRow(rec, _logTf.width);
-                    try {
-                        var decorated = buildEmojiFeedRow(rec, _logTf.width);
-                        if (decorated != null) rendered = decorated;
-                    } catch (emojiError:Dynamic) {
-                        zfeLog("warn", "emoji", "kept styled row; step=" + _renderStep + ": " + clip200(Std.string(emojiError)));
-                    }
+                    var rendered:FeedRowView = buildFeedRowSinglePass(rec, viewportWidth);
                     rendered.contentY = pendingContentY;
                     rendered.view.y = pendingContentY;
                     stagingRows.push(rendered);
@@ -5675,25 +5919,42 @@ class FCMChatWidget extends MovieClip {
                     _pendingContentY = pendingContentY;
                 }
                 renderedCount = end;
+                _renderSliceSize = FcmFeedPlan.nextSliceSize(_renderSliceSize, flash.Lib.getTimer() - sliceStart);
                 if (renderedCount < pendingRecords.length) {
-                    var chunk:Timer = new Timer(1, 1);
-                    chunk.addEventListener(TimerEvent.TIMER_COMPLETE, function(_:Dynamic) {
+                    stopSliceTimer();
+                    _sliceTimer = new Timer(1, 1);
+                    var sliceRef:Timer = _sliceTimer;
+                    var sliceHandler:Dynamic = null;
+                    sliceHandler = function(_:Dynamic) {
+                        try { sliceRef.removeEventListener(TimerEvent.TIMER_COMPLETE, sliceHandler); }
+                        catch (_:Dynamic) {}
+                        if (sliceRef != _sliceTimer) return;
+                        _sliceTimer = null;
+                        _sliceTimerHandler = null;
                         _renderGeneration.runCurrent(renderToken, doSlice, renderRecordsFallback);
-                    });
-                    chunk.start();
+                    };
+                    _sliceTimerHandler = sliceHandler;
+                    sliceRef.addEventListener(TimerEvent.TIMER_COMPLETE, sliceHandler);
+                    try { sliceRef.start(); } catch (_:Dynamic) {
+                        stopSliceTimer();
+                        _renderGeneration.runCurrent(renderToken, doSlice, renderRecordsFallback);
+                    }
                 } else {
-                    zfeLog("info", "name-colors", "rows=" + pendingRecords.length + " differentFromTheme=" + customNameColorsChunk + " sliced render dt=" + (flash.Lib.getTimer() - tChunkStart) + "ms");
+                    zfeLog("info", "name-colors", "rows=" + pendingRecords.length + " differentFromTheme=" + customNameColorsChunk
+                        + " reused=" + reuseCount + " slice=" + _renderSliceSize
+                        + " sliced render dt=" + (flash.Lib.getTimer() - tChunkStart) + "ms");
                     var contentY:Float = pendingContentY;
                     if (_bScrolling && _newWhileScrolled > 0) {
                         var notice:FeedRowView = buildFeedNoticeRow(
-                            "v " + _newWhileScrolled + " new - wheel down or F11 Scroll to newest", _logTf.width);
+                            "v " + _newWhileScrolled + " new - wheel down or F11 Scroll to newest", viewportWidth);
                         notice.contentY = contentY;
                         notice.view.y = contentY;
                         stagingRows.push(notice);
                         stagingLayer.addChild(notice.view);
                         contentY += notice.height + FEED_ROW_GAP;
                     }
-                    commitFeedSnapshot(renderToken, stagingLayer, stagingRows, contentY);
+                    stopSliceTimer();
+                    commitFeedSnapshot(renderToken, stagingLayer, stagingRows, contentY, newKeys, viewportWidth, reuseCount);
                     var dt:Float = flash.Lib.getTimer() - tChunkStart;
                     if (dt > 80) zfeLog("info", "render", "sliced render complete dt=" + dt + "ms rows=" + pendingRecords.length);
                 }
@@ -5780,10 +6041,15 @@ class FCMChatWidget extends MovieClip {
         discardPendingFeedSnapshot();
         if (_feedLayer != null && _feedContentLayer != null) {
             try { _feedLayer.removeChild(_feedContentLayer); } catch (_:Dynamic) {}
-            _feedContentLayer = new Sprite();
+            recycleStagingLayer(_feedContentLayer);
+            _feedContentLayer = obtainStagingLayer();
+            _feedContentLayer.visible = true;
             try { _feedLayer.addChild(_feedContentLayer); } catch (_:Dynamic) {}
         }
         _feedRows = [];
+        _renderedRecordKeys = [];
+        _renderedChanIdx = -1;
+        _renderedVisualContext = "";
         _feedContentHeight = 0;
         _feedMaxScrollY = 0;
         _selectedRowIndex = -1;

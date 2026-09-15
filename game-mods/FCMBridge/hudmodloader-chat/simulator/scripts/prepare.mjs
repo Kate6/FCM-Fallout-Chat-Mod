@@ -12,10 +12,10 @@ const publicDir = resolve(simulator, 'public');
 const run = promisify(execFile);
 const source = await readFile(resolve(widget, 'FCMChatWidget.hx'), 'utf8');
 const mockSource = await readFile(resolve(simulator, 'haxe/MockXscal.hx'), 'utf8');
-const installedFixturePath = resolve(simulator, 'fixtures/installed-xscal-0.1.15.json');
+const installedFixturePath = resolve(simulator, 'fixtures/installed-xscal-0.2.16.json');
 const installedFixture = JSON.parse(await readFile(installedFixturePath, 'utf8'));
 for (const method of [...installedFixture.chatMethods, ...installedFixture.inputCallbacks]) {
-  if (!mockSource.includes(`"${method}"`)) throw new Error(`MockXscal is missing installed 0.1.15 method ${method}`);
+  if (!mockSource.includes(`"${method}"`)) throw new Error(`MockXscal is missing installed 0.2.16 method ${method}`);
 }
 const match = source.match(/VERSION:String\s*=\s*"([^"]+)"/);
 if (!match) throw new Error('FCMChatWidget version marker not found');
@@ -61,7 +61,7 @@ await writeFile(resolve(publicDir, 'FCMChat.ini'), productionConfig.replace(
   'autoHideEnabled=true',
   '; Simulator-only: keep the preview observable during long test runs.\nautoHideEnabled=false',
 ));
-await copyFile(installedFixturePath, resolve(publicDir, 'installed-xscal-0.1.15.json'));
+await copyFile(installedFixturePath, resolve(publicDir, 'installed-xscal-0.2.16.json'));
 await writeFile(resolve(publicDir, 'sim-manifest.json'), JSON.stringify({
   kind: 'fcm-hud-simulator',
   warning: 'SIMULATED HOST — NOT FALLOUT 76 OR A NATIVE PROVIDER',

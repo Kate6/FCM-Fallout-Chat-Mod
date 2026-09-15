@@ -122,6 +122,11 @@ class MockXscal {
                 pressed.remove(unregisterKey);
                 return existed;
             }
+            if (name == "Input.ClearKeys") {
+                registered = new Map();
+                pressed = new Map();
+                return true;
+            }
             if (name == "Input.IsKeyPressed") {
                 var key:Int = Std.int(value);
                 return pressed.exists(key) && pressed.get(key) == true;

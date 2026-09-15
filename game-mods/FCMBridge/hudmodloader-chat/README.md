@@ -120,6 +120,19 @@ static vector sprites; unsupported custom emoji fall back to readable names. No 
 images or GIF playback are loaded. Delayed row slices check their generation and catch their own
 failures; fallback invalidates pending work. Flash/JavaScript tests do not establish GFx behavior.
 
+Burst traffic (poll batches, optimistic echo, ACK reconciliation) coalesces into one deferred
+render per tick; tab switches, resizes, and config changes still render immediately. Tail
+appends reuse the committed snapshot's matching prefix rows and only construct the new suffix.
+The visible prefix stays attached to the committed layer throughout delayed construction and is
+reparented only at the synchronous commit edge, so cancellation cannot blank the old snapshot.
+Reuse keys include every rendered message/cosmetic/delivery field plus moderation and theme state.
+Rows take a single build pass (plain bodies skip the emoji planner via a fast prefilter),
+`TextFormat` objects and font measurements are cached per font size, staging layers and the
+slice size adapts within 4-12 rows to hold the per-tick UI budget. Only one slice timer can be
+live, and its listener is removed on completion, cancellation, failure, or teardown. Pure planning
+helpers live in `FcmFeedPlan.hx`/`FcmRenderCoalescer.hx` with
+`test-feed-plan.hxml` coverage.
+
 F11 → FCM → Customize changes position, independent panel dimensions, feed/input text size, input
 height, backgrounds, text colors, opacity, and auto-hide. Input width/alignment follow the panel.
 Server-resolved user colors override the default local sender color. Timestamps are not shown;
@@ -145,13 +158,16 @@ npm test
 Playwright owns the loopback Vite process and closes it after the run; the test also removes the
 Ruffle player in `afterEach`. Generated SWFs, copied runtime files, screenshots, video, and reports
 are ignored. The default mode is the production artifact. A second browser test replays a sanitized
-contract captured from the installed xScal 0.1.15 DLL (hash and supported runtime included), without
+contract captured from the Nexus xScal 0.2.16 DLL (hash and supported runtime included), without
 loading or redistributing that DLL. `?mode=harness` is an experimental
-rendered contract-host spike based on the installed xScal behavior, not fork additions, and is not
+rendered contract-host spike based on the released xScal behavior, not fork additions, and is not
 acceptance evidence because Ruffle 0.6.0
 currently does not expose the compiled AVM2 callbacks. See
 [the automation plan](../../../docs/testing/hud-automation-plan.md)
 for the fidelity boundary and real-game tier.
+
+The ZFE simulator contract identifies as 0.15.0 and retains the asynchronous chat capability gate
+required to prevent synchronous network work from blocking Fallout's Scaleform thread.
 
 To collect a sanitized contract trace from a game session you launched yourself, use
 [`native-capture/Capture-HudSession.ps1`](native-capture/README.md). The collector fingerprints the
@@ -165,6 +181,7 @@ active artifacts and tails only fresh xScal/ZFE diagnostics; it never owns or st
 | `FcmCommand.hx`, `FcmHistory.hx`, `FcmEcho.hx`, `FcmOutbox.hx` | Channel/command, replay, echo, retry guards |
 | `FcmConfig.hx`, `FcmHudLayout.hx` | INI settings and optional per-device persistence |
 | `FcmRenderGeneration.hx`, `FcmFeedText.hx`, `FcmEmoji*.hx` | Delayed rendering, styled text, bundled emoji |
+| `FcmFeedPlan.hx`, `FcmRenderCoalescer.hx`, `TestFcmFeedPlan.hx` | Pure render planning (coalescing, prefix reuse, slice budget) + tests |
 | `FCMChat.ini`, `FCMChatWidget.ini`, `hudmodloader.ini` | Package configuration templates and loader line |
 | `build.hxml`, `normalize_swf.py`, `emoji/` | Haxe build, FWS normalization, bundled sprite data/licenses |
 | `package.py`, `test_package.py`, `test-*.hxml` | Target/provider/distribution packaging and checks |
