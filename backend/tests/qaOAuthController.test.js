@@ -103,4 +103,12 @@ describe('defaultQaCallbackDeps.upsertUser — discordId detach before upsert', 
     expect(order).toEqual(['updateMany', 'upsert']);
     expect(prismaMock.user.upsert.mock.calls[0][0].where).toEqual({ installToken: 'inst-new' });
   });
+
+  test('uses a unique placeholder username for a fresh QA install', async () => {
+    await defaultQaCallbackDeps.upsertUser(identity, 'inst-new');
+
+    const create = prismaMock.user.upsert.mock.calls[0][0].create;
+    expect(create.username).toMatch(/^pending-qa-[0-9a-f-]{36}$/);
+    expect(create.username).not.toBe(`discord:${identity.id}`);
+  });
 });

@@ -174,7 +174,11 @@ export const defaultQaCallbackDeps: QaCallbackDeps = {
       },
       create: {
         installToken,
-        username: `discord:${identity.id}`,
+        // A Discord identity can return with a fresh install token while its prior
+        // detached row still owns the old synthetic username. Use a per-row
+        // placeholder so the username @unique constraint cannot strand QA login.
+        // resolveDisplayName() already treats pending-* values as non-displayable.
+        username: `pending-qa-${uuidv4()}`,
         discordId: identity.id,
         discordUsername: identity.username,
         discordAvatar: identity.avatar ?? null,
