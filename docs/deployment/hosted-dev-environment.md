@@ -26,6 +26,12 @@ which is **live and deployed** as of 2026-06-11.
 > **Developers connect to DEV only. They never touch production — not the
 > database, not the object store, not production credentials.**
 
+The hosted OAuth MCP is deliberately excluded from this environment. The
+backend requires both `NODE_ENV=production` and `MCP_REMOTE_ENABLED=true`, so
+setting the switch on `fcm-dev` does not expose OAuth discovery, authorization,
+token, revocation, or `/mcp`. Developers use the local development stdio server
+against fake/dev data; production OAuth access is not an onboarding shortcut.
+
 Production is the only place confidential data lives (real users, real chat, and
 especially **ban/report evidence**). The bridge from prod to dev is a one-way
 **sanitizing seed pipeline that only the maintainer runs** (see

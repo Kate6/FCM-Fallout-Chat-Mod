@@ -7,6 +7,100 @@ All bot features — the chat bridge, temp voice channels, embed builder, and
 reaction roles — attach their listeners to this shared client at startup; there
 is **no second login**.
 
+Production OAuth MCP clients reuse these same embed, channel/role/emoji context,
+and reaction-role services; see [embeds](./embeds.md),
+[reaction roles](./reaction-roles.md), and [MCP OAuth](../backend/mcp-oauth.md).
+
+## Overlay and moderation slash commands
+
+`discordOverlayCommandService` registers guild-scoped application commands for
+every environment configured with `DISCORD_SERVER_ID` (Dev, Ant, and Production).
+It provides `/fcm command:<overlay command>` as the compatibility surface for
+the full server-side overlay command catalog, including configured custom commands,
+so a new enabled overlay command does not require a separate Discord command
+registration change.
+
+The card-bearing Fallout lookups also have first-class public commands:
+`/wiki query:`, `/camp item:`, `/minerva`, `/nukecodes`, and
+`/serverstatus`.
+They call `commandService` and convert its returned metadata—not a second lookup
+or duplicate data model—into a public Discord embed. This keeps Discord fields,
+attribution, image URL, sale dates, codes, and status in step with the overlay
+card data. Other command results are ephemeral to avoid flooding the relay
+channel. `/fcm` accepts only slash-prefixed input, for example
+`/fcm command:"/g hello"` or `/fcm command:"/help"`.
+
+`/giveaway command:` is also available directly in Discord; for example use
+`/giveaway command:list` or `/giveaway command:"join <id>"`.
+
+`/wiki query:` and `/camp item:` search the local FCM catalog as the user types;
+choosing a result then produces the same public rich card used by the overlay,
+including its stored thumbnail when available. Discord's autocomplete picker is
+text-only, so it cannot render images or an overlay inside the picker itself.
+`/report bug description:` files a bug report, while `/report player user: description:`
+searches linked FCM, Discord, and Steam identities before filing a player report.
+
+`/help` is an ephemeral copy of the complete overlay command reference, including
+all built-in and enabled dynamic commands that apply in Discord. Party-only shortcuts
+are omitted because they are overlay-local. The response is one Discord embed when it
+fits (with private continuation embeds only if future command growth requires them).
+`/appearance` explains
+the private `/name` and `/cosmetics` controls. `/events` without an option lists
+every currently enabled overlay command whose action is an event announcement;
+`/events command:"/ss"` runs one. The event message is finalized through the
+same relay path as the overlay, so it appears in the mapped event channel and
+in FCM history rather than merely as a Discord interaction response.
+Every enabled event announcement is also registered as its own Discord slash
+command (for example `/gu`, `/dc`, `/lits`, `/mj`, `/nw`, `/sbq`, and `/ss`).
+Those shortcuts run the exact same finalization path, so the Events channel,
+overlay, and HUD all receive the same announcement.
+
+First-class FCM slash commands can be invoked from any Discord channel where the
+bot can send messages; the invoking channel does not need an FCM relay mapping.
+`/g`, `/t`, `/e`, `/r`, and `/i` still deliver to their named FCM channels.
+Normal lookup cards and `/help` are public in the invoking channel, while
+moderation actions, `/apply`, and `/report` remain private to the invoker.
+Public lookup cards never include an invocation mention. Their typed card metadata
+is also finalized into the mapped FCM channel (or General for an unmapped command
+channel) without sending a second Discord copy, so the overlay and HUD receive the
+same normalized card once.
+
+`/keybinds` posts the default Electron-overlay and optional HUD-mod controls as
+a public embed. Starting a giveaway posts the confirmation in the invoking
+Discord channel and relays the announcement to FCM General.
+
+### Optional bot-commands channel
+
+Set `DISCORD_BOT_COMMANDS_CHANNEL_ID` to designate a Discord channel as the
+bot-command entry point. On startup, and after each human message in that
+channel, the bot removes its previous help card and posts a fresh compact embed
+that directs users to `/help` and `/events`. User messages are retained. The bot
+needs **Read Message History** and **Manage Messages** there. Leave the setting
+blank to disable the sticky help card.
+
+`/moderate` is a separate command group: `kick`, `mute`, `unmute`, `ban`,
+`unban`, and `delete-message`. Discord's Moderate Members permission is only an
+initial UI gate. Each invocation also requires a linked FCM account whose
+effective FCM role is `moderator`, `admin`, or `owner`; otherwise it is rejected
+ephemerally. Actions call the same `moderationActionsService` methods used by the
+dashboard, retaining target protection, session eviction, Discord propagation,
+audit logging, public FCM announcement, and ban-evidence requirements. `/moderate
+ban` therefore requires an evidence summary and `/moderate unban` requires the
+FCM ban ID. The Discord slash variants also enforce the equivalent Discord
+action: `kick` removes the linked member from the guild, `mute` applies a native
+Discord timeout, and `ban` creates a guild ban even when the FCM ban has an
+expiry (the FCM unban/expiry flow removes that guild ban again). If Discord
+rejects an action because of bot permissions or role hierarchy, the response is
+explicitly marked as FCM-only rather than claiming success.
+
+The `user` box for `/moderate kick`, `/moderate mute`, `/moderate unmute`, and
+`/moderate ban` is an FCM-backed autocomplete. Moderators can search by FCM chat
+name, Discord display name or ID, Steam name, or SteamID, then choose the linked
+account from the resulting list. Interaction confirmations are ephemeral; FCM
+does not broadcast a public General-channel moderation message. Every moderation
+action instead writes its audit record and posts a staff-only embed through the
+configured `mod_log_channel_id` (the Vault Security channel by default).
+
 ---
 
 ## Required gateway intents
@@ -35,9 +129,13 @@ stop working after a redeploy.
 | Permission | Needed for |
 |------------|-----------|
 | Read Messages / View Channels | All features |
+| Read Message History | Bot-commands sticky help card |
 | Send Messages | Chat bridge outbound, embed builder |
 | Embed Links | Embed builder |
 | Manage Messages | Chat bridge — deleting over-length or media-only messages |
+| Moderate Members | `/moderate mute` Discord timeout |
+| Kick Members | `/moderate kick` guild removal |
+| Ban Members | `/moderate ban` guild ban |
 | Manage Channels | Temp voice — creating/deleting channels |
 | Move Members | Temp voice — moving members into their channel |
 | Manage Roles | Temp voice channel overrides, reaction roles |
@@ -56,7 +154,9 @@ in-game `channel_id` to a Discord channel snowflake.
 
 Handled by the `messageCreate` listener at `discordService.ts:348`.
 
-1. Bot and webhook messages are ignored (echo-loop prevention).
+1. Messages from the FCM bot itself are ignored (echo-loop prevention). Compatible
+   FCM card embeds from other bots or webhooks are instead normalized into bounded
+   `wiki_share`, `camp_item`, `minerva`, `nuke_codes`, or `server_status` metadata.
 2. Messages carrying the zero-width-space watermark (`​`) are dropped
    (defense-in-depth — these are our own outbound relay messages bouncing back).
 3. The relay mapping is looked up; if no explicit mapping exists for the Discord
@@ -73,9 +173,16 @@ Handled by the `messageCreate` listener at `discordService.ts:348`.
    `backend/src/utils/overLengthDm.ts`, unit-tested in
    `backend/src/services/__tests__/overLengthDm.test.ts`.
 5. Images are never relayed to main channels. GIFs are allowed only if the
-   destination channel has `allowGifs = true`.
-6. User-mention tokens (`<@id>`) are resolved to readable names: FO76 name from
-   the DB if linked, otherwise the Discord server display name.
+   destination channel has `allowGifs = true`. The five recognized FCM cards are
+   the narrow exception: their public HTTPS image URL is preserved as card metadata
+   (wiki maps remain the large image; other card art remains a thumbnail) rather
+   than being relayed as free-form media.
+6. User (`<@id>`) and channel (`<#id>`) mentions are normalized to readable
+   `@name` / `#channel` text. Their Discord snowflakes are retained in
+   `metadata.entities`; channel entities also carry a canonical Discord URL.
+   Identity is therefore paired by ID rather than inferred from a display name.
+   Sharing a known `discord.com/events/...` URL resolves to the existing
+   `scheduled_event` metadata and renders the standard event card in FCM.
 7. The automod engine is run on the content. Blocked messages are silently
    dropped (author is notified by DM).
 8. The message is decorated with the author's current supporter cosmetics using
@@ -100,8 +207,9 @@ has `discord_relay` enabled.
 - Outbound messages are rate-limited to 4 msg/sec through an in-memory queue
   drained by a 250 ms interval timer.
 - Raw Discord mention syntax is stripped (abuse guard).
-- In-app `@name` tokens are converted to real `<@discordId>` Discord mentions
-  for linked users.
+- In-app autocomplete selections carry `{name, discordId}` and are converted to
+  real `<@discordId>` Discord mentions. The same ID-backed entity is persisted
+  with the FCM message so every overlay client renders the same mention label.
 - A zero-width-space watermark is appended to prevent the inbound handler from
   re-relaying the message.
 - Format: `**[ChannelName]** **Username**: content`. When the server-resolved author
@@ -109,6 +217,12 @@ has `discord_relay` enabled.
   arbitrary badge text is never accepted. The HUD send acknowledgement and live
   event use the same server-resolved identity, so a supporter message typed in-game
   is marked consistently in the HUD, overlay, and Discord relay.
+- Structured `wiki_share`, `camp_item`, `minerva`, `nuke_codes`, and
+  `server_status` metadata is sent as a native Discord embed instead of the text
+  prefix. The card has no actor mention, maps are clickable full-size images, and
+  other images are clickable thumbnails. The FCM wire still carries compact text
+  plus the metadata, so the HUD can display a readable line while the overlay
+  renders its native rich-card treatment.
 
 ---
 
@@ -118,6 +232,8 @@ has `discord_relay` enabled.
 discordClient created (intents + partials)
   └─ voiceService.register(client)         ← temp voice channels
   └─ reactionRoleService.register(client)  ← reaction roles
+  └─ discordOverlayCommandService.register(client) ← /fcm, lookup cards, /moderate
+  └─ discordCommandHelpService.register(client) ← bot-commands sticky /help card
   └─ emoji cache-invalidation listeners
   └─ ready handler (presence, logging)
   └─ messageCreate handler (chat bridge)
@@ -134,6 +250,7 @@ discordClient created (intents + partials)
 | `DISCORD_TOKEN` | Bot token — if unset, the bridge is disabled entirely |
 | `DISCORD_SERVER_ID` | Guild snowflake (assignable-roles, nickname sync) |
 | `DISCORD_CHANNEL_ID` | Default relay channel fallback |
+| `DISCORD_BOT_COMMANDS_CHANNEL_ID` | Optional channel that maintains the compact `/help` and `/events` sticky card |
 | `DISCORD_EVENTS_CHANNEL_ID` | Existing Discord text-channel snowflake for event announcements; must belong to `DISCORD_SERVER_ID` |
 | `DISCORD_UPDATES_CHANNEL_ID` | Release announcement channel (default `1479531502567166066`) |
 | `DOWNLOAD_PAGE_URL` | Release embed/download-page URL; dev overrides this to `https://dev.falloutchatmod.com` |

@@ -699,6 +699,13 @@ Shared attendance updates use `event:attendance-updated` and patch the matching
 event card by stable event code. Attendee identity and viewer-specific native
 state are never placed in shared cached metadata.
 
+Posting the URL of a scheduled event in a mapped Discord chat resolves the
+existing mirror and uses this same card rather than displaying a bare URL. User
+and channel mentions use `metadata.entities` to preserve Discord snowflakes:
+user mentions render as highlighted `@name` text and channel mentions as a
+consistent `#channel` link that opens Discord. Labels are presentation only;
+cross-surface identity and ping routing always use the Discord ID.
+
 ## Related
 
 - [theming.md](./theming.md) — theme system and CSS variable details

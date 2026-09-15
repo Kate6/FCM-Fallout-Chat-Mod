@@ -393,6 +393,24 @@ model DiscordEmbed {
   @@map("discord_embeds")
 }
 
+model EmbedAsset {
+  id               String    @id @default(uuid()) @db.Uuid
+  sha256           String    @unique @db.Char(64)
+  objectKey        String    @unique @map("object_key")
+  publicUrl        String    @map("public_url")
+  mimeType         String    @map("mime_type")
+  byteSize         Int       @map("byte_size")
+  originalHost     String    @map("original_host")
+  creatorDiscordId String?   @map("creator_discord_id")
+  status           String    @default("pending")
+  claimToken       String?   @map("claim_token") @db.Uuid
+  leaseExpiresAt   DateTime? @map("lease_expires_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("embed_assets")
+}
+
 // =============================================================================
 // Reaction-role panels — a posted message whose reactions grant/remove roles.
 // mappings = [{ emoji, matchKey, reactValue, roleId, roleName? }]
@@ -1069,6 +1087,69 @@ model McpApiKey {
   @@index([ownerId])
   @@index([keyHash])
   @@map("mcp_api_keys")
+}
+
+// OAuth 2.1 state for the production remote MCP. Secrets are represented only
+// by SHA-256 hashes; plaintext authorization codes and tokens are never stored.
+model McpOAuthClient {
+  clientId     String    @id @map("client_id")
+  metadata     Json
+  redirectUris String[]  @map("redirect_uris")
+  disabledAt   DateTime? @map("disabled_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  codes  McpOAuthCode[]
+  grants McpOAuthGrant[]
+
+  @@map("mcp_oauth_clients")
+}
+
+model McpOAuthCode {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codeHash            String    @unique @map("code_hash") @db.Char(64)
+  clientId            String    @map("client_id")
+  discordId           String    @map("discord_id")
+  redirectUri         String    @map("redirect_uri")
+  pkceChallenge       String    @map("pkce_challenge")
+  codeChallengeMethod String    @default("S256") @map("code_challenge_method")
+  resource            String
+  scopes              String[]
+  expiresAt           DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt          DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  client McpOAuthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([clientId, discordId])
+  @@map("mcp_oauth_codes")
+}
+
+model McpOAuthGrant {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  familyId               String    @map("family_id") @db.Uuid
+  discordId              String    @map("discord_id")
+  clientId               String    @map("client_id")
+  scopes                 String[]
+  audience               String
+  accessTokenHash        String    @unique @map("access_token_hash") @db.Char(64)
+  accessTokenExpiresAt   DateTime  @map("access_token_expires_at") @db.Timestamptz(6)
+  refreshTokenHash       String    @unique @map("refresh_token_hash") @db.Char(64)
+  usedRefreshTokenHashes String[]  @default([]) @map("used_refresh_token_hashes")
+  refreshTokenExpiresAt  DateTime  @map("refresh_token_expires_at") @db.Timestamptz(6)
+  revokedAt              DateTime? @map("revoked_at") @db.Timestamptz(6)
+  lastUsedAt             DateTime? @map("last_used_at") @db.Timestamptz(6)
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  client McpOAuthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+
+  @@index([familyId])
+  @@index([discordId])
+  @@index([clientId])
+  @@index([refreshTokenExpiresAt])
+  @@map("mcp_oauth_grants")
 }
 
 // Maps a GitHub issue to its Discord support thread (both sync directions).

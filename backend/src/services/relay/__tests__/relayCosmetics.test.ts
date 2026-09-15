@@ -45,6 +45,27 @@ test('native HUD transport encodes the validated projection in targetUserId', ()
   assert.equal(relayHudCosmeticTransport({}), '');
 });
 
+test('native HUD transport carries a validated channel link for the selected row', () => {
+  const cosmetics = relayHudCosmetics({
+    metadata: { entities: [{ type: 'channel', url: 'https://discord.com/channels/1/2' }] },
+  });
+  assert.equal(cosmetics.linkUrl, 'https://discord.com/channels/1/2');
+  assert.equal(
+    relayHudCosmeticTransport(cosmetics),
+    'FCMHUD/1;u=https%3A%2F%2Fdiscord.com%2Fchannels%2F1%2F2',
+  );
+});
+
+test('native HUD transport carries a scheduled-event action URL', () => {
+  const cosmetics = relayHudCosmetics({
+    metadata: {
+      type: 'scheduled_event',
+      discordEventUrl: 'https://discord.com/events/123/456',
+    },
+  });
+  assert.equal(cosmetics.linkUrl, 'https://discord.com/events/123/456');
+});
+
 test('native HUD transport carries a stable message id without cosmetics', () => {
   assert.equal(relayHudCosmeticTransport({}, 'm-2'), 'FCMHUD/1;m=m-2');
 });

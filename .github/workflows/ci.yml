@@ -13,7 +13,7 @@ name: CI
 # Untrusted fork code is blocked regardless of which runner is in use.
 #
 # The single required branch-protection check is the `CI Summary` job below.
-# It gates: unit-vitest (overlay + dashboard matrix), overlay-launch-smoke-linux
+# It gates: unit-vitest (overlay + dashboard matrix), mcp-contract, overlay-launch-smoke-linux
 # (packaged-launch smoke), overlay-build-windows-nsis (NSIS + portable build verification),
 # lint-typecheck, backend-jest, and gamemod-anchors (in-game .ba2 SWF anchors) —
 # all blocking for PRs.
@@ -163,20 +163,45 @@ jobs:
       - name: Install
         working-directory: backend
         run: npm ci
-      - name: Prisma generate + schema push
+      - name: Prisma schema push
         working-directory: backend
         run: |
+          npx prisma validate
           npx prisma generate
           npx prisma db push --skip-generate
+      - name: Apply MCP migrations twice and verify database objects
+        working-directory: backend
+        run: node scripts/verify-mcp-migrations.mjs
       - name: Build (jest tests target compiled .js)
         working-directory: backend
         run: npm run build
+      - name: Remote MCP Inspector contract smoke
+        working-directory: backend
+        run: node scripts/mcp-inspector-smoke.mjs
       - name: Jest (supertest integration)
         working-directory: backend
         run: npm test
       - name: TS unit suites (node:test via testRunner)
         working-directory: backend
         run: npm run test:unit
+
+  mcp-contract:
+    name: MCP (build + contract tests)
+    needs: authorize
+    runs-on: ${{ vars.CI_RUNNER && fromJSON(vars.CI_RUNNER) || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: mcp/package-lock.json
+      - name: Install
+        working-directory: mcp
+        run: npm ci
+      - name: Build + contract tests
+        working-directory: mcp
+        run: npm test
 
   # ── OSV dependency vulnerability scan (NON-BLOCKING pilot) ───────────────────
   # Scans every lockfile in the tree against the OSV database (osv.dev) on each
@@ -406,6 +431,42 @@ jobs:
       - name: Run EasyFishing installer tests
         run: bash game-mods/EasyFishing/test-install.sh
 
+  # ── HUD Ruffle/Playwright regression harness — REQUIRED gate ────────────────
+  hud-ruffle:
+    name: HUD Ruffle provider harness
+    needs: authorize
+    runs-on: ${{ vars.CI_RUNNER && fromJSON(vars.CI_RUNNER) || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: game-mods/FCMBridge/hudmodloader-chat/simulator/package-lock.json
+      - name: Install Haxe and browser dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y haxe
+          cd game-mods/FCMBridge/hudmodloader-chat/simulator
+          npm ci --ignore-scripts
+          npx playwright install --with-deps chromium
+      - name: Build production widget and run complete harness
+        working-directory: game-mods/FCMBridge/hudmodloader-chat
+        run: |
+          haxe build.hxml
+          python3 normalize_swf.py FCMChatWidget.swf
+          cd simulator
+          npm test
+      - name: Upload harness failures
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hud-ruffle-failure
+          path: |
+            game-mods/FCMBridge/hudmodloader-chat/simulator/test-results
+            game-mods/FCMBridge/hudmodloader-chat/simulator/playwright-report
+          if-no-files-found: ignore
+
   # ── Overlay launch smoke (Linux) — REQUIRED gate ─────────────────────────────
   # Builds the packaged overlay and asserts a clean startup. Catches crash-on-launch
   # (e.g. v1.3.82's missing './overlay-core' in the asar, which bricked users).
@@ -516,7 +577,9 @@ jobs:
       - overlay-build-windows-nsis     # NSIS build verification + no-feed-files assertion (Windows)
       - lint-typecheck                 # Phase 2: now a required blocking gate
       - backend-jest                   # Phase 2: now a required blocking gate
+      - mcp-contract                   # MCP TypeScript build + legacy contract freeze
       - gamemod-anchors                # in-game .ba2 SWF anchor checks (Python)
+      - hud-ruffle                     # xScal/ZFE Ruffle + Playwright HUD regression harness
     steps:
       # Require every listed job to have SUCCEEDED. A skipped job (e.g. an
       # unlabeled fork PR where `authorize` did not run) must NOT pass the gate,

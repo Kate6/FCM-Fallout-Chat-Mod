@@ -11,10 +11,12 @@
     "test": "jest --runInBand --forceExit",
     "test:unit": "node --import tsx src/testRunner.ts",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage --runInBand --forceExit"
+    "test:coverage": "jest --coverage --runInBand --forceExit",
+    "test:mcp-inspector": "npm run build && node scripts/mcp-inspector-smoke.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1090.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@prisma/client": "^5.22.0",
     "@types/tar-stream": "^3.1.4",
     "argon2": "^0.45.0",
@@ -28,6 +30,7 @@
     "express-session": "^1.18.1",
     "file-type": "^21.3.4",
     "helmet": "^8.3.0",
+    "ipaddr.js": "^1.9.1",
     "joi": "^18.2.3",
     "multer": "^2.2.0",
     "node-cron": "^4.6.0",
@@ -42,6 +45,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@modelcontextprotocol/inspector": "^2.6.0",
     "@types/connect-redis": "^0.0.23",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",

@@ -1,0 +1,33 @@
+name: Deploy laptop Dev
+
+on:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fcm-laptop-dev-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ vars.LAPTOP_DEV_AUTODEPLOY == 'true' }}
+    runs-on: [self-hosted, Windows, X64, fcm-laptop-dev]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          clean: true
+
+      - name: Build, deploy, verify, or roll back laptop Dev
+        # GitHub writes each step to a temporary .ps1. Use a process-scoped
+        # bypass so a hardened machine policy does not block that wrapper;
+        # this does not change the host's persisted execution policy.
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: >-
+          & .github/scripts/deploy-laptop-dev.ps1
+          -CommitSha '${{ github.sha }}'
+          -CutoverRoot 'C:\FCM\cutover\dev'

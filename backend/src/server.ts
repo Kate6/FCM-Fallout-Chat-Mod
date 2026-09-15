@@ -137,6 +137,9 @@ import {
   markBrowserDevPersonaAccess,
 } from './controllers/devPersonaLoginController';
 import hudFeedRouter from './routes/hudFeed';
+import embedAssetsRouter from './routes/embedAssets';
+import mcpOAuthRouter from './routes/mcpOAuth';
+import { mcpTransportRouter } from './mcp/transport';
 
 const app = express();
 const server = http.createServer(app);
@@ -189,6 +192,10 @@ if (env.NODE_ENV === 'development' || env.NODE_ENV === 'test') {
   app.use('/api/game/player-bridge', gameBridgeRouter);
 }
 
+// MCP authenticates before parsing JSON and owns protocol-shaped parser errors.
+// Keep it ahead of the global body parser and the legacy /api/mcp surface.
+app.use('/mcp', mcpTransportRouter);
+
 // Capture the raw request body so device-signature middleware can hash the
 // exact bytes the client signed (req.body is the parsed object, which can't
 // be re-serialised byte-identically). req.rawBody is the unparsed Buffer.
@@ -196,7 +203,11 @@ app.use(express.json({
   limit: '64kb',
   verify: (req, _res, buf) => { (req as any).rawBody = buf; },
 }));
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({
+  extended: false,
+  limit: '64kb',
+  verify: (req, _res, buf) => { (req as Request & { rawBody?: Buffer }).rawBody = buf; },
+}));
 
 // Sessions backed by Redis
 app.use(session({
@@ -211,6 +222,9 @@ app.use(session({
     maxAge: 4 * 60 * 60 * 1000, // 4h
   },
 }));
+
+// OAuth discovery must live at the origin root (RFC 8414 / RFC 9728).
+app.use(mcpOAuthRouter);
 
 app.use('/api/', apiLimiter);
 
@@ -1837,6 +1851,7 @@ app.get('/party-images/:imageId', apiLimiter, async (req: Request, res: Response
 });
 
 // -- API Routes ----------------------------------------------------------------
+app.use('/embed-assets', apiLimiter, embedAssetsRouter);
 app.use('/api/health', healthRouter);
 app.use('/api/version', versionRouter);
 app.use('/api/auth', authRouter);

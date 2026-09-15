@@ -1,0 +1,22 @@
+{
+  "name": "fcm-hud-simulator",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "prepare": "haxe harness.hxml && python3 ../normalize_swf.py public/FCMHarness.swf && node scripts/prepare.mjs",
+    "dev": "npm run prepare && vite --host 127.0.0.1",
+    "dev:hosted": "npm run sync:hosted-dev && npm run prepare && FCM_HOSTED_DEV_LIVE=1 vite --host 127.0.0.1 --port 41739 --strictPort",
+    "build": "npm run prepare && vite build",
+    "test": "npm run prepare && playwright test",
+    "test:headed": "npm run prepare && playwright test --headed",
+    "sync:hosted-dev": "node scripts/sync-hosted-dev.mjs"
+  },
+  "dependencies": {
+    "@ruffle-rs/ruffle": "0.6.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.0",
+    "vite": "8.2.0"
+  }
+}

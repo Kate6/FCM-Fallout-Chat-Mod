@@ -12,6 +12,7 @@
  */
 
 import prisma from '../config/prisma';
+import logger from '../config/logger';
 import { createError } from '../middleware/errorHandler'; // used in getEntry 404
 import type { WikiLocationSegment } from './wikiParser';
 import { getCampMatchesForName } from './campService';
@@ -161,20 +162,21 @@ export async function searchEntries(
   // alias_hits are separate index-friendly scans, UNION'd then deduped by entry
   // (max score across name + aliases). similarity() is computed only on the
   // already-narrowed candidate rows for scoring.
-  const rows = await prisma.$transaction(async (tx) => {
+  type SearchRow = {
+    id: string;
+    name: string;
+    wiki_title: string;
+    kind: string | null;
+    thumb_id: string | null;
+    score: number;
+  };
+  let rows: SearchRow[];
+  try {
+    rows = await prisma.$transaction(async (tx) => {
     // SET LOCAL cannot take a bind parameter — inline the numeric constant
     // (Number()-coerced, never user input, so no injection risk).
     await tx.$executeRawUnsafe(`SET LOCAL pg_trgm.similarity_threshold = ${Number(TRGM_SIMILARITY_THRESHOLD)}`);
-    return tx.$queryRaw<
-      Array<{
-        id: string;
-        name: string;
-        wiki_title: string;
-        kind: string | null;
-        thumb_id: string | null;
-        score: number;
-      }>
-    >`
+    return tx.$queryRaw<SearchRow[]>`
       WITH name_hits AS (
         SELECT e.id, e.name, e.wiki_title, e.kind, similarity(e.name, ${q}) AS score
         FROM wiki_entries e
@@ -202,7 +204,22 @@ export async function searchEntries(
         length(r.name) ASC
       LIMIT ${safeLimit}
     `;
-  });
+    });
+  } catch (err) {
+    // A partial/local install can be missing pg_trgm even though the catalog is
+    // usable. Autocomplete must degrade to ordinary ILIKE instead of returning
+    // an empty Discord picker.
+    logger.warn({ err }, '[wiki] pg_trgm unavailable; using ILIKE autocomplete fallback');
+    rows = await prisma.$queryRaw<SearchRow[]>`
+      SELECT e.id, e.name, e.wiki_title, e.kind,
+        (SELECT i.id FROM wiki_images i WHERE i.wiki_entry_id = e.id ORDER BY i.position ASC LIMIT 1) AS thumb_id,
+        0::float AS score
+      FROM wiki_entries e
+      WHERE e.is_stale = false AND e.kind IS NOT NULL AND e.name ILIKE ${'%' + q + '%'}
+      ORDER BY (lower(e.name) = lower(${q})) DESC, (lower(e.name) LIKE lower(${q}) || '%') DESC, length(e.name) ASC
+      LIMIT ${safeLimit}
+    `;
+  }
 
   return rows.map((r) => ({
     id: r.id,

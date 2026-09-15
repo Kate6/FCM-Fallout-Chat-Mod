@@ -25,13 +25,21 @@ class FcmHistory {
 
     public function needsRecovery(authenticated:Bool, now:Float = 0):Bool {
         return authenticated && attempts < 3 && now >= nextAttemptAt
-            && (!complete || dropped) && (resyncSent || !staticEventsSeen || dropped);
+            && (!complete || dropped);
     }
 
     public function attempted(now:Float):Void {
         attempts++;
         resyncSent = true;
         nextAttemptAt = now + 10000;
+    }
+
+    /** A limited identity becoming linked invalidates pre-auth recovery attempts. */
+    public function authenticationChanged():Void {
+        attempts = 0;
+        resyncSent = false;
+        nextAttemptAt = 0;
+        complete = false;
     }
 
     public function finish():Void {

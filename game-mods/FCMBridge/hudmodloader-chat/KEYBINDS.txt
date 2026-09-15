@@ -6,7 +6,7 @@ PROVIDER KEYBIND CONTRACT
 One FCMChatWidget.ba2 serves both providers, but the open-key source is different:
 
   Provider  Authoritative open-key source                         Detection path
-  ZFE       effective [TextChat] OpenChatKey + matching openKey    isChatKeyPressed
+  ZFE       Data/FCMChat.ini openKey (synced after discovery)      isChatKeyPressed
   xScal     Data/FCMChat.ini openKey only                          Input.RegisterKey /
                                                                   Input.IsKeyPressed
 
@@ -18,7 +18,9 @@ or input commands through xScal chatInterface; xScal chat and Input.* are separa
 Both providers open the visible SharedHUDTools editor. Only ZFE may use its native draft buffer
 when SharedHUDTools cannot open. After changing input or discovery, test each provider separately:
 INSERT opens one visible editor, `hello` remains five characters, Page Up/Down switch channels
-only during the owned edit, Escape cancels, and Enter sends exactly once. If HUDModLoader removes
+only during the owned edit. Up/Down selects and highlights message rows. Enter sends a non-empty
+draft exactly once; on an empty draft it opens the selected row's HTTP(S) link directly in the
+operating system browser through GFx. No desktop overlay is required. Escape cancels. If HUDModLoader removes
 its field without delivering the final callback, FCM recovers the Enter draft after a short grace
 period; other focus loss cancels the stale edit so the next Insert press works.
 
@@ -35,43 +37,43 @@ setting and ZFE's native key watcher aligned. The complete shipped key map is:
   scrollUpKey=Up
   scrollDownKey=Down
   scrollBottomKey=
+  activateLinkKey=ENTER
   hideKey=DELETE
 
-`scrollBottomKey` is intentionally blank, so Home/End remain game controls. `hideKey=DELETE`
-hides the HUD while input is idle; `/hide` and the F11 menu remain available. Enter sends and Escape cancels through
-the active editor; they are not configurable in this INI. Delete always edits text while input is
+`scrollBottomKey` is intentionally blank, so Home/End remain game controls. `activateLinkKey`
+opens a selected link only after OpenChat owns the editor and defaults to Enter; it is inert during
+ordinary gameplay. `hideKey=DELETE` hides the HUD while input is idle; `/hide` and the F11 menu
+remain available. Enter still sends non-empty drafts and Escape cancels. Delete always edits text while input is
 open. The default `hideKey=DELETE` cannot hide or close an active editor;
-the hide binding applies again after input closes. For ZFE, the native open key must match
-the widget's `openKey`:
+the hide binding applies again after input closes. For ZFE, the widget synchronizes the native
+watcher to its authoritative `openKey` after provider discovery:
 
 1. Edit Data/FCMChat.ini:
 
    [FCMChat]
    openKey=DELETE
 
-2. Edit the existing Data/configuration/zfe.ini (preserve its other settings):
-
-   [TextChat]
-   OpenChatKey=DELETE
-
-Do not create a second [TextChat] section or a duplicate OpenChatKey. Restart Fallout 76
-after changing zfe.ini. Reloading only the HUD widget is not enough for native ZFE config.
+ZFE's own configuration remains its pre-widget startup default; no duplicate `[TextChat]` section
+is needed. Reload the widget or restart Fallout after changing `FCMChat.ini`.
 
 ZFE accepts INSERT, DELETE, HOME, END, PAGE_DOWN (also PAGEDOWN or PGDN), and one letter
 or digit. DELETE is the recommended alternative when Insert conflicts with another mod.
 Avoid PAGE_DOWN if you want Page Down to remain FCM's next-channel command. Letter and
 digit keys can conflict with gameplay and typing, so use them only after testing both states.
+The widget refuses to open in a configured hidden HUD mode. The default includes ContainerMode,
+preventing T from taking text focus when Fallout uses T for Deposit All. This does not reserve T
+globally: it can still overlap other gameplay actions in ordinary HUD modes.
 Reference: ZFE Modder Guide: https://www.nexusmods.com/fallout76/articles/255
 It describes the extender hotkey surface; this file describes FCM's supported values and precedence.
 
 ZFE CONFIG PRECEDENCE
 ---------------------
-Data/configuration/zfe.ini [TextChat] is the user override and wins over:
+Data/configuration/zfe.ini [TextChat] supplies ZFE's startup value and overrides:
 
   Data/ZFE/TextChat/fragments/FCMChatWidget.ini
 
-The packaged fragment also contains OpenChatKey=INSERT as its default. If zfe.ini already
-has OpenChatKey, changing only the fragment will have no effect.
+The packaged fragment also contains OpenChatKey=INSERT as its default. Once FCMChatWidget loads,
+its `FCMChat.ini` value is pushed to the active watcher and wins for FCM chat.
 
 OTHER HUD ACTIONS
 -----------------

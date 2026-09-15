@@ -163,7 +163,7 @@ Validation rules:
 - `content` max 500 characters
 - `clientCreatedAt` must be within ±5 minutes of server time
 - `channelId` must be a UUID or start with `server:`
-- `metadata` capped at 2 KB serialized (oversized → dropped to `null`); rendered as plain text nodes client-side (no HTML injection)
+- `metadata` capped at 2 KB serialized (oversized → dropped to `null`); rendered as plain text nodes client-side (no HTML injection). The Discord bridge normalizes compatible public FCM embeds into the same bounded `wiki_share`, `camp_item`, `minerva`, `nuke_codes`, and `server_status` metadata, while the HUD receives the compact text fallback.
 - Shared-card title actions re-run only supported card commands (`/nukecodes`, `/serverstatus`, `/camp`, `/minerva`) against the clicked message's `channelId`. This preserves delivery in aggregate feeds where the selected parent channel differs from the message's child channel.
 - Rate-limited to 5 msg/s
 
@@ -251,6 +251,23 @@ The shared metadata contains the event code, source ID, public status, UTC
 times, location, bounded summary, announcement/native URLs, and native
 Interested count. It never contains attendee names or a shared
 `isViewerInterested` value.
+
+HUD clients that negotiate the current cosmetic carrier also receive the event's validated
+`discordEventUrl` (and Discord channel-entity URLs) as the carrier's optional `u` field. It is used
+only as the selected row's action target; the rendered URL remains abbreviated.
+
+### `hud:open-url` (legacy S→C private desktop action)
+
+Legacy HUD builds may submit the reserved `FCMCTL/1/OPENURL:` server-channel control with a
+percent-encoded HTTP(S) URL. The relay validates and rate-limits it, then emits `hud:open-url` only
+to sessions belonging to the linked FCM user. Only the Electron overlay acts on this frame; normal
+browser clients ignore it. Electron revalidates the scheme before asking the OS to open the URL.
+FCMChatWidget 2.10.91 and later open a user-selected, validated HTTP(S) URL directly through GFx;
+they do not use this synchronous relay path or require Electron for link activation.
+
+```json
+{ "type": "hud:open-url", "payload": { "url": "https://discord.com/channels/123/456" } }
+```
 
 ### `event:attendance-state` (C→S request)
 

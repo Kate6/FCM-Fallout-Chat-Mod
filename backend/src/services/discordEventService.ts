@@ -31,6 +31,7 @@ import {
   type PublicEventStatus,
 } from './discordEventProjection';
 import { UUID_EVENTS } from './relay/channelMap';
+import { discordEventReference } from '../utils/discordReferences';
 
 const EVENT_BOT_INSTALL_TOKEN = 'discord:event-bot';
 const EVENT_BOT_USERNAME = 'pending-discord-event-bot';
@@ -80,6 +81,47 @@ interface EventProjectionMetadata {
   interestedCount: number;
   /** Deliberately omitted from shared metadata; viewer state is private. */
   isViewerInterested?: never;
+}
+
+/** Resolve a shared Discord event URL to the same metadata used by the canonical
+ * event projection, so ordinary chat shares render the existing event card. */
+export async function projectionForSharedEvent(content: string): Promise<EventProjectionMetadata | null> {
+  const reference = discordEventReference(content);
+  if (!reference) return null;
+
+  const mirror = await prisma.discordEventMirror.findUnique({
+    where: {
+      guildId_scheduledEventId: {
+        guildId: reference.guildId,
+        scheduledEventId: reference.scheduledEventId,
+      },
+    },
+  });
+  if (!mirror) return null;
+
+  if (mirror.fcmMessageId) {
+    const stored = await readStoredProjection(mirror.fcmMessageId);
+    if (stored?.metadata && typeof stored.metadata === 'object'
+      && (stored.metadata as Record<string, unknown>).type === 'scheduled_event') {
+      return stored.metadata as EventProjectionMetadata;
+    }
+  }
+
+  return {
+    type: 'scheduled_event',
+    kind: 'scheduled_event',
+    eventCode: mirror.eventCode,
+    scheduledEventId: mirror.scheduledEventId,
+    name: mirror.sourceName ?? `Event ${mirror.eventCode}`,
+    status: mapDiscordEventLifecycle(mirror.sourceStatus as DiscordEventSourceState).status,
+    startUtc: mirror.sourceStartUtc?.toISOString() ?? null,
+    endUtc: mirror.sourceEndUtc?.toISOString() ?? null,
+    location: mirror.sourceLocation,
+    descriptionSummary: mirror.sourceDescriptionSummary ?? '',
+    announcementUrl: mirror.announcementUrl,
+    discordEventUrl: mirror.sourceDiscordEventUrl,
+    interestedCount: Math.max(0, mirror.finalInterestedCount ?? 0),
+  };
 }
 
 interface StoredProjectionRow {
@@ -1034,4 +1076,4 @@ export function _resetForTests(): void {
 
 export { stableEventCode };
 
-module.exports = { register, _resetForTests, stableEventCode };
+module.exports = { register, _resetForTests, stableEventCode, projectionForSharedEvent };

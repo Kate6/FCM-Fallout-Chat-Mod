@@ -7,7 +7,9 @@ import { getGlobalOnlineCount } from './onlinePresenceService';
 import { getServerPlayersForUser } from './playerListService';
 import * as giveawayService from './giveawayService';
 import { GiveawayError } from './giveawayService';
-import { getMinervaStatus } from './minervaService';
+import { getMinervaInventory, getMinervaStatus } from './minervaService';
+import { bestMatch, getEntry } from './wikiCatalogService';
+import { validateSearchQuery } from '../lib/wikiValidation';
 
 export const MINERVA_SOURCE_NAME = 'Fallout Builds';
 export const MINERVA_SOURCE_URL = 'https://www.falloutbuilds.com/fo76/minerva';
@@ -117,8 +119,16 @@ function substituteTemplate(
 
 // ── /help Response Builder ────────────────────────────────────────────────────
 
-function buildHelpResponse(commands: ChatCommand[]): string {
+export function buildHelpResponse(commands: ChatCommand[], options: { includeParty?: boolean; discordUsage?: boolean } = {}): string {
   const lines: string[] = ['◈ VAULT-TEC COMMAND REFERENCE'];
+
+  if (options.discordUsage) {
+    lines.push('', '— DISCORD ARGUMENTS —');
+    lines.push('/wiki query:<item> · /camp item:<item>');
+    lines.push('/report bug description:<details> · /report player user:<player> description:<details>');
+    lines.push('/giveaway command:<list | join <id> | start <item>> · /events command:</ss>');
+    lines.push('/fcm command:"/g <message>" — run another overlay command');
+  }
 
   // PUBLIC channels — these also relay to Discord. Never describe one as a party
   // command; the private party shortcuts are listed separately below.
@@ -129,11 +139,13 @@ function buildHelpResponse(commands: ChatCommand[]): string {
   lines.push('/r (/raid) <message> — Send to Raids');
   lines.push('/i <message> — Send to Infests');
 
-  lines.push('', '— PARTY (private — only your party sees these) —');
-  lines.push('/recent (/rp) <message> — Send to your most recent party');
-  lines.push('/p1 <message> — Send to your 1st joined party (Party-tab order, left to right)');
-  lines.push('/p2 <message> — Send to your 2nd joined party');
-  lines.push('/p3 <message> — Send to your 3rd joined party');
+  if (options.includeParty !== false) {
+    lines.push('', '— PARTY (private — only your party sees these) —');
+    lines.push('/recent (/rp) <message> — Send to your most recent party');
+    lines.push('/p1 <message> — Send to your 1st joined party (Party-tab order, left to right)');
+    lines.push('/p2 <message> — Send to your 2nd joined party');
+    lines.push('/p3 <message> — Send to your 3rd joined party');
+  }
 
   lines.push('', '— MODERATION —');
   lines.push('/report bug <description> — Report a bug to the team');
@@ -147,6 +159,7 @@ function buildHelpResponse(commands: ChatCommand[]): string {
   lines.push('/minerva — Show Minerva\'s current or next Big Sale (location, list number, dates)');
   lines.push('/wiki <name> — Look up a Fallout 76 item, weapon, creature, perk, or location');
   lines.push('/camp <item name> — Look up a CAMP item (budget cost, required plan, category)');
+  lines.push('/keybinds — Show default overlay and HUD-mod keybinds');
 
   lines.push('', '— GIVEAWAYS —');
   lines.push('/giveaway start <item> [<minutes>] - Start a giveaway (1-60 min, default 5)');
@@ -266,10 +279,11 @@ async function buildOnlineResponse(
 
 // ── /minerva Response Builder ─────────────────────────────────────────────────
 
-export function buildMinervaResponse(): { text: string; metadata: Record<string, unknown> } {
+export async function buildMinervaResponse(): Promise<{ text: string; metadata: Record<string, unknown> }> {
   const { active, next } = getMinervaStatus();
   const fmt = (d: Date) => d.toUTCString().replace(':00 GMT', ' UTC').replace(/:\d\d UTC/, ' UTC');
   const sale = active ?? next;
+  const inventory = await getMinervaInventory(sale.listNumber);
   const superTag = sale.isSuperSale ? ' ★ SUPER SALE' : '';
   const lines = [
     `◈ MINERVA'S BIG SALE${superTag}`,
@@ -277,6 +291,7 @@ export function buildMinervaResponse(): { text: string; metadata: Record<string,
     `LOCATION — ${sale.location}`,
     `LIST     — #${sale.listNumber}`,
     `${active ? 'ENDS' : 'STARTS'}    — ${fmt(active ? sale.endUtc : sale.startUtc)}`,
+    ...(inventory.length ? ['', 'FOR SALE', ...inventory.slice(0, 10).map((item) => `• ${item}`)] : []),
     '',
     `More info at ${MINERVA_SOURCE_URL.replace(/^https?:\/\/(www\.)?/, '')}`,
   ];
@@ -296,8 +311,56 @@ export function buildMinervaResponse(): { text: string; metadata: Record<string,
       nextStartUtc: active ? next.startUtc.toISOString() : null,
       sourceName: MINERVA_SOURCE_NAME,
       sourceUrl: MINERVA_SOURCE_URL,
+      inventory,
     },
   };
+}
+
+// ── /wiki Response Builder ────────────────────────────────────────────────────
+
+/**
+ * Resolve the same catalog entry used by the overlay WikiPanel.  The dashboard
+ * intercepts `/wiki` to open that panel locally; Discord commands need a server
+ * response, so they use this builder and retain the complete card payload.
+ */
+async function buildWikiResponse(query: string): Promise<{ text: string; metadata: Record<string, unknown> | null }> {
+  let term: string;
+  try {
+    term = validateSearchQuery(query);
+  } catch {
+    return { text: 'Usage: /wiki <name> — enter 1–100 characters.', metadata: null };
+  }
+
+  try {
+    let entry;
+    try {
+      entry = await getEntry(term);
+    } catch {
+      const match = await bestMatch(term);
+      if (!match) {
+        return { text: `No wiki entry found for "${term}".`, metadata: null };
+      }
+      entry = await getEntry(match.name);
+    }
+    return {
+      text: `◈ FALLOUT WIKI — ${entry.name}`,
+      metadata: {
+        type: 'wiki_share',
+        wikiEntryId: entry.id,
+        name: entry.name,
+        kind: entry.kind,
+        wikiTitle: entry.wikiTitle,
+        articleUrl: entry.articleUrl,
+        imageUrl: entry.images?.find((image) => image.isMap)?.url ?? entry.imageUrl,
+        imageIsMap: entry.images?.some((image) => image.isMap) === true,
+        locations: entry.locations,
+        fields: entry.fields,
+        attribution: entry.attribution,
+      },
+    };
+  } catch {
+    return { text: 'Wiki lookup is unavailable right now. Try again in a moment.', metadata: null };
+  }
 }
 
 // ── /giveaway Sub-Command Handler ────────────────────────────────────────────
@@ -672,12 +735,33 @@ export async function tryHandleCommand(
 
   // Built-in /minerva — current or next Minerva Big Sale location and dates
   if (trigger === '/minerva') {
-    const r = buildMinervaResponse();
+    const r = await buildMinervaResponse();
     return {
       handled: true,
       actionType: 'private',
       botMessage: r.text,
       metadata: r.metadata,
+      targetChannelId: channelId,
+    };
+  }
+
+  // Built-in /wiki — the overlay opens its WikiPanel locally, while Discord
+  // receives this same structured catalog payload as a public embed.
+  if (trigger === '/wiki') {
+    if (!args) {
+      return {
+        handled: true,
+        actionType: 'private',
+        botMessage: 'Usage: /wiki <name> — Look up a Fallout 76 item, weapon, creature, perk, or location.',
+        targetChannelId: channelId,
+      };
+    }
+    const response = await buildWikiResponse(args);
+    return {
+      handled: true,
+      actionType: 'private',
+      botMessage: response.text,
+      metadata: response.metadata,
       targetChannelId: channelId,
     };
   }

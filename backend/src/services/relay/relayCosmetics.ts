@@ -12,6 +12,7 @@ export interface RelayHudCosmetics {
   supporterStar?: true;
   starColor?: string;
   nameColor?: string;
+  linkUrl?: string;
 }
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
@@ -24,6 +25,18 @@ export function relayHudCosmetics(source: Record<string, unknown>): RelayHudCosm
   if (typeof source.tag === 'string' && source.tag.trim()) {
     result.tag = source.tag;
   }
+  const metadata = source.metadata && typeof source.metadata === 'object'
+    ? source.metadata as Record<string, unknown> : null;
+  const entities = Array.isArray(metadata?.entities) ? metadata.entities : [];
+  const linkedEntity = entities.find((value: unknown) => {
+    if (!value || typeof value !== 'object') return false;
+    const entity = value as Record<string, unknown>;
+    return entity.type === 'channel' && typeof entity.url === 'string';
+  }) as Record<string, unknown> | undefined;
+  const metadataEventUrl = metadata?.type === 'scheduled_event' ? metadata.discordEventUrl : undefined;
+  const linkUrl = typeof linkedEntity?.url === 'string' ? linkedEntity.url : metadataEventUrl;
+  if (typeof linkUrl === 'string' && /^https?:\/\//i.test(linkUrl)
+      && linkUrl.length <= 1_024) result.linkUrl = linkUrl;
 
   const badges = Array.isArray(source.badges) ? source.badges : [];
   const hasSupporterTier = badges.includes('supporter') || badges.includes('overseer');
@@ -73,6 +86,9 @@ export function relayHudCosmeticTransport(
   }
   if (typeof cosmetics.tag === 'string' && cosmetics.tag.trim()) {
     fields.push(`t=${encodeURIComponent(cosmetics.tag)}`);
+  }
+  if (cosmetics.linkUrl && /^https?:\/\//i.test(cosmetics.linkUrl) && cosmetics.linkUrl.length <= 1_024) {
+    fields.push(`u=${encodeURIComponent(cosmetics.linkUrl)}`);
   }
   return fields.length > 0
     ? `${HUD_COSMETICS_TRANSPORT_PREFIX}${fields.join(';')}`

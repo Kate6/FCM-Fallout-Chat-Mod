@@ -101,7 +101,7 @@ class TestFcmHistory {
             history.observe("system");
             check("server/link events cannot hide missing static history", history.needsRecovery(true));
             history.observe("global");
-            check("normal subscribe snapshot suppresses recovery", !history.needsRecovery(true));
+            check("partial subscribe snapshot still needs terminal completion", history.needsRecovery(true));
             history.dropped = true;
             check("queue loss requires recovery even after a partial snapshot", history.needsRecovery(true));
             history.attempted(0);
@@ -114,6 +114,8 @@ class TestFcmHistory {
             check("retry interval enforced", !history.needsRecovery(true, 19999));
             history.attempted(20000);
             check("failed recovery bounded to three attempts", !history.needsRecovery(true, 30000));
+            history.authenticationChanged();
+            check("link completion re-arms rejected pre-auth recovery", history.needsRecovery(true, 30000));
             history.finish();
             check("completion stops recovery including empty history", !history.needsRecovery(true, 40000));
 

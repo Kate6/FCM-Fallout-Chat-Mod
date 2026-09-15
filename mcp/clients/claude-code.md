@@ -1,6 +1,16 @@
 # FCM MCP — Claude Code
 
-Add to your project `.mcp.json`:
+For production, add the hosted server and complete OAuth when Claude prompts:
+
+```json
+{
+  "mcpServers": {
+    "fcm": { "type": "http", "url": "https://falloutchatmod.com/mcp" }
+  }
+}
+```
+
+The local development compatibility server still uses `.mcp.json`:
 
 ```json
 {
@@ -17,4 +27,4 @@ Add to your project `.mcp.json`:
 }
 ```
 
-Mint a token at https://dev.falloutchatmod.com → Profile → API Tokens.
+Mint only a development token at https://dev.falloutchatmod.com → Profile → API Tokens.

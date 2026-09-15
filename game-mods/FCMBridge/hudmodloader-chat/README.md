@@ -3,7 +3,24 @@
 FCMChatWidget is the optional HUDModLoader chat widget for Fallout 76. It uses ZFE or xScal's
 native chat bridge and FCM's `/relay`. It is independent of the desktop overlay.
 
-**Local candidate: 2.10.85 (2026-09-13).** The feed builds delayed row batches in a hidden
+**Local candidate: 2.10.93 (2026-09-14).** Up/Down selects a visible message row while chat owns
+the editor. The selected row has a configurable outline and translucent fill; users can change
+`Selected message` under F11 → Customize → Colors, or set `selectedRowColor` in `FCMChat.ini`.
+`activateLinkKey` (Enter by default) opens that row's
+first HTTP(S) link directly in the operating system browser through GFx; no desktop overlay or
+relay round trip is required. URLs are
+shown as a bounded `host/...` label while the full validated target is retained. Discord channel
+mentions and scheduled-event cards receive their native Discord URL through the existing HUD
+transport. Ordinary HTTP(S) links posted in message text use the same selection, abbreviation, and
+empty-Enter behavior, including rows that also contain emoji. The BA2 does not open a browser or
+perform networking itself.
+
+For stability, 2.10.92 does not issue automatic Server-room roster/leave controls through ZFE.
+Those calls are synchronous on Fallout's UI thread and a failed relay connection can stall the game
+for the native timeout. Ordinary ZFE chat and static-channel history remain enabled; automatic
+Server-room binding remains available through xScal while a non-blocking ZFE request API is pending.
+
+The feed builds delayed row batches in a hidden
 snapshot and swaps them into view only after positioning is complete, preventing the overlapping
 intermediate frame seen as a white flash. Windows 10 xScal measurements showed that the former
 32-row work slices still occupied 32-65 ms of a frame, so rebuilds now process six rows per timer
@@ -61,10 +78,14 @@ fallback is retained; the widget does not dispatch ControlMap lock events itself
 by renaming FCM's compatibility calls. See the [provider guide](../../../docs/overlay/zfe/modder-guide.md).
 
 The shipped key map is `openKey=INSERT`, `channelNextKey=NextPage`, `channelPrevKey=PrevPage`,
-`scrollUpKey=Up`, `scrollDownKey=Down`, `scrollBottomKey=` and `hideKey=DELETE`. Insert opens chat;
-Enter sends; Escape cancels. A missing host callback cannot leave Insert permanently latched.
-Page Up/Down switch channels while idle or editing. Up/Down scroll
-only while chat owns the visible editor. The blank newest value leaves Home/End as game controls.
+`scrollUpKey=Up`, `scrollDownKey=Down`, `scrollBottomKey=`, `activateLinkKey=ENTER`, and
+`hideKey=DELETE`. Insert opens chat; Enter sends a non-empty draft and, when it is the configured
+link key, opens a selected link from an empty draft. Escape cancels. A custom link key acts only
+while the OpenChat-owned editor is active and a link row is selected; it is inert during gameplay.
+A missing host callback cannot leave Insert permanently latched.
+Page Up/Down switch channels while idle or editing. Up/Down moves the highlighted row selection
+only while chat owns the visible editor and keeps it in view. The blank newest value leaves
+Home/End as game controls.
 Delete hides while idle, while `/hide` and the F11 menu also hide the feed. `KEYBINDS.txt` covers aliases,
 rebinding, physical polling, and ZFE config precedence.
 The default `hideKey=DELETE` hides only while input is idle. While either
@@ -99,6 +120,33 @@ See [CUSTOMIZATION.txt](CUSTOMIZATION.txt) for active/retired INI keys and saved
 ZFE stores F11 settings in vendor-scoped storage. xScal uses per-linked-device relay persistence
 only when the backend advertises the capability and supports the settings payload. Missing
 persistence leaves changes session-local. A code checkout does not establish backend deployment.
+
+## Browser HUD simulator
+
+`simulator/` provides the non-game M0 smoke runner. It renders the exact normalized production SWF
+with pinned, self-hosted Ruffle and verifies browser key delivery with Playwright:
+
+```bash
+cd simulator
+npm ci --ignore-scripts
+npx playwright install chromium
+npm test
+```
+
+Playwright owns the loopback Vite process and closes it after the run; the test also removes the
+Ruffle player in `afterEach`. Generated SWFs, copied runtime files, screenshots, video, and reports
+are ignored. The default mode is the production artifact. A second browser test replays a sanitized
+contract captured from the installed xScal 0.1.15 DLL (hash and supported runtime included), without
+loading or redistributing that DLL. `?mode=harness` is an experimental
+rendered contract-host spike based on the installed xScal behavior, not fork additions, and is not
+acceptance evidence because Ruffle 0.6.0
+currently does not expose the compiled AVM2 callbacks. See
+[the automation plan](../../../docs/testing/hud-automation-plan.md)
+for the fidelity boundary and real-game tier.
+
+To collect a sanitized contract trace from a game session you launched yourself, use
+[`native-capture/Capture-HudSession.ps1`](native-capture/README.md). The collector fingerprints the
+active artifacts and tails only fresh xScal/ZFE diagnostics; it never owns or stops Fallout.
 
 ## Files
 

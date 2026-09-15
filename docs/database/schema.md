@@ -370,7 +370,10 @@ Populated by the `wikiIngestionService` background cron (weekly + admin on-deman
 
 Migration: `backend/prisma/migrations/20260604010000_add_wiki_catalog/migration.sql`
 
-**Required extension:** `pg_trgm` — first DDL statement in the migration. Must be creatable by the migration user on the Dokploy Postgres image (verify once on first deploy).
+**Required extension:** `pg_trgm`. It is installed idempotently by the backend's
+post-`db push` prerequisite patch on every boot, so fresh and baseline-managed
+databases cannot skip it. The Postgres role still must be allowed to create the
+extension.
 
 ### `wiki_entries` (`WikiEntry`)
 
