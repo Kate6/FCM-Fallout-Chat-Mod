@@ -2095,7 +2095,7 @@ export function chatEntities(metadata: ChatMessageMetadata): ChatEntity[] {
 }
 
 export function splitParts(content: string, entities: readonly ChatEntity[] = []): Part[] {
-  type Span = { start: number; end: number; kind: 'mention' | 'url' | 'emoji' | 'channel'; url?: string; emojiName?: string; discordId?: string; priority?: number };
+  type Span = { start: number; end: number; kind: 'mention' | 'url' | 'emoji' | 'channel'; url?: string; fallbackUrl?: string; emojiName?: string; discordId?: string; priority?: number };
   const spans: Span[] = [];
   for (const entity of entities) {
     const token = `${entity.type === 'channel' ? '#' : '@'}${entity.label}`;
@@ -5241,7 +5241,7 @@ export default function ChatOverlay() {
                 return;
               }
               if (frame.type === 'hud:open-url') {
-                const hudUrl = hudOpenUrlFromFrame(frame, overlayShell);
+                const hudUrl = hudOpenUrlFromFrame(frame, Boolean(overlayShell));
                 if (hudUrl) openUrl(hudUrl);
                 return;
               }
@@ -7149,7 +7149,7 @@ export default function ChatOverlay() {
   // immediately without rebuilding this callback (and re-rendering the feed).
   const msgMentionsMe = useCallback((m: ChatMessage) =>
     m.userId !== myUserIdRef.current
-      && messageTriggersNotify(m.content, myNamesRef.current, notifyKeywordsRef.current, chatEntities(m.metadata), myDiscordIdRef.current),
+      && messageTriggersNotify(m.content, myNamesRef.current, notifyKeywordsRef.current, chatEntities(m.metadata ?? null), myDiscordIdRef.current),
   []);
   // Show the jump button only when there is at least one visible mention whose
   // message id has NOT yet been dismissed. dismissedMentionEpoch is bumped each
