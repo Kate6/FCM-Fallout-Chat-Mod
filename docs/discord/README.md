@@ -60,10 +60,13 @@ bot can send messages; the invoking channel does not need an FCM relay mapping.
 `/g`, `/t`, `/e`, `/r`, and `/i` still deliver to their named FCM channels.
 Normal lookup cards and `/help` are public in the invoking channel, while
 moderation actions, `/apply`, and `/report` remain private to the invoker.
-Public lookup cards never include an invocation mention. Their typed card metadata
-is also finalized into the mapped FCM channel (or General for an unmapped command
-channel) without sending a second Discord copy, so the overlay and HUD receive the
-same normalized card once.
+Public lookup and sale cards never include an invocation mention. They remain
+Discord-only when invoked in an unmapped Discord channel (including the
+bot-commands channel), so they never fall back into FCM General. When invoked
+in a linked Discord↔FCM channel, the public Discord embed is also finalized as
+the matching overlay/HUD card in that paired FCM channel. Overlay-originated
+commands retain their compact response text and source hyperlink (for example,
+Minerva's “More info at …” link).
 
 `/keybinds` posts the default Electron-overlay and optional HUD-mod controls as
 a public embed. Starting a giveaway posts the confirmation in the invoking
