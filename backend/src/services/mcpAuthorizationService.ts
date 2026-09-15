@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from 'crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'crypto';
 import env from '../config/environment';
 import { matchesRegisteredRedirectUri } from './mcpClientMetadataService';
 import prisma from '../config/prisma';
@@ -27,13 +27,17 @@ interface Options {
 export interface IssueCodeInput {
   clientId: string; discordId: string; redirectUri: string; resource: string;
   pkceChallenge: string; codeChallengeMethod: string; scopes: readonly string[]; ttlSeconds?: number;
+  consentIdempotencyKey?: string;
 }
 export interface ExchangeCodeInput { code: string; clientId: string; redirectUri: string; resource: string; codeVerifier: string; }
 export interface RefreshInput { refreshToken: string; clientId: string; resource: string; scopes?: readonly string[]; }
 
 const hash = (value: string): string => createHash('sha256').update(value).digest('hex');
 const opaque = (prefix: string): string => `${prefix}${randomBytes(32).toString('base64url')}`;
+const authorizationCodeForConsent = (consentIdempotencyKey: string): string =>
+  `fcm_code_${createHmac('sha256', env.MCP_OAUTH_STATE_SECRET).update(`authorization-code:${consentIdempotencyKey}`).digest('base64url')}`;
 const PKCE_VALUE = /^[A-Za-z0-9._~-]{43,128}$/;
+const CONSENT_VALUE = /^[A-Za-z0-9_-]{43}$/;
 const normalizeScopes = (scopes: readonly string[]): McpScope[] => [...new Set(scopes)].sort().map((scope) => {
   if (!(MCP_SCOPES as readonly string[]).includes(scope)) throw new McpOAuthError('invalid_scope', `Unsupported scope: ${scope}`);
   return scope as McpScope;
@@ -70,14 +74,34 @@ export class McpAuthorizationService {
     if (!client || client.disabledAt || !matchesRegisteredRedirectUri(client.redirectUris, input.redirectUri)) throw new McpOAuthError('invalid_client', 'Client or redirect URI is invalid');
     const role = await this.requireRole(input.discordId);
     const scopes = this.authorizeScopes(role, input.scopes);
-    const code = opaque('fcm_code_');
+    if (input.consentIdempotencyKey !== undefined && !CONSENT_VALUE.test(input.consentIdempotencyKey)) {
+      throw new McpOAuthError('invalid_grant', 'Consent idempotency key is invalid');
+    }
+    const code = input.consentIdempotencyKey
+      ? authorizationCodeForConsent(input.consentIdempotencyKey)
+      : opaque('fcm_code_');
     const expiresAt = new Date(this.now().getTime() + Math.min(600, Math.max(1, input.ttlSeconds ?? 300)) * 1000);
-    await this.db.mcpOAuthCode.create({ data: {
+    const data = {
       codeHash: hash(code), clientId: input.clientId, discordId: input.discordId,
       redirectUri: input.redirectUri, pkceChallenge: input.pkceChallenge, codeChallengeMethod: 'S256',
       resource: input.resource, scopes, expiresAt,
-    } });
-    return { code, expiresAt };
+    };
+    if (!input.consentIdempotencyKey) {
+      await this.db.mcpOAuthCode.create({ data });
+      return { code, expiresAt };
+    }
+    const stored = await this.db.mcpOAuthCode.upsert({
+      where: { codeHash: data.codeHash },
+      create: data,
+      update: {},
+      select: { clientId: true, discordId: true, redirectUri: true, pkceChallenge: true, codeChallengeMethod: true, resource: true, scopes: true, expiresAt: true },
+    });
+    const sameBinding = stored.clientId === data.clientId && stored.discordId === data.discordId
+      && stored.redirectUri === data.redirectUri && stored.pkceChallenge === data.pkceChallenge
+      && stored.codeChallengeMethod === data.codeChallengeMethod && stored.resource === data.resource
+      && stored.scopes.length === data.scopes.length && stored.scopes.every((scope, index) => scope === data.scopes[index]);
+    if (!sameBinding) throw new McpOAuthError('invalid_grant', 'Consent replay binding is invalid');
+    return { code, expiresAt: stored.expiresAt };
   }
 
   async exchangeAuthorizationCode(input: ExchangeCodeInput) {

@@ -1,5 +1,12 @@
 const state = new Map();
-const redis = { set: jest.fn(async (key, value) => { state.set(key, value); }), getDel: jest.fn(async key => { const value = state.get(key); state.delete(key); return value ?? null; }) };
+const redis = {
+  set: jest.fn(async (key, value, options = {}) => {
+    if (options.NX && state.has(key)) return null;
+    state.set(key, value); return 'OK';
+  }),
+  get: jest.fn(async key => state.get(key) ?? null),
+  getDel: jest.fn(async key => { const value = state.get(key); state.delete(key); return value ?? null; }),
+};
 const authz = { issueAuthorizationCode: jest.fn(async () => ({ code: 'issued-code' })), exchangeAuthorizationCode: jest.fn(async () => ({ accessToken: 'at', refreshToken: 'rt', tokenType: 'Bearer', expiresIn: 600, scopes: ['fcm:read'] })), refresh: jest.fn(), revokeToken: jest.fn(async () => {}) };
 const mockRoleAuth = jest.fn(async () => ({ authorized: true, role: 'admin' }));
 const clients = { redirectUris: ['https://claude.ai/api/mcp/auth_callback'], metadata: { client_name: 'Claude' }, disabledAt: null };
@@ -98,7 +105,45 @@ describe('MCP OAuth HTTP routes', () => {
     const consent = await agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' });
     const redirect = new URL(consent.headers.location); expect(redirect.origin + redirect.pathname).toBe(clients.redirectUris[0]); expect(redirect.searchParams.get('state')).toBe('client-state'); expect(redirect.searchParams.get('code')).toBe('issued-code');
     const repeatedConsent = await agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' });
-    expect(repeatedConsent.status).toBe(400); expect(repeatedConsent.body).toEqual({ error: 'invalid_request', error_description: 'Consent is invalid, expired, or already used' });
+    expect(repeatedConsent.status).toBe(302); expect(new URL(repeatedConsent.headers.location).searchParams.get('code')).toBe('issued-code');
+  });
+
+  test('concurrent duplicate approvals return the same callback instead of racing', async () => {
+    const agent = request.agent(app());
+    const response = await agent.get('/oauth/authorize').query({ client_id: 'registered', redirect_uri: clients.redirectUris[0], resource: env.MCP_RESOURCE_URL, response_type: 'code', code_challenge_method: 'S256', code_challenge: 'a'.repeat(43), scope: 'fcm:read', state: 'client-state' });
+    const oauthState = new URL(response.headers.location).searchParams.get('state');
+    global.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: 'discord-token' }) }).mockResolvedValueOnce({ ok: true, json: async () => ({ id: '123456789012345678' }) });
+    const callback = await agent.get('/oauth/discord/callback').query({ code: 'discord-code', state: oauthState });
+    const consentToken = callback.text.match(/name="consent_token" value="([^"]+)"/)[1];
+    authz.issueAuthorizationCode.mockImplementationOnce(async () => {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      return { code: 'issued-code' };
+    });
+
+    const [first, second] = await Promise.all([
+      agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' }),
+      agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' }),
+    ]);
+
+    expect(first.status).toBe(302); expect(second.status).toBe(302);
+    expect(new URL(first.headers.location).searchParams.get('code')).toBe('issued-code');
+    expect(new URL(second.headers.location).searchParams.get('code')).toBe('issued-code');
+  });
+
+  test('a consent decision cannot be changed after it is bound', async () => {
+    const agent = request.agent(app());
+    const response = await agent.get('/oauth/authorize').query({ client_id: 'registered', redirect_uri: clients.redirectUris[0], resource: env.MCP_RESOURCE_URL, response_type: 'code', code_challenge_method: 'S256', code_challenge: 'a'.repeat(43), scope: 'fcm:read' });
+    const oauthState = new URL(response.headers.location).searchParams.get('state');
+    global.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: 'discord-token' }) }).mockResolvedValueOnce({ ok: true, json: async () => ({ id: '123456789012345678' }) });
+    const callback = await agent.get('/oauth/discord/callback').query({ code: 'discord-code', state: oauthState });
+    const consentToken = callback.text.match(/name="consent_token" value="([^"]+)"/)[1];
+
+    expect((await agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' })).status).toBe(302);
+    const conflict = await agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'deny' });
+    expect(conflict.status).toBe(302);
+    const conflictRedirect = new URL(conflict.headers.location);
+    expect(conflictRedirect.searchParams.get('error')).toBe('invalid_request');
+    expect(conflictRedirect.searchParams.get('error_description')).toBe('Consent decision is already final');
   });
 
   test('does not redirect an unvalidated redirect and redirects post-validation errors', async () => {

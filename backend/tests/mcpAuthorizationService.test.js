@@ -28,6 +28,18 @@ describe('mcpAuthorizationService', () => {
       resource: 'https://falloutchatmod.com/mcp', pkceChallenge: '', codeChallengeMethod: 'plain', scopes: ['fcm:read'] })).rejects.toMatchObject({ code: 'invalid_grant' });
   });
 
+  it('returns one deterministically bound code for repeated consent approval', async () => {
+    prisma.mcpOAuthCode.upsert.mockImplementation(async ({ create }) => ({ ...create }));
+    const input = { clientId: client.clientId, discordId: '42', redirectUri: client.redirectUris[0],
+      resource: 'https://falloutchatmod.com/mcp', pkceChallenge: pkceS256(verifier), codeChallengeMethod: 'S256',
+      scopes: ['fcm:read'], consentIdempotencyKey: 'a'.repeat(43) };
+    const first = await service().issueAuthorizationCode(input);
+    const second = await service().issueAuthorizationCode(input);
+    expect(second.code).toBe(first.code);
+    expect(prisma.mcpOAuthCode.upsert).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(prisma.mcpOAuthCode.upsert.mock.calls)).not.toContain(first.code);
+  });
+
   it.each(['replayed', 'expired', 'wrong PKCE', 'wrong audience', 'cross-client'])(
     'rejects a %s authorization code atomically', async () => {
       prisma.mcpOAuthCode.findUnique.mockResolvedValue({ clientId: 'client-a', discordId: '42',

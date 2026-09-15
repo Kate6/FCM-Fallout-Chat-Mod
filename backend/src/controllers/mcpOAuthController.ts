@@ -135,19 +135,19 @@ export async function consent(req: Request, res: Response) {
   try {
     const consentToken = scalar(req.body.consent_token);
     if (!consentToken) throw new Error('Consent token is required');
-    const redis = await getRedisClient(); const raw = await redis.getDel(`mcp_oauth_consent:${consentToken}`);
-    // A consent token is intentionally single-use. Treat a repeat POST (for
-    // example, a double-click on the approval button) as a client error rather
-    // than an infrastructure outage. The first request may already have
-    // issued a code, so reporting a 500 here misleadingly suggests that the
-    // authorization service failed.
-    if (!raw) throw new McpOAuthError('invalid_grant', 'Consent is invalid, expired, or already used');
+    const redis = await getRedisClient(); const raw = await redis.get(`mcp_oauth_consent:${consentToken}`);
+    if (!raw) throw new McpOAuthError('invalid_grant', 'Consent is invalid or expired');
     pending = unseal<Pending & { discordId: string }>(raw);
     if (pending.sessionId !== req.sessionID) throw new Error('Consent is not bound to this browser session');
+    const decision = scalar(req.body.decision);
+    if (decision !== 'approve' && decision !== 'deny') throw new McpOAuthError('invalid_grant', 'Consent decision is invalid');
+    const decisionKey = `mcp_oauth_consent_decision:${consentToken}`;
+    const claimed = await redis.set(decisionKey, decision, { EX: STATE_TTL, NX: true });
+    if (!claimed && await redis.get(decisionKey) !== decision) throw new McpOAuthError('invalid_grant', 'Consent decision is already final');
     const target = new URL(pending.redirectUri);
-    if (req.body.decision !== 'approve') { target.searchParams.set('error', 'access_denied'); recordMcpMetric('oauth', { outcome: 'failure' }); }
+    if (decision !== 'approve') { target.searchParams.set('error', 'access_denied'); recordMcpMetric('oauth', { outcome: 'failure' }); }
     else {
-      const grant = await mcpAuthorizationService.issueAuthorizationCode({ clientId: pending.clientId, discordId: pending.discordId, redirectUri: pending.redirectUri, resource: pending.resource, pkceChallenge: pending.pkceChallenge, codeChallengeMethod: 'S256', scopes: pending.scopes });
+      const grant = await mcpAuthorizationService.issueAuthorizationCode({ clientId: pending.clientId, discordId: pending.discordId, redirectUri: pending.redirectUri, resource: pending.resource, pkceChallenge: pending.pkceChallenge, codeChallengeMethod: 'S256', scopes: pending.scopes, consentIdempotencyKey: consentToken });
       target.searchParams.set('code', grant.code);
       recordMcpMetric('oauth', { outcome: 'success' });
     }
