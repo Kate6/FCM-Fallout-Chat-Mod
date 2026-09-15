@@ -30,11 +30,14 @@ import { normalizeDiscordReferences, type DiscordMessageEntity } from '../utils/
 import { outboundAllowedMentions, roleMentionAliases } from '../utils/discordMentions';
 import { normalizeDiscordRelayCard, type DiscordRelayEmbed } from './discordRelayCard';
 import { buildDiscordOverlayCard } from './discordOverlayCommandEmbeds';
+import { stabilizePresenceCount } from '../utils/discordPresence';
 
 let discordClient: Client | null = null;
 let broadcastFn: ((payload: any, excludeWs?: any) => void) | null = null; // Injected from WS handler to avoid circular deps
 let broadcastUsersFn: ((payload: any, userIds: string[]) => Promise<number>) | null = null;
 let discordStatus = 'disconnected';
+let lastNonZeroPresenceCount = 0;
+let lastNonZeroPresenceAt = 0;
 
 // ZWS watermark -- inserted into all outbound relay messages (game->Discord)
 // so inbound handler can detect and reject echo loops (defense-in-depth)
@@ -446,9 +449,18 @@ function getOnlineUserCount(): number {
   }
 }
 
+function stablePresenceCount(rawCount: number, now = Date.now()): number {
+  if (rawCount > 0) {
+    lastNonZeroPresenceCount = rawCount;
+    lastNonZeroPresenceAt = now;
+    return rawCount;
+  }
+  return stabilizePresenceCount(rawCount, lastNonZeroPresenceCount, lastNonZeroPresenceAt, now);
+}
+
 function updatePresence(): void {
   if (!discordClient?.user) return;
-  const n = getOnlineUserCount();
+  const n = stablePresenceCount(getOnlineUserCount());
   const noun = n === 1 ? 'dweller' : 'dwellers';
   try {
     discordClient.user.setPresence({
