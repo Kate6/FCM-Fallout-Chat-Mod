@@ -33,7 +33,8 @@ const label: React.CSSProperties = {
 };
 
 const btn: React.CSSProperties = {
-  padding: '7px 14px', borderRadius: '4px', cursor: 'pointer',
+  minHeight: '34px', padding: '7px 14px', borderRadius: '4px', cursor: 'pointer',
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
   border: '1px solid var(--phosphor-color)', background: 'rgba(212,176,64,0.08)',
   color: 'var(--phosphor-color)', fontFamily: 'var(--font-mono)', fontSize: '13px',
 };
@@ -212,8 +213,8 @@ export default function CosmeticsPanel({ userId, previewName }: { userId: string
           onPick={id => save.mutate({ starColorPresetId: id })} shopUrl={status?.shopUrl ?? null} />
         <button type="button" disabled={save.isPending}
           onClick={() => save.mutate({ starColorPresetId: null })}
-          style={{ ...btn, marginTop: '10px', fontSize: '12px' }}>
-          Use tier default
+          style={{ ...btn, marginTop: '12px', fontSize: '12px' }}>
+          Reset to default
         </button>
       </div>
 
@@ -226,6 +227,11 @@ export default function CosmeticsPanel({ userId, previewName }: { userId: string
         <div style={{ ...label, marginTop: '14px' }}>Supporter colours</div>
         <Swatches presets={paidColors} current={cosmetics?.stored?.colorPresetId ?? null} tier={tier}
           onPick={id => save.mutate({ colorPresetId: id })} shopUrl={status?.shopUrl ?? null} />
+        <button type="button" disabled={save.isPending}
+          onClick={() => save.mutate({ colorPresetId: null, customColorHex: null })}
+          style={{ ...btn, marginTop: '12px', fontSize: '12px' }}>
+          Reset to default
+        </button>
       </div>
 
       {/* ── Effects ────────────────────────────────────────────────────── */}

@@ -481,6 +481,7 @@ function setCollapsed(next: boolean, focusInput = false) {
     if (fullAutoHide) {
       collapsedHidden = [];
       root?.classList.add('fcm-full-auto-hidden');
+      document.documentElement.classList.add('fcm-full-auto-hidden');
     } else {
       applyCollapsedHidden();
     }
@@ -510,6 +511,7 @@ function setCollapsed(next: boolean, focusInput = false) {
     setTimeout(() => {
       if (collapsed) return;
       if (wasFullAutoHide) root?.classList.remove('fcm-full-auto-hidden');
+      if (wasFullAutoHide) document.documentElement.classList.remove('fcm-full-auto-hidden');
       revealCollapsedElements(root, hiddenEls);
       // Jump the feed to the latest message so the user sees the most recent
       // chat after expanding. Defer a frame so the body has laid out first.
@@ -550,8 +552,10 @@ function reassertCollapsed() {
   if (fullAutoHide) {
     collapsedHidden = [];
     root?.classList.add('fcm-full-auto-hidden');
+    document.documentElement.classList.add('fcm-full-auto-hidden');
   } else {
     root?.classList.remove('fcm-full-auto-hidden');
+    document.documentElement.classList.remove('fcm-full-auto-hidden');
     applyCollapsedHidden();
   }
   // Reset any scroll the React overlay applied so the input can't be revealed.
@@ -2195,6 +2199,7 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
     if (msgActivityTimeout) { clearTimeout(msgActivityTimeout); msgActivityTimeout = null; }
     const root = document.getElementById('root');
     root?.classList.remove('fcm-full-auto-hidden');
+    document.documentElement.classList.remove('fcm-full-auto-hidden');
     if (collapsed) {
       collapsed = false;
       // #327: fully reveal — not just the root 'collapsed' class. Previously this
@@ -2219,7 +2224,11 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
     // #fcm-picker-portal and .ss-ac are portaled to <body> (outside #root) and
     // must also count as interactive UI.
     const modalOpen = !!document.querySelector('#shell-settings-backdrop.open, #shell-onboarding-backdrop.open');
-    const overUi = modalOpen
+    // The one-pixel full-hide strip is deliberately transparent, but it is a
+    // wake target. Treat forwarded hover there as interactive so auto
+    // click-through releases mouse-ignore and markActivity can expand it.
+    const fullAutoHidden = document.documentElement.classList.contains('fcm-full-auto-hidden');
+    const overUi = fullAutoHidden || modalOpen
       || !!(e.target as HTMLElement)?.closest('#shell-overlay-host, #shell-bar, #shell-settings-backdrop, #shell-onboarding-backdrop, #fcm-picker-portal, .ss-ac');
     if (overUi !== lastInteractive) {
       lastInteractive = overUi;

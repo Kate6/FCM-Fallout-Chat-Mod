@@ -96,6 +96,33 @@ function problemResponse(detail: string, status: number): Response {
 }
 
 describe('supporter appearance save lifecycle', () => {
+  it('renders a reset action below each colour picker and clears the name selection', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(payload()))
+      .mockResolvedValueOnce(jsonResponse({
+        ...payload(),
+        cosmetics: {
+          ...payload().cosmetics,
+          nameColor: null,
+          stored: { ...payload().cosmetics.stored!, colorPresetId: null, customColorHex: null },
+        },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const root = mountSupporterAppearance(parent);
+    await vi.waitFor(() => expect(root.querySelectorAll('.ss-cosmetics-reset')).toHaveLength(2));
+
+    const resets = root.querySelectorAll<HTMLButtonElement>('.ss-cosmetics-reset');
+    expect([...resets].map(button => button.textContent)).toEqual(['RESET TO DEFAULT', 'RESET TO DEFAULT']);
+    resets[0].click();
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const request = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toEqual({ colorPresetId: null, customColorHex: null });
+  });
+
   it('retries transient saves and stops retrying permanent errors', async () => {
     const sleep = vi.fn(async () => undefined);
     let attempts = 0;

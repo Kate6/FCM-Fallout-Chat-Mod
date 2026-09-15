@@ -433,6 +433,11 @@ export function mountSupporterAppearance(parent: HTMLElement): HTMLElement {
 
     colourGroup('COLOUR — everywhere, including the in-game HUD', data.catalog.colors.filter(c => c.tier === 'none'));
     colourGroup('SUPPORTER COLOURS', data.catalog.colors.filter(c => c.tier !== 'none'));
+    const resetNameColour = node('button', 'ss-fbtn ss-cosmetics-reset', 'RESET TO DEFAULT') as HTMLButtonElement;
+    resetNameColour.type = 'button';
+    resetNameColour.dataset.cosmeticsInteractive = 'true';
+    resetNameColour.addEventListener('click', () => void mutate({ colorPresetId: null, customColorHex: null }));
+    root.append(resetNameColour);
 
     root.append(node('div', 'ss-cosmetics-label', 'SUPPORTER STAR COLOUR'));
     root.append(node('div', 'ss-note', 'The supporter marker is always a star. Its colour is independent from your name colour.'));
@@ -459,7 +464,7 @@ export function mountSupporterAppearance(parent: HTMLElement): HTMLElement {
     };
     starColourGroup('FREE STAR COLOURS', data.catalog.colors.filter(c => c.tier === 'none'));
     starColourGroup('SUPPORTER STAR COLOURS', data.catalog.colors.filter(c => c.tier !== 'none'));
-    const resetStar = node('button', 'ss-fbtn', 'USE TIER DEFAULT') as HTMLButtonElement;
+    const resetStar = node('button', 'ss-fbtn ss-cosmetics-reset', 'RESET TO DEFAULT') as HTMLButtonElement;
     resetStar.type = 'button';
     resetStar.disabled = tier === 'none';
     if (!resetStar.disabled) resetStar.dataset.cosmeticsInteractive = 'true';

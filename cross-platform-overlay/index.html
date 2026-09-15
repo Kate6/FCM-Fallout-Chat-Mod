@@ -133,8 +133,12 @@
          without using display:none, which would disturb the expand measurement. */
       #root.fcm-full-auto-hidden {
         visibility: hidden !important;
-        pointer-events: none !important;
       }
+      /* Visual-effect layers are siblings of #root, so hiding only #root left a
+         dim rectangle behind. Keep the one-pixel document hit target alive so
+         mouse movement over it can wake the overlay. */
+      html.fcm-full-auto-hidden #shell-bg-dim,
+      html.fcm-full-auto-hidden #shell-scanline { visibility: hidden !important; }
 
       /* Prototype-managed visual layers the web component doesn't expose as
          settings: an adjustable scanline overlay (above the settings modal so it
@@ -372,6 +376,7 @@
       #shell-settings .ss-cosmetics-support { display: inline-block; margin-top: 12px; font-size: 10px; color: var(--shell-primary, #C8A840); letter-spacing: 0.07em; }
       #shell-settings .ss-cosmetics-status { min-height: 16px; margin-top: 8px; color: #8CDB57; font-size: 10px; line-height: 1.4; }
       #shell-settings .ss-cosmetics-status.error { color: #FF9B7A; }
+      #shell-settings .ss-cosmetics-reset { margin-top: 12px; }
       #shell-settings .ss-cosmetics[data-saving="true"] { cursor: progress; }
       #shell-settings .ss-cosmetics[data-saving="true"] [data-cosmetics-interactive="true"] { opacity: 0.55; cursor: progress; }
       /* Footer */
@@ -382,8 +387,9 @@
       }
       #shell-settings .ss-fspacer { flex: 1; }
       #shell-settings .ss-fbtn {
-        padding: 3px 12px; cursor: pointer; line-height: 1.2; align-self: center;
-        min-height: 0; height: auto;
+        padding: 6px 12px; cursor: pointer; line-height: 1.2; align-self: center;
+        min-height: 32px; height: 32px; box-sizing: border-box;
+        display: inline-flex; align-items: center; justify-content: center;
         background: rgba(20,32,20,0.9); border: 1px solid color-mix(in srgb, var(--shell-primary, #C8A840) 35%, transparent);
         color: var(--shell-text, #E8DFC0); font-family: "Courier New", monospace; font-size: 11px; letter-spacing: 0.06em;
       }

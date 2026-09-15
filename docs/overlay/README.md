@@ -97,11 +97,16 @@ Discord role is active. The supporter marker is always a `★`, with its colour 
 independently from the username colour. Colour and tag render in the in-game HUD; visual
 effects are labelled desktop-only because the HUD implements solid colors and tags, not those
 animated effects. This is an FCM feature boundary, not a universal Scaleform limitation.
+The name- and star-colour pickers each provide a consistently sized **Reset to default**
+button beneath their swatches; the same controls are available on the website profile.
 Selecting a value updates the local preview immediately. The save then replaces that preview
 with the server-authoritative result; transient network/server failures retry a bounded number
 of times, while validation or entitlement errors roll the preview back and release the busy
 state with an actionable message. Discord role presentation is queued separately, so a slow
 Discord API cannot leave the settings panel waiting after the FCM appearance is saved.
+
+Full auto-hide also hides the renderer's dim and scanline layers. Its transparent one-pixel
+edge remains pointer-active so moving the mouse over it restores the overlay.
 
 ---
 
