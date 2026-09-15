@@ -136,7 +136,12 @@ export async function consent(req: Request, res: Response) {
     const consentToken = scalar(req.body.consent_token);
     if (!consentToken) throw new Error('Consent token is required');
     const redis = await getRedisClient(); const raw = await redis.getDel(`mcp_oauth_consent:${consentToken}`);
-    if (!raw) throw new Error('Consent is invalid, expired, or already used');
+    // A consent token is intentionally single-use. Treat a repeat POST (for
+    // example, a double-click on the approval button) as a client error rather
+    // than an infrastructure outage. The first request may already have
+    // issued a code, so reporting a 500 here misleadingly suggests that the
+    // authorization service failed.
+    if (!raw) throw new McpOAuthError('invalid_grant', 'Consent is invalid, expired, or already used');
     pending = unseal<Pending & { discordId: string }>(raw);
     if (pending.sessionId !== req.sessionID) throw new Error('Consent is not bound to this browser session');
     const target = new URL(pending.redirectUri);

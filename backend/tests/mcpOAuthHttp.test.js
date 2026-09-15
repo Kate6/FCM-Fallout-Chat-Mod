@@ -97,7 +97,8 @@ describe('MCP OAuth HTTP routes', () => {
     const consentToken = callback.text.match(/name="consent_token" value="([^"]+)"/)[1];
     const consent = await agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' });
     const redirect = new URL(consent.headers.location); expect(redirect.origin + redirect.pathname).toBe(clients.redirectUris[0]); expect(redirect.searchParams.get('state')).toBe('client-state'); expect(redirect.searchParams.get('code')).toBe('issued-code');
-    expect((await agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' })).status).toBe(500);
+    const repeatedConsent = await agent.post('/oauth/authorize/consent').type('form').send({ consent_token: consentToken, decision: 'approve' });
+    expect(repeatedConsent.status).toBe(400); expect(repeatedConsent.body).toEqual({ error: 'invalid_request', error_description: 'Consent is invalid, expired, or already used' });
   });
 
   test('does not redirect an unvalidated redirect and redirects post-validation errors', async () => {

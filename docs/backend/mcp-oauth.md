@@ -44,6 +44,8 @@ When remote MCP is enabled, issuer/resource URLs must be explicit HTTPS URLs and
 
 Token, revocation, and consent endpoints accept only `application/x-www-form-urlencoded` requests and enforce an 8 KiB raw-wire limit, including chunked or percent-encoded bodies. A Discord denial consumes and verifies the bound state before returning `access_denied` to the trusted client callback. Access tokens are opaque, audience-bound, short-lived, and stored only as hashes. Refresh tokens grant a connection for at most 72 hours (minimum configurable lifetime: 24 hours), rotate on every use, and retain the original grant expiry during rotation; reuse revokes the token family.
 
+Consent tokens are single-use. A duplicate approval submission is rejected as an OAuth `invalid_request` response; it is not treated as a server outage. The original approval may already have issued its one-time authorization code.
+
 ## Audit and operational monitoring
 
 Every MCP mutation creates a durable audit intent before any side effect and uses that row ID as its correlation ID. Final records include the bounded target, tool/action, client ID, actor Discord ID, grant, outcome (`success`, `failure`, or `partial`), and elapsed time. MCP responses expose `X-Correlation-ID`; a client-supplied value is accepted only when it is a valid UUID.
