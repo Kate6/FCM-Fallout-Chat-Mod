@@ -118,9 +118,9 @@ aliases, and a parallel build graph that drifts from the real build.
 
 **Backend runner caveat.** `npm test` (Jest) globs only compiled `tests/**/*.test.js`, so you must
 `npm run build` (tsc) **before** Jest or it finds nothing/stale. The newer TS unit suites under
-`backend/src/services/__tests__/*.test.ts` run via the hand-rolled `src/testRunner.ts`
-(`node:test` + tsx) and need a **separate** `npm run test:unit`. Until the backend is consolidated
-onto one runner, CI must run **both** or the wiki TS units go unexecuted. See
+`backend/src/services/__tests__/*.test.ts` run via the hand-rolled, process-isolated
+`src/testRunner.ts` (`node:test` + tsx) and need a **separate** `npm run test:unit`. Until the
+backend is consolidated onto one runner, CI must run **both** or the wiki TS units go unexecuted. See
 [ci-cd-pipeline.md](ci-cd-pipeline.md).
 
 **Don't clobber `test` in the dashboard.** `admin-dashboard`'s `test` script is already Playwright.

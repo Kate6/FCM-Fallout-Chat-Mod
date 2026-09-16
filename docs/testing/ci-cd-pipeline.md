@@ -34,8 +34,8 @@ Source of truth for the test-tooling decisions cited here is the five-agent subs
 Key constraints it surfaced:
 
 - BACKEND uses **Jest 30.4.2** for its compiled `backend/tests/**/*.test.js` supertest suites, plus
-  a hand-rolled `backend/src/testRunner.ts` (node:test + tsx) for newer TS unit suites under
-  `backend/src/services/__tests__/*.test.ts`. CI must run **both** paths.
+  a hand-rolled, process-isolated `backend/src/testRunner.ts` (node:test + tsx) for newer TS unit
+  suites under `backend/src/services/__tests__/*.test.ts`. CI must run **both** paths.
 - OVERLAY (`cross-platform-overlay`) and DASHBOARD (`admin-dashboard`) both use **Vitest + RTL +
   jsdom** (`test:unit`). They already run Vite 6 + `@vitejs/plugin-react`; Vitest reuses the exact
   transform pipeline with zero extra config. See [README.md](README.md) for the full tooling rationale.
