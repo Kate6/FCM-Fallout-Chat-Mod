@@ -503,6 +503,12 @@ jobs:
       - name: Install overlay deps
         working-directory: cross-platform-overlay
         run: npm ci
+      # A restored npm cache can leave Electron's JS package present while its
+      # platform binary is absent. Run the official installer explicitly so the
+      # subsequent IPC smoke always exercises a real Electron executable.
+      - name: Ensure Electron binary is installed
+        working-directory: cross-platform-overlay
+        run: node node_modules/electron/install.js
       - name: Build renderer
         working-directory: cross-platform-overlay
         run: npm run build:renderer

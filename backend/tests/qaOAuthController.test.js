@@ -39,6 +39,9 @@ function depsWith({ roles, installToken = 'inst-123' }) {
 
 function app(handler) {
   const a = express();
+  // This is a direct controller fixture, not a production route. The real
+  // callback is mounted behind authLimiter in src/server.ts:295.
+  // codeql[js/missing-rate-limiting]
   a.get('/auth/discord/qa/callback', handler);
   return a;
 }
