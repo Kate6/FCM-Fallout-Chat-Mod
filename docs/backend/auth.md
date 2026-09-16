@@ -54,7 +54,7 @@ Every subsequent request from the desktop client includes `X-Auth-Token: <sessio
 
 ### OAuth2 Flow
 
-1. **`GET /auth/discord`** — stores a CSRF state token in Redis (`oauth_state:<state>` → `{ intent, sessionId }`, 5-min TTL), persists the initiating session cookie, and redirects to Discord with scopes `identify guilds.members.read`.
+1. **`GET /auth/discord`** — stores a CSRF state token in Redis (`oauth_state:<state>` → `{ intent, sessionId }`, 5-min TTL), persists the initiating session cookie, and redirects to Discord with scopes `identify guilds.members.read`. Browser link buttons add a fresh, non-security `attempt` query value on every click so an old cached redirect cannot replay an already-consumed state; the backend ignores that value and remains the sole issuer and validator of `state`.
 
 2. **`GET /auth/discord/callback`** — validates the state token (deleted from Redis on use), exchanges the authorization code for an access token, fetches Discord identity and guild membership. Determines the user's role:
    - Compares the user's guild roles against `OWNER_ROLE_ID`, `ADMIN_ROLE_ID`, `MODERATOR_ROLE_ID` environment variables.
