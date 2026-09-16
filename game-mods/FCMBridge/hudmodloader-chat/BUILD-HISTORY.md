@@ -1,6 +1,20 @@
 # Archived HUD build notes
 
-## Queue-retirement recovery fix, candidate 2.10.109 (2026-09-16)
+## Production release 2.10.110 (2026-09-16)
+
+- Published as a HUD-only update after commit `775905d0` and production merge `782024f6`.
+- Retains 2.10.109's distinction between contiguous/stale xScal queue-retirement markers and
+  forward/unidentified cursor gaps. Both xScal test machines crossed the former soak boundary
+  without a resync or FCM error; ZFE 0.15.0 restored saved auth/history on both machines and the
+  desktop received relay-confirmed Server membership.
+- Adds the retained-local-row supporter refresh. Only rows whose sender ID matches an
+  authenticated local account alias inherit the authoritative projection; same-name foreign rows
+  remain untouched.
+- Passed the complete local HUD gate, 37-case Ruffle suite, hosted CI, final 2.10.110 ZFE startup
+  checks on both machines, and the retained 2.10.109 xScal native recovery checks. Published BA2 SHA-256 is
+  `7db1b0149d637772c0c1db8b884c8dc41e3017c0833e23ad242db50edd7422b2`.
+
+## Queue-retirement recovery fix, 2.10.109 release precursor (2026-09-16)
 
 - Fresh 2.10.108 logs on both xScal machines show the first retention marker is the next
   contiguous event after the consumed cursor at the 128-entry boundary.
@@ -8,7 +22,8 @@
   queue, causing another retirement marker and a self-sustaining 15-second resync loop.
 - Acknowledge contiguous/stale retirement markers without recovery. Preserve fail-closed history
   recovery for forward gaps and markers without a usable sequence ID. Pure and compiled tests
-  cover retirement and real-gap cases; fresh native acceptance remains required.
+  cover retirement and real-gap cases. This behavior passed fresh native acceptance and shipped
+  unchanged in 2.10.110.
 
 ## Queue-loss evidence, diagnostic candidate 2.10.108 (2026-09-16)
 
@@ -1141,7 +1156,7 @@ the configured textColor. Star Shape fill continues to use the validated starCol
 The same string offsets anchor the star, so range styling preserves full-width
 wrapping. Tests cover prefixes, literal markup, line breaks and exact name/body
 boundaries (`haxe test-feed-text.hxml`). This was the earlier implementation milestone; styling is now user-confirmed in 2.10.72 on desktop xScal. Current emoji limitations are recorded above.
-## Retained supporter-history correction, candidate 2.10.110 (2026-09-16)
+## Retained supporter-history correction, released in 2.10.110 (2026-09-16)
 
 - [Confirmed] Hosted DEV showed multiple retained messages for the authenticated HUD sender
   without supporter presentation, followed by a newly resolved row with the expected star.

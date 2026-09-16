@@ -482,6 +482,14 @@ the supplied cursor is `0`, then by live events. A nonzero cursor resumes after 
 subscription backfill is distinct from a short-lived `poll` response; it does not consume or alter
 the cursor of any other connection. The relay holds live frames behind the initial snapshot and
 flushes them in cursor order, preventing a live event from overtaking or duplicating the backfill.
+
+An xScal bounded queue can report that already-consumed entries aged out. A retirement marker whose
+sequence is contiguous with, or stale relative to, the widget's consumed cursor is an
+acknowledgement boundary, not proof of unread loss; HUD 2.10.109+ advances/acknowledges it without
+requesting history. A marker that skips forward, omits a usable sequence, or otherwise identifies
+an unread gap still enters the authenticated `FCMCTL/1/RESYNC` recovery path. Do not collapse these
+cases: the old unconditional resync replayed history into the same bounded queue and created a
+self-sustaining recovery loop.
 FCM's xScal widget drains this stream with a bounded warm-up. A ZFE widget uses the authenticated
 `FCMCTL/1/RESYNC` control only as a delayed fallback after an empty or dropped initial poll, which
 prevents a normal subscribe snapshot from being appended twice when the native queue is still full.

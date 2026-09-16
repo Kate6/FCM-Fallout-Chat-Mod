@@ -7,10 +7,15 @@ must not add game-memory reads, code injection, or network/port scanning.
 
 ## Current implementation and verification
 
-**2026-09-16 source candidate:** visible FCMChatWidget **2.10.110** reapplies an authoritative
+**Current production HUD release (2026-09-16):** visible FCMChatWidget **2.10.110** reapplies an authoritative
 supporter projection to retained rows from the same authenticated sender IDs, fixing old feed rows
 that remained unstyled after a later self-echo gained the star. Same-name foreign rows are excluded.
-It retains 2.10.109's queue-retirement recovery behavior. Fresh native acceptance is pending.
+It retains 2.10.109's queue-retirement recovery behavior. The final BA2 passed the complete local
+HUD gate, hosted CI, and final ZFE 0.15.0 startup checks on the desktop and MSI laptop. Both final
+ZFE runs restored saved authentication/history; the desktop received relay-confirmed Server
+membership without sending a message first. xScal's native recovery evidence is from 2.10.109,
+whose queue logic is unchanged in 2.10.110; the final artifact retained compiled xScal coverage.
+Nexus file `23572` and the website release feed publish 2.10.110.
 
 **Previous 2.10.107:** adds automatic pending-ZFE
 auth refresh after native 2.10.106 restored populated roster reads but still failed to join
@@ -19,7 +24,9 @@ The real-widget delayed-auth scenarios cover both providers. Fresh desktop ZFE/p
 logs confirm automatic authentication and Server-room binding before any ordinary chat send,
 with populated roster reads and no decoder errors. Two Server-send echoes reconcile without
 duplicates, and one loading/fast-travel cycle retains the room with empty auxiliary lists.
-Real hop/MainMenu, extended empty-primary fallback and laptop/xScal acceptance remain pending.
+At that intermediate point, real hop/MainMenu, extended empty-primary fallback and laptop/xScal
+acceptance remained pending; subsequent 2.10.109/2.10.110 evidence supersedes the laptop/provider
+startup portion without turning one observed transition into universal hop acceptance.
 2.10.106 restored earlier traversal after **2.10.105 confirmed** decoder method-entry E1014 even
 on synthetic payloads. The rejected method is diagnostic-only;
 probe results never become roster evidence or renew leases.
@@ -27,8 +34,9 @@ The widget retains copied names plus source timestamps only; unchanged getter re
 not renew freshness. FCMServerBridge **0.1.6** retains its separate shared decoder and is
 **previously installed locally with failed native roster acceptance** (`payload E1014` on four sources,
 `test provider` on two, no observed roster). It remains inactive during the visible-widget test.
-Neither candidate is published; the visible widget's desktop ZFE startup binding, Server-send/
-echo and one same-room travel cycle have passed fresh native checks.
+The background bridge remains unpublished and separate. The visible widget is now published as
+2.10.110; its desktop ZFE startup binding, Server-send/echo and same-room travel evidence remain
+the native basis for that path.
 See [bridge architecture](background-server-bridge.md) and the [test gate](../../testing/hud-automation-plan.md#isolated-packaged-bridge-gate).
 
 Historical **2026-09-15** acceptance: the source and rebuilt SWF/BA2 candidate were
@@ -38,7 +46,7 @@ The preceding 2.10.101 same-world travel test failed when an empty map masked po
 teams. Candidate 2.10.102 permits an overlapping populated player/public-team fallback, retaining
 the existing expiry and disjoint-roster safeguards. Native history, General/Server echoes and
 room continuity through two populated-map loading transitions passed; the exact empty-map
-fallback remains native-test pending. It is not published. The previous
+fallback was not established by that run. That 2.10.102 build was not published. The previous
 2.10.100/hosted-Dev ZFE run confirmed linking, history completion, and message
 self-echoes, but same-server fast travel falsely reset Server chat on an empty `TeamMarkers`
 update. The new candidate uses effective map/player roster continuity and bounded empty recovery;
@@ -53,6 +61,7 @@ coverage from remaining native checks. See
 | --- | --- |
 | Build, install, package, and validate | [Widget build guide](../../../game-mods/FCMBridge/hudmodloader-chat/BUILD.md) |
 | Widget source and behavior | [Widget README](../../../game-mods/FCMBridge/hudmodloader-chat/README.md) |
+| Current public changes and publication evidence | [HUD 2.10.110 release record](../../deployment/hud-2.10.110-release-notes.md) |
 | Native relay, authentication, controls, cosmetics | [FCM integration](native-chat-relay/fcm-integration.md) |
 | Extender API distinctions and current author links | [Provider API guide](modder-guide.md) |
 | Appearance, fonts, emoji, persistence | [Appearance](ingame-chat-appearance.md) |

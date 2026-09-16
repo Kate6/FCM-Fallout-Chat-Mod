@@ -945,7 +945,7 @@ endpoint examples. It is 5,991,085 bytes, SHA-256
 The website ZIP is 5,992,493 bytes, SHA-256
 `f4fee4aa66abe2069c4b6b6ffeefe23cbb83ade6353fd63115a05ef2dc20615e`.
 These are **blocked candidates**, not approved release files. Public notes and announcement
-drafts are in [the HUD-only release packet](../deployment/hud-post-2.10.85-release-notes-draft.md).
+publication evidence is in [the HUD 2.10.110 release record](../deployment/hud-2.10.110-release-notes.md).
 
 ### 2.10.108 bounded queue-loss diagnostic candidate
 

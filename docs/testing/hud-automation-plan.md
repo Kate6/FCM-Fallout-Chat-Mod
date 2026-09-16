@@ -164,8 +164,11 @@ visible, selected Server tab. The bridge remains invisible and owns no editor. P
 all three named cycle-pass markers plus the terminal scenario pass, so a skipped cycle or a
 transient clear/rebind cannot be concealed by an eventually healthy final state. Test-owned
 timestamps reach the grace boundary without adding real-time waits or extending production TTLs.
-The full suite remains 28 tests; it passed locally in 36.2 seconds on 2026-09-15, and port 41739
-was successfully rebound after teardown. Existing hop/expiry/MainMenu assertions still run
+That 2.10.102 suite contained 28 tests and passed locally in 36.2 seconds on 2026-09-15; port 41739
+was successfully rebound after teardown. The production 2.10.110 suite has 37 cases. Added cases
+exercise timer-driven delayed authentication on both providers, xScal queue retirement versus real
+forward gaps, and retained-local-row cosmetic refresh without same-name identity bleed. Existing
+hop/expiry/MainMenu assertions still run
 **after** the repeated cycles, with stale auxiliary/public-team names present.
 
 Native 2.10.102 xScal logs subsequently confirmed two normal same-world loading transitions
@@ -484,6 +487,17 @@ Confirmed on the mounted Steam installation:
 
 This review supports the contract-host design and supplies real assets for the private loader-stack
 spike. It does not make Ruffle equivalent to Fallout 76, and no local game file was changed.
+
+## Production 2.10.110 verification (2026-09-16)
+
+The complete 37-case suite and the pure Haxe/source/package/SWF/BA2/emoji checks passed for the
+final production tree, followed by hosted CI. The provider-identical BA2 was then installed on the
+desktop and MSI laptop. Fresh final-build ZFE 0.15.0 logs showed saved-auth and history restoration;
+the desktop reached relay-confirmed Server membership without a message-triggered auth refresh.
+The native xScal soak evidence belongs to 2.10.109: both machines crossed the former
+queue-retirement failure boundary without resync or FCM errors, and the same logic plus compiled
+xScal scenarios shipped in 2.10.110. This evidence accepts the released startup/recovery fixes but does not make the simulator
+authoritative for new game builds, provider versions, real world hops, or ControlMap suppression.
 
 ## Authority matrix
 

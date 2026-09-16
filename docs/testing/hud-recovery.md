@@ -2,7 +2,7 @@
 
 These checks apply to the optional in-game HUD widget, separately from the desktop overlay.
 
-For local candidate 2.10.78, verify the combined General feed on each extender:
+For current production HUD 2.10.110, verify the combined General feed on each extender:
 
 - Receive one message from General, Server, Trading, Events, Infests, and Raids. General must
   show each once with its source label. Each other tab must show only its own rows. Sending
@@ -36,6 +36,16 @@ from fresh logs. Automated tests do not establish native GFx or extender behavio
 
 ## Recovery and sends
 
+- Start the game with an already-linked provider token. Arrange for history and a populated roster
+  to arrive while provider auth still reports `connecting`, then let only the normal event/auth
+  timers run. The HUD must restore the authenticated identity, submit one current roster, receive
+  matching `SERVER-READY`, and show Server without sending a General or Server message. Repeat with
+  ZFE and xScal. Static chat being visible is not sufficient proof that this sequence completed.
+- Complete a fresh web link while the HUD stays loaded. The link/auth refresh must re-arm bounded
+  history and roster recovery; Server still waits for the current room confirmation. Reload with
+  the saved credential and repeat to prove provider-owned auth persistence is restored rather than
+  inferred from cached rows.
+
 - With a linked account, interrupt the test relay for at least five minutes. Submit several
   different messages while disconnected, restore the relay, and verify automatic authentication
   and delivery without reopening the widget. Each accepted message must appear once.
@@ -52,6 +62,13 @@ from fresh logs. Automated tests do not establish native GFx or extender behavio
   memory; exiting the game or unloading the widget does not preserve unsent drafts.
 - Leave an xScal handshake pending and return malformed poll responses in the test harness.
   Recovery must continue after its timeout rather than remaining permanently connected/stuck.
+- Fill xScal's bounded native queue past its retention boundary. A contiguous or stale retirement
+  marker for already-consumed events must not trigger `RESYNC`. Then inject a forward marker and a
+  marker without a usable sequence; each must retain fail-closed history recovery. Run the native
+  soak beyond the former approximately six-minute loop onset and require zero repeated resyncs.
+- After an authoritative local ACK/self-echo adds supporter cosmetics, inspect older retained rows
+  from the same authenticated sender IDs. They should repaint with the current projection. A row
+  with the same display name but a different sender ID must remain unchanged.
 
 Keep logs to build/provider, status codes, queue counts and timings. Do not collect tokens,
 message bodies, player names, or private channel membership for routine diagnostics.
