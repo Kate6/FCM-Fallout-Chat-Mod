@@ -1,4 +1,5 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const request = require('supertest');
 const redisMock = { set: jest.fn().mockResolvedValue('OK'), getDel: jest.fn().mockResolvedValue(null) };
 jest.mock('../src/config/redis', () => ({ getRedisClient: jest.fn().mockResolvedValue(redisMock) }));
@@ -39,10 +40,10 @@ function depsWith({ roles, installToken = 'inst-123' }) {
 
 function app(handler) {
   const a = express();
-  // This is a direct controller fixture, not a production route. The real
-  // callback is mounted behind authLimiter in src/server.ts:295.
-  // codeql[js/missing-rate-limiting]
-  a.get('/auth/discord/qa/callback', handler);
+  // Mirror the real callback's authLimiter in src/server.ts:295. A local
+  // MemoryStore keeps this isolated controller fixture self-contained.
+  const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 500, standardHeaders: true, legacyHeaders: false });
+  a.get('/auth/discord/qa/callback', limiter, handler);
   return a;
 }
 
