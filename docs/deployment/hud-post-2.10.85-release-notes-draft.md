@@ -2,7 +2,7 @@
 
 **Status: native-accepted; commit/hosted CI and release-owner publication confirmation pending.**
 
-Investigation update: source is now **2.10.109 and native-accepted on both providers**. The 2.10.108
+Investigation update: source is now **2.10.110; 2.10.109 was native-accepted on both providers**. The 2.10.108
 capture proved xScal emits contiguous markers when already-consumed entries age out of its
 128-entry queue. The HUD now acknowledges those without history replay, while actual cursor gaps
 still recover. Fresh 2.10.109 xScal runs on both machines cross the retention boundary without a
@@ -11,7 +11,7 @@ confirm the desktop Server room with populated rosters. Publication remains gate
 commit, hosted CI, exact artifact verification and release-owner confirmation below.
 
 This is a HUD-only release packet. The last Nexus HUD archive was `2.10.85` (published
-2026-09-13). The current source identifies itself as `2.10.109`. Native 2.10.106 restores roster
+2026-09-13). The current source identifies itself as `2.10.110`. Native 2.10.106 restores roster
 reads but exposes a separate delayed-ZFE-auth race; 2.10.107 adds automatic pending-auth refresh.
 Fresh desktop ZFE logs confirm automatic startup binding, Server sends and one same-room travel
 cycle. Desktop and MSI laptop xScal logs confirm automatic authentication and room binding;
@@ -128,6 +128,7 @@ included. Follow INSTALL.txt and preserve your existing loader/archive registrat
 | 2.10.106 | Restores earlier widget traversal and map/team helper. **Native populated-roster reads observed; Server joining still blocked by pending auth.** |
 | 2.10.107 | Recheck pending ZFE authentication automatically. **Desktop ZFE startup binding, Server-send/echo and one same-room travel cycle pass; both xScal machines bind automatically; desktop xScal send/echo passes. All 35 Ruffle cases pass again. Long-session xScal dropped-event/resync loop blocks release.** |
 | 2.10.108 | Adds bounded numeric-only queue diagnostics. **Both-machine native evidence proves xScal's marker is contiguous queue retirement, not an unread gap. Diagnostic-only; not published.** |
+| 2.10.110 | Repaint retained local-account rows when authoritative supporter cosmetics arrive; same-name foreign rows remain unchanged. Native acceptance pending. |
 | 2.10.109 | Acknowledge contiguous/stale retirement markers while retaining fail-closed recovery for forward or unidentified gaps. **All 37 Ruffle cases and local build gates pass; both xScal machines cross the old boundary with zero resyncs/errors; ZFE 0.15.0 startup/auth/history and desktop Server binding pass.** |
 
 ## Release gate

@@ -7,10 +7,10 @@ must not add game-memory reads, code injection, or network/port scanning.
 
 ## Current implementation and verification
 
-**2026-09-16 source candidate:** visible FCMChatWidget **2.10.109** uses the bounded numeric-only
-2.10.108 evidence to distinguish xScal's contiguous 128-entry retirement marker from an actual
-unread cursor gap. Contiguous/stale markers no longer replay history; forward gaps and unidentified
-markers retain fail-closed recovery. Fresh native acceptance is pending before production.
+**2026-09-16 source candidate:** visible FCMChatWidget **2.10.110** reapplies an authoritative
+supporter projection to retained rows from the same authenticated sender IDs, fixing old feed rows
+that remained unstyled after a later self-echo gained the star. Same-name foreign rows are excluded.
+It retains 2.10.109's queue-retirement recovery behavior. Fresh native acceptance is pending.
 
 **Previous 2.10.107:** adds automatic pending-ZFE
 auth refresh after native 2.10.106 restored populated roster reads but still failed to join

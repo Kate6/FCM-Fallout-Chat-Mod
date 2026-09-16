@@ -1,7 +1,8 @@
 # FCMChatWidget build, install, and verification
 
-**Widget version:** 2.10.109. Fixes the long-session xScal history-resync loop by distinguishing
-contiguous queue-retirement markers from actual unread cursor gaps.
+**Widget version:** 2.10.110. Reapplies newly resolved supporter cosmetics to retained messages
+from the same authenticated sender IDs while leaving same-name foreign rows unchanged. It retains
+2.10.109's distinction between contiguous queue-retirement markers and actual unread cursor gaps.
 This is the explicit opt-in HUD-mod track. The desktop overlay never installs or modifies it.
 
 ## Status and scope
