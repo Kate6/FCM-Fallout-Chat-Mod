@@ -39,6 +39,12 @@ the Timescale physical/base backup, MinIO objects, downloads, and the approved
 Redis policy, then run `docker compose config` without printing its expanded
 output. The stack intentionally fails closed when required values are missing.
 
+The production backend rejects `http://minio:9700` as an unsafe generic Docker
+default. The cutover Compose file therefore uses the private `minio-internal`
+network alias; do not replace it with the generic service name. Confirm that the
+rendered endpoint resolves from the backend container before starting the
+connector.
+
 ## Windows/SSH Manager pitfall
 
 The SSH Manager batch deploy cleanup currently emits Unix `rm -f`, which Windows
@@ -70,6 +76,58 @@ record architecture, creation timestamp, and the source container image ID.
 If an upstream registry no longer serves a pinned digest (observed with MinIO),
 export that exact running image from the authoritative host and checksum the
 archive instead of silently pulling `latest`.
+
+## Secondary-VPS standby preparation
+
+When the laptop is authoritative but must be taken offline, a second VPS may be
+prepared as a **cold standby**. This is staging work, not a cutover: it must not
+start a backend, bot, worker, scheduler, database, MinIO server, or Cloudflare
+connector while the laptop remains authoritative.
+
+1. Create a root-owned cutover directory with `config/`, `images/`, and
+   `backups/` directories restricted to mode `0700`.
+2. Transfer the production Compose definition, runtime environment, and tunnel
+   environment individually; restrict every file to `0600`, then compare the
+   full SHA-256 of each source and destination file. Run `docker compose config
+   --quiet` only—never print rendered configuration.
+3. Pull the digest-pinned third-party images and export the exact local backend
+   and any locally pinned MinIO image from the authoritative host with
+   `docker image save`. Verify the archive SHA-256 before `docker image load` on
+   the standby. Image loading and `docker compose create` are permitted
+   preparation steps; all resulting containers must remain in `Created` state.
+4. Retain the existing `COMPOSE_PROJECT_NAME` and the backend network alias that
+   the remotely managed tunnel resolves. A different project name can produce a
+   different backend hostname and leave a correctly authenticated connector
+   unable to reach the target.
+5. Do not copy live volumes while writers run. A final cold physical backup of
+   Postgres/Timescale, Redis under the selected policy, MinIO, and required
+   downloads requires the explicit failback/cutover approval boundary: stop the
+   laptop backend and connector, prove there are no writers, backup, transfer,
+   verify, and restore. Start the target connector only after Cloudflare state
+   is snapshotted and the laptop connector is confirmed stopped.
+
+The laptop-to-secondary-VPS handoff reuses the existing Cloudflare tunnel only
+when the tunnel origin hostname remains exactly the same and there is exactly
+one live connector. It does not require a DNS edit, but Cloudflare MCP must
+still snapshot and verify the tunnel/DNS state before and after the connector
+handoff.
+
+### Hostinger production auto-deploy
+
+`deploy-hostinger-prod.yml` deploys only trusted `prod` pushes to a Linux
+self-hosted runner labeled `fcm-hostinger-prod`. It replaces only the backend
+container, preserves the stateful services and connector, validates localhost
+health, and restores the previous image on failure. It requires both
+`HOSTINGER_PROD_AUTODEPLOY=true` as a GitHub repository variable and the local
+`/opt/fcm-cutover/prod/HOSTINGER_AUTODEPLOY_ACTIVE` marker. Remove the marker
+before any laptop failover or manual cutover.
+
+When restoring a physical Postgres volume onto a smaller host, inspect the
+restored `postgresql.conf` before startup. The source host's `shared_buffers`
+can exceed target RAM and cause an immediate `could not map anonymous shared
+memory: Out of memory` failure. Stop Postgres, set a target-appropriate value
+(1 GB on the 8 GB Hostinger standby used in this transfer), then restart and
+require a healthy database before starting the backend or connector.
 
 ## Rehearsal findings (2026-09-14)
 
@@ -168,6 +226,12 @@ fail-closed checkpoint in future rehearsals and in Production:
   must not be used against a Compose ID. Until that MCP capability exists, this
   flag is an explicit Dokploy UI checkpoint; do not substitute a direct database
   edit or an undocumented shell/API call.
+- After the Production laptop restart, GitHub ticket creation returned an HTTP
+  401 while core Discord/chat relay remained healthy. Treat outbound GitHub
+  automation as a separate acceptance check: validate the configured GitHub
+  credential and repository permissions without printing the token before
+  declaring a target fully accepted. Do not confuse that integration failure
+  with a database/object-store restore failure.
 
 The 2026-09-14 Dev laptop cutover passed private health, external HTTP, `/ws` and
 `/relay` upgrades, hosted Dev persona authentication, live message echo,

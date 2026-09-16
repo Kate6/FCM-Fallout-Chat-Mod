@@ -42,6 +42,10 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
     volumes:
       - minio_data:/data
+    networks:
+      default:
+        aliases:
+          - minio-internal
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9700/minio/health/live || exit 1"]
@@ -73,7 +77,9 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-      MINIO_ENDPOINT: http://minio:9700
+      # The backend rejects the generic Docker default in production. This
+      # private, explicit Compose-network alias works for both Dev and Prod.
+      MINIO_ENDPOINT: http://minio-internal:9700
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       PORT: 7676
