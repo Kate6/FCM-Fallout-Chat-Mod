@@ -1,0 +1,5 @@
+--main PackagedBridgeHost
+--class-path isolated
+--swf public/PackagedBridgeHost.swf
+--swf-version 32
+-D haxeJSON

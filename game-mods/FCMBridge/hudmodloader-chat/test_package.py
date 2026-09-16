@@ -147,6 +147,9 @@ def main() -> None:
         'var rs:String = Std.string(_api.call("chat.v1.sendMessage", payload));'
     ), "optimistic row must be queued before the native send call"
     swf_artifact = (ROOT / "FCMChatWidget.swf").read_bytes()
+    assert b"RosterScenario" not in swf_artifact and b"ROSTER-SCENARIO" not in swf_artifact, (
+        "Ruffle-only roster drivers and state probes must never ship in the production widget"
+    )
     assert swf_artifact[:3] == b"FWS" and swf_artifact[3] == 32, (
         "FCMChatWidget.swf must be an uncompressed Flash v32 artifact"
     )

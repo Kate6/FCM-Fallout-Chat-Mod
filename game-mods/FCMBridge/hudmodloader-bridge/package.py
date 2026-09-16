@@ -16,7 +16,7 @@ import zlib
 
 ROOT = Path(__file__).resolve().parent
 ENTRY = "Interface/FCMServerBridge.swf"
-VERSION = "0.1.0"
+VERSION = "0.1.6"
 
 
 def module(name: str, path: Path):
@@ -40,7 +40,8 @@ def validate_pair(swf: Path, archive: Path) -> dict:
     if ba2._raw_blob(raw, records[0]) != swf.read_bytes():
         raise ValueError("Archive SWF differs from compiled SWF")
     payload = swf.read_bytes()
-    for forbidden in [b"FCMChatWidget", b"flash.text.TextField", b"TextEdit", b"URLLoader", b"Socket"]:
+    for forbidden in [b"FCMChatWidget", b"flash.text.TextField", b"TextEdit", b"URLLoader", b"Socket",
+                      b"BridgeRosterScenario", b"BRIDGE-ROSTER", b"PackagedBridgeHost", b"IsolatedProvider"]:
         if forbidden in payload:
             raise ValueError(f"Background build unexpectedly contains {forbidden!r}")
     return info

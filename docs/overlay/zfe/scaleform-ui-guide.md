@@ -18,13 +18,27 @@ work and build the plain-text fallback. Every delayed slice must check its rende
 catch exceptions inside that callback; the scheduling stack's catch cannot handle later failures.
 A stale failure must not replace a newer feed.
 
+Burst ingest/echo/ACK traffic coalesces into one deferred render per tick; tab, resize, and
+config changes still render immediately. Tail appends reuse the committed snapshot's matching
+prefix rows (durable message ID first, transaction token second, never body fallback) and build
+only the new suffix in a single pass. The old layer remains intact during every delayed slice;
+proven prefix rows move only at the synchronous commit edge. Visual fingerprints cover sender,
+cosmetics, body/link, delivery, moderation, and theme state so reuse cannot preserve stale output.
+Plain bodies skip the emoji planner via a fast prefilter. `TextFormat` objects, line height, and
+NBSP advance are cached per font size; staging layers are reused; the slice size adapts within
+4–12 rows to hold the per-tick UI budget. One slice timer may be live, and its listener is detached
+at completion, cancellation, failure, or teardown.
+Pure planning lives in `FcmFeedPlan.hx`/`FcmRenderCoalescer.hx` with `test-feed-plan.hxml` coverage.
+
 Layout changes on data, resize, scroll, or settings changes, not every frame. Measure the actual
 rendered text after wrapping. `getCharBoundaries` is a layout/advance rectangle, not a tight glyph
 outline. Use text-field offsets when marker and field share a proven row coordinate basis; use
 `localToGlobal`/`globalToLocal` when crossing parents. Do not add guessed scroll-line offsets.
 Account for wrapped names, reserved marker/emoji gaps, clipping, and reflow.
 
-The widget uses Fallout font aliases such as `$MAIN_Font_Light` in embedded-font mode. This is
+The widget uses Fallout font aliases such as `$MAIN_Font` (body) and `$MAIN_Font_Bold`
+(names/tags) in embedded-font mode. The active English `interface/fontconfig_en.txt` maps those
+aliases but does not map `$MAIN_Font_Light`, so the body weight targets the Regular face. This is
 project/runtime evidence, not a universal GFx alias or proof of arbitrary glyph coverage. Avoid
 introducing dynamic classes/interfaces on hot compatibility paths without target verification;
 the historical Error #1014 failures did not establish a universal ban on those language features.

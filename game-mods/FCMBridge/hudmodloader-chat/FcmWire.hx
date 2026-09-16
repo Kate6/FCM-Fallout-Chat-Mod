@@ -1,5 +1,67 @@
 /** Small, Flash-free helpers for the native chat.v1 wire format. */
 class FcmWire {
+    /** Return the provider-local request id only for a successful asynchronous queue result. */
+    public static function queuedRequestId(raw:String):Int {
+        var value:Dynamic = parseObject(raw);
+        if (value == null || Reflect.field(value, "success") != true
+                || Std.string(Reflect.field(value, "status")) != "queued") return 0;
+        return positiveInt(Reflect.field(value, "requestId"));
+    }
+
+    /** 1 = accepted, -1 = failed, 0 = unrelated provider event. */
+    public static function asyncSendCompletion(raw:String):Int {
+        var value:Dynamic = parseObject(raw);
+        if (value == null) return 0;
+        return switch (Std.string(Reflect.field(value, "kind"))) {
+            case "chat.send.accepted": 1;
+            case "chat.send.failed": -1;
+            default: 0;
+        };
+    }
+
+    public static function asyncRequestId(raw:String):Int {
+        var value:Dynamic = parseObject(raw);
+        return value == null ? 0 : positiveInt(Reflect.field(value, "requestId"));
+    }
+
+    /** ZFE failures carry the stable machine code in error.code. */
+    public static function asyncErrorCode(raw:String):String {
+        var value:Dynamic = parseObject(raw);
+        if (value == null) return "";
+        var error:Dynamic = Reflect.field(value, "error");
+        var code:Dynamic = error == null ? null : Reflect.field(error, "code");
+        if (code == null) code = Reflect.field(value, "code");
+        return code == null ? "" : Std.string(code);
+    }
+
+    static function parseObject(raw:String):Dynamic {
+        if (raw == null || raw.length == 0) return null;
+        // Fallout's Scaleform runtime does not provide Flash's native JSON parser.
+        // Ruffle does, which allowed the async ZFE receipt
+        // tests to pass while the same branch returned requestId=0 in-game. Reuse the
+        // bounded, exception-free reader already proven by the auth/outbox paths.
+        var start:Int = skipWhitespace(raw, 0);
+        if (raw.charAt(start) != "{") return null;
+        var end:Int = raw.length - 1;
+        while (end >= start) {
+            var c:Int = raw.charCodeAt(end);
+            if (c != 9 && c != 10 && c != 13 && c != 32) break;
+            end--;
+        }
+        if (end <= start || raw.charAt(end) != "}") return null;
+        return FcmJson.parse(raw);
+    }
+
+    static function positiveInt(value:Dynamic):Int {
+        if (value == null) return 0;
+        // Request IDs are provider-issued JSON numbers. Do not coerce strings,
+        // booleans, fractions, or values outside ActionScript's signed Int range.
+        if (Std.isOfType(value, String) || Std.isOfType(value, Bool)) return 0;
+        var parsed:Float = Std.parseFloat(Std.string(value));
+        return Math.isFinite(parsed) && parsed > 0 && parsed <= 2147483647
+            && Math.floor(parsed) == parsed ? Std.int(parsed) : 0;
+    }
+
     /** Native acceptance only: a queued command is not proof of relay delivery.
      * Scan without flash JSON, accepting legacy unquoted keys as well as JSON.
      * Only the outer response's Boolean success may enable the server tab.

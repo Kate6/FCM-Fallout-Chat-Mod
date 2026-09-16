@@ -28,6 +28,14 @@ inspection; fresh logs must establish when they populate in the current game bui
 the session nonce. HUD recreation, a roster boundary, and reconnect also reset the nonce.
 The widget logs provider counts and the opaque confirmed room key, never roster names.
 
+From 2.10.101, session comparison prefers a fresh map roster, then the player list, and only
+falls back to the auxiliary union when both are unavailable. Empty/disjoint nearby or team
+lists no longer override an unchanged primary. A transient empty primary waits up to 60 seconds
+without renewing the relay lease; repeated empty observations do not restart that grace.
+Same/overlapping recovered lists retain Server history, selection, and nonce. Disjoint nonempty
+primary lists still leave/rebind, and MainMenu still leaves immediately. This is a continuity
+heuristic on the exposed HUD data, not a new authoritative server identifier.
+
 ## Protocol
 
 Existing `FCMCTL/1/ROSTER`, WORLD and LEAVE bodies remain compatible. A new widget includes
@@ -78,7 +86,8 @@ storage failures and mutual-sighting isolation. They run in the existing Haxe an
 
 For live acceptance, test two linked FCM users on the same public world, first before and then
 after opening the map. Check that both report nonzero roster names and the same confirmed room,
-then exchange SERVER messages. Move one user to another world twice: room keys must separate,
+then exchange SERVER messages. Fast-travel within the same world and verify no LEAVE, tab reset,
+or lost rows. Then move one user to another world twice: room keys must separate,
 old rows must disappear, and neither user may receive the other's new SERVER messages. Repeat
 with each extender. General/Trading/Events/Infests/Raids should retain static history throughout.
 Use a matching backend that emits session confirmations; a build with only RPC acceptance

@@ -2,6 +2,7 @@
 --class-path haxe
 --class-path ..
 --class-path ../..
+--class-path ../../hudmodloader-bridge
 --swf public/FCMHarness.swf
 --swf-version 32
 -D haxeJSON

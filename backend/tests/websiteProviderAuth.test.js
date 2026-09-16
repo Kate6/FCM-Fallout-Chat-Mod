@@ -137,10 +137,23 @@ test('profile link refuses an occupied Discord identity without switching accoun
 test('profile link start requires an authenticated account and binds it into state', async () => {
   const response = await request(app).get('/auth/discord/profile');
   expect(response.status).toBe(302);
+  expect(response.headers['cache-control']).toBe('no-store');
   const stateWrite = mockRedis.set.mock.calls.find(([key]) => key.startsWith('oauth_state:'));
   expect(JSON.parse(stateWrite[1])).toMatchObject({ intent: 'profile', sessionId: 'browser-a', linkUserId: 'account-a' });
   mockBrowserSession = {};
   expect((await request(app).get('/auth/discord/profile')).status).toBe(401);
+});
+
+test('desktop Discord link start is non-cacheable and stores fresh one-time state', async () => {
+  const response = await request(app).get('/auth/discord/link?installToken=install-123');
+  expect(response.status).toBe(302);
+  expect(response.headers['cache-control']).toBe('no-store');
+  expect(response.headers.location).toContain('discord.com/api/oauth2/authorize');
+  expect(mockRedis.set).toHaveBeenCalledWith(
+    expect.stringMatching(/^oauth_link_state:/),
+    'install-123',
+    { EX: 300 },
+  );
 });
 
 test('Steam profile can change only its own chat name', async () => {
@@ -161,4 +174,106 @@ test.each([
   const response = await request(app).get('/auth/me');
   expect(response.status).toBe(200);
   expect(response.body.data.username).toBe(expected);
+});
+
+describe('Discord browser sign-in to HUD code entry', () => {
+  const discordId = '12345678901234567';
+  let accounts;
+
+  beforeEach(() => {
+    mockBrowserSession = {};
+    mockRedis.getDel.mockResolvedValue(JSON.stringify({ sessionId: 'browser-a', intent: 'link' }));
+    global.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ roles: [] }) });
+    accounts = [{ id: 'unrelated-account', username: 'Dweller', discordId: '99999999999999999' }];
+    const find = where => accounts.find(account => Object.entries(where).every(([key, value]) => account[key] === value));
+    prismaStub.user.findFirst.mockImplementation(async ({ where }) => find(where) ?? null);
+    prismaStub.user.findUnique.mockImplementation(async ({ where }) => find(where) ?? null);
+    prismaStub.user.updateMany.mockImplementation(async ({ where, data }) => {
+      const account = find(where);
+      if (account) Object.assign(account, data);
+      return { count: account ? 1 : 0 };
+    });
+    prismaStub.user.create.mockImplementation(async ({ data }) => {
+      const target = ['username', 'discordId'].find(key => accounts.some(account => account[key] === data[key]));
+      if (target) throw Object.assign(new Error('Unique constraint failed'), { code: 'P2002', meta: { target: [target] } });
+      const account = { id: 'signed-in-account', isBanned: false, ...data };
+      accounts.push(account);
+      return account;
+    });
+    prismaStub.user.upsert.mockImplementation(async ({ where, create, update }) => {
+      const account = find(where);
+      if (account) return Object.assign(account, update);
+      return prismaStub.user.create({ data: create });
+    });
+  });
+
+  afterEach(() => {
+    prismaStub.user.create.mockReset().mockResolvedValue({});
+    prismaStub.user.upsert.mockReset().mockResolvedValue({});
+  });
+
+  test('a taken display name still reaches code entry without claiming the other account', async () => {
+    const callback = await request(app).get('/auth/discord/callback?code=code&state=state');
+    expect(callback.status).toBe(302);
+    expect(callback.headers.location).toMatch(/\/link$/);
+    const linkState = await request(app).get('/api/link/game');
+    expect(linkState.status).toBe(200);
+    expect(linkState.body.data).toMatchObject({
+      hasLinkedProvider: true,
+      providers: [{ provider: 'discord', username: 'Dweller' }],
+    });
+    expect(accounts[0]).toEqual({ id: 'unrelated-account', username: 'Dweller', discordId: '99999999999999999' });
+    expect(accounts[1]).toMatchObject({
+      username: expect.stringMatching(new RegExp(`^discord:${discordId}:[0-9a-f-]{36}$`)),
+      discordId,
+      discordDisplayName: 'Dweller',
+    });
+    expect(prismaStub.user.upsert).toHaveBeenCalledWith(expect.objectContaining({ where: { discordId } }));
+    expect(mockBrowserSession.discordUser.role).toBe('member');
+    expect(prismaStub.adminUser.upsert).not.toHaveBeenCalled();
+  });
+
+  test('repeat sign-in uses the Discord ID and preserves the existing account and install token', async () => {
+    accounts.push({ id: 'existing-account', username: 'Chosen name', installToken: 'existing-install', discordId, isBanned: false });
+    const callback = await request(app).get('/auth/discord/callback?code=code&state=state');
+    expect(callback.status).toBe(302);
+    expect((await request(app).get('/api/link/game')).status).toBe(200);
+    expect(accounts).toHaveLength(2);
+    expect(accounts[1]).toMatchObject({ id: 'existing-account', username: 'Chosen name', installToken: 'existing-install', discordDisplayName: 'Dweller' });
+    expect(prismaStub.user.create).not.toHaveBeenCalled();
+  });
+
+  test('an unlinked legacy Discord placeholder cannot block or claim the authenticated account', async () => {
+    const legacy = { id: 'legacy-account', username: `discord:${discordId}`, discordId: null, installToken: 'legacy-install' };
+    accounts.push({ ...legacy });
+    const callback = await request(app).get('/auth/discord/callback?code=code&state=state');
+    expect(callback.status).toBe(302);
+    expect(callback.headers.location).toMatch(/\/link$/);
+    expect((await request(app).get('/api/link/game')).status).toBe(200);
+    expect(accounts[1]).toEqual(legacy);
+    expect(accounts).toHaveLength(3);
+    expect(accounts[2]).toMatchObject({ id: 'signed-in-account', discordId, discordDisplayName: 'Dweller' });
+    expect(accounts[2].username).not.toBe(legacy.username);
+    expect(accounts[2].installToken).not.toBe(legacy.installToken);
+    expect(require('../src/websocket/handlers').resolveDisplayName(accounts[2])).toBe('Dweller');
+  });
+
+  test('account persistence failure does not establish a successful sign-in session', async () => {
+    prismaStub.user.create.mockRejectedValue(new Error('database unavailable'));
+    prismaStub.user.upsert.mockRejectedValue(new Error('database unavailable'));
+    const callback = await request(app).get('/auth/discord/callback?code=code&state=state');
+    expect(callback.status).toBe(500);
+    expect(callback.headers.location).toBeUndefined();
+    expect(mockBrowserSession.discordUser).toBeUndefined();
+  });
+
+  test('a used or expired OAuth state remains rejected before account creation', async () => {
+    mockRedis.getDel.mockResolvedValueOnce(null);
+    const callback = await request(app).get('/auth/discord/callback?code=code&state=state');
+    expect(callback.status).toBe(403);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(prismaStub.user.create).not.toHaveBeenCalled();
+    expect(prismaStub.user.upsert).not.toHaveBeenCalled();
+    expect(mockBrowserSession.discordUser).toBeUndefined();
+  });
 });

@@ -367,6 +367,9 @@ jobs:
         run: |
           haxe test-state.hxml
           python3 test_package.py
+      - name: Test shared HUD roster collector
+        working-directory: game-mods/FCMBridge/hudmodloader-chat
+        run: haxe test-roster-reader.hxml
       - name: Run HUD device-layout tests
         working-directory: game-mods/FCMBridge/hudmodloader-chat
         run: |
@@ -409,6 +412,9 @@ jobs:
       - name: Test delayed HUD render invalidation
         working-directory: game-mods/FCMBridge/hudmodloader-chat
         run: haxe test-render-generation.hxml
+      - name: Test feed render planning (coalescing, prefix reuse, slice budget)
+        working-directory: game-mods/FCMBridge/hudmodloader-chat
+        run: haxe test-feed-plan.hxml
       - name: Run native bridge compatibility tests
         working-directory: game-mods/FCMBridge
         run: haxe test-native-api.hxml
@@ -497,6 +503,12 @@ jobs:
       - name: Install overlay deps
         working-directory: cross-platform-overlay
         run: npm ci
+      # A restored npm cache can leave Electron's JS package present while its
+      # platform binary is absent. Run the official installer explicitly so the
+      # subsequent IPC smoke always exercises a real Electron executable.
+      - name: Ensure Electron binary is installed
+        working-directory: cross-platform-overlay
+        run: node node_modules/electron/install.js
       - name: Build renderer
         working-directory: cross-platform-overlay
         run: npm run build:renderer
@@ -512,6 +524,10 @@ jobs:
           # libasound2 was renamed libasound2t64 in Ubuntu 24.04 (the t64 ABI transition);
           # try the new name first, fall back to the classic name on older runners.
           sudo apt-get install -y --no-install-recommends libasound2t64 || sudo apt-get install -y --no-install-recommends libasound2
+      - name: Test Linux header dragging through Electron IPC
+        run: |
+          npm ci --ignore-scripts --prefix game-mods/FCMBridge/hudmodloader-chat/simulator
+          xvfb-run -a -s '-screen 0 1920x1080x24' node cross-platform-overlay/scripts/drag-smoke.mjs
       # ── Packaged-launch smoke ──
       - name: Build Linux package
         working-directory: cross-platform-overlay

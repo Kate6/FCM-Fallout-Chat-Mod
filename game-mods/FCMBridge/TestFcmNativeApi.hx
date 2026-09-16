@@ -30,6 +30,8 @@ class TestFcmNativeApi {
         check("ZFE uses native input", zApi.supportsNativeInput());
         check("ZFE async-send capability permits non-blocking sends",
             zApi.probeChatCapability() && zApi.supportsNonBlockingSend());
+        check("ZFE without async-control does not permit automatic server controls",
+            !zApi.supportsNonBlockingControl());
         check("ZFE widget requests retained-subscriber history resync",
             FcmNativeApi.widgetMustRequestHistoryResync(FcmNativeApi.ZFE));
         check("ZFE capability probe uses the ZFE chat verb", zCalls.length == 3
@@ -43,6 +45,15 @@ class TestFcmNativeApi {
         }});
         check("legacy synchronous ZFE send fails the safety capability gate",
             syncZfe != null && syncZfe.probeChatCapability() && !syncZfe.supportsNonBlockingSend());
+        check("legacy synchronous ZFE control fails the safety capability gate",
+            !syncZfe.supportsNonBlockingControl());
+
+        var asyncControlZfe:FcmNativeApi = FcmNativeApi.fromZfe({call: function(verb:String, payload:Dynamic):String {
+            return '{"success":true,"capabilities":["zfe-chat-online-v1","zfe-chat-async-send-v1","zfe-chat-async-control-v1"]}';
+        }});
+        check("current ZFE async-control capability permits automatic server controls",
+            asyncControlZfe != null && asyncControlZfe.probeChatCapability()
+            && asyncControlZfe.supportsNonBlockingControl());
 
         // ZFE's explicit chat bridge and its legacy BRG_OBJ compatibility callback can coexist.
         // Input.* must use the generic callback with the native integer VK argument, while chat
@@ -208,6 +219,7 @@ class TestFcmNativeApi {
         check("maps xScal report to reportMessage", xCalls.length == 4
             && xCalls[3] == "reportMessage|{\"messageId\":\"m1\"}");
         check("xScal does not claim ZFE native input", !xApi.supportsNativeInput());
+        check("xScal transport permits automatic server controls", xApi.supportsNonBlockingControl());
         check("xScal can recover an empty retained subscriber after a HUD reload",
             FcmNativeApi.widgetMustRequestHistoryResync(FcmNativeApi.XSCAL));
         check("unsupported xScal command fails closed",

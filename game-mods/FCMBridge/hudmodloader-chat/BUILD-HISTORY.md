@@ -1,5 +1,99 @@
 # Archived HUD build notes
 
+## Shared roster collector candidate 2.10.103 (2026-09-16)
+
+- The visible widget and background bridge 0.1.6 now share the native-data decoder. Game-owned
+  objects stay at the collector boundary; bridge session policy stores only copied values.
+- Invalid/damaged lists cannot establish or renew room evidence. Unchanged getter snapshots
+  retain their timestamp; pushes/change evidence advance local revisions, not world identity.
+- Added pure reader tests and an independent Ruffle host loading the exact packaged bridge SWF
+  in a fresh application domain. Both provider transports are local mocks, not hosted Dev.
+- Previous 0.1.5 native bridge acceptance still failed with E1014 and no parsed class identifier.
+  Neither these architectural changes nor passing Ruffle tests establish a native fix.
+- Not installed, deployed or published. See the current [build guide](BUILD.md).
+
+## Populated roster fallback candidate 2.10.102 (2026-09-15)
+
+- Confirmed native failure on 2.10.101/xScal 0.2.16: the user fast-traveled within the same world.
+  `MapMenuData` became empty while public-team observations stayed populated; strict empty-map
+  precedence starved the usable roster until the 60-second grace expired and a new room was bound.
+- Shared selection now permits populated player/public-team fallback only with overlap in an
+  established session. Populated higher-priority rosters still win; disjoint cached lower-priority
+  names and nearby-only lists cannot override an empty primary. Expiry and backend leases stay
+  unchanged. The invisible bridge uses the same selector for membership and boundary retention.
+- Pure HUD/bridge regressions and all four AVM2 provider/surface cases failed before the fix.
+  The complete 28-test Ruffle suite then passed (40.4 seconds), including real-hop/expiry/MainMenu
+  safeguards. These are local mock-provider results, not native travel acceptance or hosted CI.
+- After the user closed Fallout 76, 2.10.102 was installed for the xScal/hosted-Dev retest.
+  The old HUD/version stamps were backed up; settings, extender, native credentials and archive
+  registration were not changed. Installed decoded SWF equality passed. Native retest is pending.
+- BA2 SHA-256: `43cff32998f0be42b9ca7909e9824cd3e5d5a8462ebe64282c84ecea51a3f452`.
+
+## Same-server fast-travel candidate 2.10.101 (2026-09-15)
+
+- Confirmed: the 20:42 loading transition was same-server fast travel (user confirmation).
+  Empty `TeamMarkers` triggered a pending boundary even with the main roster populated,
+  clearing Server history and assigning a new room after LEAVE/rebind.
+- Session decisions now prefer fresh `MapMenuData`, then `PlayerListData`, then the auxiliary
+  union only if neither exists. Callbacks store snapshots without making irreversible boundary
+  decisions. Same/overlapping lists retain the tab, rows, and nonce; disjoint full rosters still
+  leave before rebinding even if an auxiliary contains old names.
+- Empty-primary recovery is bounded at 60 seconds, never refreshed by repeated empty polls and
+  never extending the existing relay lease. Initial solo binding and explicit MainMenu exits
+  retain their behavior. Lease expiry cannot suppress a later required LEAVE.
+- Added pure roster regressions and an autonomous AVM2 Ruffle scenario for both native adapters.
+  Reintroducing the old auxiliary rule failed both tests at `same world preserves Server tab`.
+  The harness now reads movie parameters correctly and attaches its trace observer after load,
+  so requested-provider/state assertions cannot silently pass against browser-only controls.
+- Candidate only: no local game installation, backend deployment, or publication in this change.
+- Local validation passed: all 20 `test-*.hxml` suites, native adapter/auth tests, empty compiler
+  diagnostics, source anchors, BA2/SWF/package tests, emoji generation/embedded/JS checks, and
+  the complete 26-test Ruffle suite (32.7 seconds). Automatic teardown left no listener on
+  port 41739. The rebuilt archive contains exactly one SWF, extracted byte-for-byte equal to
+  the normalized FWS v32 artifact. Hosted CI and native acceptance remain pending.
+- BA2 SHA-256: `0d6b80715590e1f762a9d1d4267dec1fbdf0e58e3b9d7a587aa5fe3cdc83c255`.
+
+## GFx-safe ZFE receipt candidate 2.10.100
+
+- Replaces the 2.10.99 async send/control receipt parser with the existing bounded,
+  exception-free `FcmJson` reader. The build already enabled `haxeJSON`; the previous claim
+  that a missing native JSON global caused this failure was not established.
+- Fresh 2.10.99 diagnostics showed a 48-byte response and a later WSS completion while the
+  widget took the synchronous-success branch. The raw envelope was not captured.
+- Adds documented queued-envelope, whitespace, malformed-type, nested-object, and source-gate
+  regressions. The render coalescer, six-row slices, and row reuse are retained unchanged.
+- Rebuilt and validated the production-target FWS v32 SWF and one-entry BA2, then installed it
+  locally with ZFE after confirming Fallout 76 had exited. The previous 2.10.99 BA2 remains in
+  the timestamped local backup directory.
+- Fresh 2.10.100 logs confirm queued/completion handling. They show the remaining failure:
+  a link notice received by the first HUD instance is absent after a movie reload, and
+  limited-identity RESYNC/send/roster requests receive `permission_denied`. The local backend
+  recovery fix resends that private notice without clearing native credentials; it still
+  requires hosted deployment and in-game acceptance.
+
+## ZFE terminal send/control completion candidate 2.10.99
+
+- Treats ZFE's immediate `status=queued` response as queue admission only and correlates its
+  numeric `requestId` with the later `chat.send.accepted` or `chat.send.failed` poll event.
+- Keeps an optimistic message pending until a durable relay echo/receipt, surfaces terminal
+  failure codes, and leaves the Server tab gated on `FCMCTL/1/SERVER-READY`.
+- Delays the fast follow-up poll to 750 ms so ZFE's asynchronous WSS worker can publish its
+  completion. The Ruffle ZFE mock now exercises the same two-stage behavior instead of returning
+  a false synchronous relay success.
+
+## Provider-gated Server-room binding candidate 2.10.98
+
+- Restores automatic roster-derived Server-room binding on ZFE only when runtime info advertises
+  `zfe-chat-async-control-v1`; older synchronous ZFE builds remain fail-closed so a relay timeout
+  cannot freeze Fallout's Scaleform thread.
+- Keeps xScal Server-room binding on its asynchronous `chatInterface` path and adds provider-parity
+  unit coverage for both safe paths plus the legacy-ZFE rejection case.
+- Extends the simulator fixtures with a HUD-published roster and relay-style `SERVER-READY`
+  response, and adds source/package assertions for both provider paths. The executable native
+  Haxe tests verify capability gating and exact control payload preservation; final
+  BSUIDataManager subscription/acknowledgement remains an in-game acceptance item because the
+  current Ruffle build does not expose the movie callbacks needed to observe that state.
+
 ## Provider physical-key rebind candidate 2.10.96
 
 - Fixes channel-next, channel-previous, and hide parsing so recognized physical tokens such as

@@ -2,14 +2,17 @@
 
 ## Required change-to-install flow
 
-Every visible HUD widget change follows this sequence; do not skip directly from source edits to a
-game install:
+Every visible HUD widget or background FCMServerBridge change follows this sequence; shared
+roster/native-adapter changes exercise both consumers. Do not skip directly from source edits to
+a game install:
 
 1. Add or update pure Haxe tests for parsing, matching, state gates, and provider-neutral logic.
 2. Compile with Haxe diagnostics and build the production SWF.
 3. Normalize and structurally validate the FWS v32 artifact, including emoji linkage.
 4. Run all `test-*.hxml`, package/anchor/BA2 tests, and the full `simulator/npm test` Playwright
    suite. Cover both xScal and ZFE whenever changed behavior crosses providers.
+   Preparing the isolated bridge test builds a temporary package and extracts its exact child;
+   this is a test input, not an installable/distributable candidate until all gates pass.
 5. Verify teardown: the owned Vite server, page, player, and browser close after the run; failure
    artifacts are retained without leaving a listener on port 41739.
 6. Rebuild the one-entry BA2 with the validated SWF, extract it, and require byte equality.
@@ -21,7 +24,58 @@ game install:
 Any failing step blocks packaging and installation. New harness-testable HUD behavior must add
 Playwright coverage in the same change and run in the required `hud-ruffle` CI gate.
 
-Status: M0 and the installed-xScal 0.1.15 browser contract fixture are implemented, 2026-09-14;
+For the background bridge, also run `haxe test-state.hxml`, bridge compiler diagnostics and
+`python3 test_package.py` in `hudmodloader-bridge/`. Build a **fresh** target ZIP with its
+`package.py`; compare the installed BA2 and decoded SWF to that ZIP's `BUILD.json`, not an older
+same-version package. Run backend `overlayServerBridge`, `serverMessageService`, `bridgeConnection`
+and `gameBridge` Jest suites, dashboard `bridgeFeed` Vitest tests, and overlay unit tests before
+the desktop/bridge handoff. The existing backend/dashboard and `gamemod-anchors`/`hud-ruffle`
+jobs cover these gates. A local pass is not a hosted CI pass.
+
+For a manual Dev test, use the [isolated packaged Dev overlay workflow](../deployment/local-dev.md#packaged-dev-overlay-for-bridge-acceptance),
+disable the visible widget before enabling the invisible bridge, and sign both clients into the
+same account. Keep the user-requested desktop overlay running for acceptance; tear down the
+automated harness and any diagnostic-only sockets/processes. Never stop or automate the game.
+
+## Isolated packaged bridge gate
+
+`npm test --prefix game-mods/FCMBridge/hudmodloader-chat/simulator` also runs
+`tests/packaged-bridge.spec.ts`. Preparation builds a temporary DEV ZIP using the real bridge
+packager, extracts its BA2 child, and compares SHA-256 to `BUILD.json`. The generated child and
+manifest remain ignored test artifacts; owned temporary packaging directories are removed in
+`finally`, including on build failure.
+
+`isolated/PackagedBridgeHost.hx` compiles without production class paths or shared mocks. It
+loads that exact child into `new ApplicationDomain(null)` and asserts that the host has no FCM
+class definitions before or after loading. Accessor-backed providers/events cross the movie
+boundary, rather than being compiled alongside the consumer. Only public provider calls,
+production timer ticks, logged binding status and subscription ownership are observed; there
+are no `@:access` calls into the packaged bridge.
+
+Both local mock adapters must pass initial roster submission/room acknowledgement, unready
+provider rejection and recovery, loading/resume without nonce churn, disjoint rebinding,
+MainMenu leave and unload. Unload must release subscriptions/disconnect exactly once and stop
+poll counts across subsequent timer periods. The older combined harness remains necessary for
+exact boundary/expiry, malformed data, push/getter divergence, exception-backoff and other
+state-focused scenarios. Pure `test-roster-reader.hxml` runs in `gamemod-anchors`; all packaged
+cases run automatically in the existing required `hud-ruffle` gate.
+
+Native-failure control (2026-09-16): the installed 0.1.5 bridge, which fails in Fallout with
+E1014, also passed the isolated packaged lifecycle tests under both mocks. The expanded suite
+closes a package/domain coverage gap but **does not reproduce or certify a fix for that native
+exception**. See the [dated evidence](hud-xscal-acceptance-2026-09-15.md#final-local-verification-and-native-failure-control).
+
+The browser driver needs `allowNetworking: all` for ExternalInterface; URL opening stays denied
+and Playwright blocks non-loopback HTTP requests. See [Ruffle's networking contract](https://ruffle.rs/js-docs/master/enums/Config.NetworkingAccessMode.html).
+This mode does not load hosted snapshots or call live relay services. It validates the package
+and mock transport contract, **not** native ZFE/xScal scheduling, GFx class availability, a hosted
+lease or actual desktop delivery. Complete those using the separate backend/renderer tests and
+bounded manual two-client native acceptance. No game input automation is used.
+
+## Existing simulator coverage
+
+Status: M0, the Nexus xScal 0.2.16 browser contract fixture, and the ZFE 0.15.0 provider contract
+are implemented, updated 2026-09-15;
 rendered widget-to-provider integration remains pending.
 This does not claim native Fallout 76, ZFE, xScal, or GFx
 acceptance. It defines a layered simulator plus an optional real-game smoke runner.
@@ -32,10 +86,11 @@ hashes the exact normalized production SWF, renders it in Chromium, records brow
 captures evidence, and lets Playwright own and tear down its strict loopback server. The current
 artifact test completes in roughly two seconds locally. An isolated Haxe contract-host prototype
 is retained behind `?mode=harness`. The in-movie mock xScal object is discovered by the production
-widget and can drive its connect/poll/render path, but Ruffle does not expose the harness's AVM2
-ExternalInterface callbacks to browser automation. That is an emulator compatibility limitation,
-not a widget or Fallout failure, and the browser-to-movie interaction test remains skipped rather
-than being reported as passing M1. Harness diagnostics are retained in a bounded in-memory field;
+widget and can drive its connect/poll/render path. Its `allowNetworking: internal` setting blocks
+ExternalInterface browser interaction by design; the earlier attribution to an emulator
+compatibility limitation was not established. The isolated packaged-bridge host below explicitly
+enables that driver with nonlocal requests blocked by its tests; this does not upgrade the older
+widget key-delivery tests into native input acceptance. Harness diagnostics are retained in a bounded in-memory field;
 they must never use Haxe `trace()`, because Ruffle paints trace output over the HUD stage.
 The browser laboratory scales its complete 16:9 stage to the available workspace width; it must
 not crop the right edge when the evidence sidebar is visible or when the viewport narrows.
@@ -83,12 +138,102 @@ The harness also exposes deterministic container/all HUD-mode transitions for te
 checks the compiled provider routes, key delivery, file-versus-persisted precedence, and both
 production HUD-mode guards. Ruffle 0.6.0 does not expose this AVM2 movie's inbound callbacks, so a
 browser test must not claim that an internal editor-state assertion is real-game acceptance.
+For the burst renderer, pure planning tests and simulator source-contract assertions enforce that
+prefix rows move only at commit, visual state invalidates reuse, and timer listeners are detached.
+The Ruffle suite still catches artifact-load and input regressions; visual continuity during a
+large sliced append remains a required GFx/in-game acceptance check.
+
+The `fast-travel` scenario runs assertions inside AVM2 against the real `FCMChatWidget`, using
+the selected native adapter and mock `BSUIDataManager` cache/CHANGE events. It covers both ZFE
+and xScal: initial Server history through max-16 polling, Loading → All with empty/disjoint
+auxiliary lists, temporary empty primary then recovery, preserved tab/history/session nonce,
+no extra controls, a genuinely disjoint map roster despite stale auxiliary names, rebind,
+expired grace/lease (test-owned timestamps advanced), solo recovery, and an immediate MainMenu
+leave. Pure `TestFcmRoster` tests (also called by CI's `test-history.hxml`)
+cover source priority, TTL expiry, solo binding, and exact empty-grace boundaries.
+The 2.10.102 regression adds the native xScal sequence where MapMenuData stays empty beyond
+grace while PublicTeamsData remains populated. An overlapping fallback must preserve room,
+nonce, selected Server tab and history without redundant controls; disjoint cached public teams
+must not conceal a populated new-world primary or bypass an empty primary's bounded recovery.
+The same scenario runs against the invisible bridge, with its unchanged 30-second limits.
+Both scenarios now repeat map recovery → loading → empty map/overlapping public teams three
+times per provider. Each cycle asserts the **selected provider** changes from MapMenuData to
+PublicTeamsData, clears the empty timer, preserves the original nonce/room and sends no redundant
+ROSTER/LEAVE. The HUD additionally retains the exact original history object and the attached,
+visible, selected Server tab. The bridge remains invisible and owns no editor. Playwright requires
+all three named cycle-pass markers plus the terminal scenario pass, so a skipped cycle or a
+transient clear/rebind cannot be concealed by an eventually healthy final state. Test-owned
+timestamps reach the grace boundary without adding real-time waits or extending production TTLs.
+The full suite remains 28 tests; it passed locally in 36.2 seconds on 2026-09-15, and port 41739
+was successfully rebound after teardown. Existing hop/expiry/MainMenu assertions still run
+**after** the repeated cycles, with stale auxiliary/public-team names present.
+
+Native 2.10.102 xScal logs subsequently confirmed two normal same-world loading transitions
+without a room reset, but MapMenuData stayed populated. That supports ordinary fast-travel
+continuity, **not** native acceptance of the empty-map fallback; keep the latter explicitly
+pending in the [acceptance record](hud-xscal-acceptance-2026-09-15.md).
+
+The harness reads provider/scenario parameters from the loaded movie, not its unattached Sprite
+(whose `loaderInfo` is null). Tests assert the actual discovered adapter matches the requested
+provider. Ruffle 0.6.0 ignores `traceObserver` before its instance exists; install it after
+`load()` and report delayed scenario results with `flash.Lib.trace`, not Haxe's on-stage debug
+field. This supplies real internal assertions without relying on unsupported inbound callbacks.
+The deterministic scenario skips hosted snapshots and never sends a live message. Test timers
+stop on success/failure; normal player/browser/server teardown remains automatic. Packaging
+asserts the scenario driver is absent from the production SWF. Real GFx/native scheduling and
+actual server identity still require manual in-game acceptance.
+
+For the invisible background mod, `scenario=bridge-fast-travel` loads `FCMServerBridge` instead
+of `FCMChatWidget`. Its ready-provider mock drives real cache/CHANGE subscriptions through the
+same two native transport mocks. Both adapters must preserve the binding through short loading
+and primary-empty recovery, leave/rebind on a disjoint full roster, expire prolonged loading,
+leave MainMenu once, and release owned subscriptions/timers on shutdown. No chat UI/editor or
+live traffic is created. Run the full suite for bridge changes as well as visible-widget changes;
+the existing required `hud-ruffle` job includes both scenarios. The visible scenario additionally
+asserts `SERVER` exists in its visible, attached tab text field after a room confirmation.
+
+Bridge 0.1.2 extends that scenario with sealed, AS3-style getter-backed provider/event classes,
+fresh `fromClient` pushes while `GetDataFromClient` remains stale, original observation-time
+expiry, test-provider rejection, duplicate menu reconnect requests and nested getter callbacks.
+`BRIDGE-EVENTS PASS` is required on both providers. A healthy reconnect refresh must neither
+disconnect from the menu dispatch stack nor discard the established room/cursor. Timers and
+subscriptions still terminate on success/failure. These tests cover AVM2 control flow, not native
+disconnect latency or the cause of a Fallout freeze; the bridge now emits capped, privacy-safe
+phase entry/exit and status diagnostics for the next manual native run.
+
+Bridge 0.1.3 adds `BRIDGE-DIAGNOSTICS PASS` to both provider scenarios. The mock retains the
+actual loader menu preparation callback and records its rows; assertions require the correct
+version/provider and rejection reason, eight bounded non-actionable diagnostic rows, no player
+data, and no provider reads, controls, nonce changes or queued refresh when the menu is built.
+Pure tests cover absent/test/unready/menu-loading/list-shape/expiry/read-failure reasons. The
+diagnostic labels are cached from the normal observation path; they must not turn opening F11
+into a new synchronous native call. This closes the diagnostic-coverage gap, not the still-unproven
+cause of the native “Waiting for a fresh world roster” failure.
+
+Bridge 0.1.4 additionally requires `BRIDGE-ERRORS PASS` on both providers. Actual AVM2 Error
+objects exercise getter, nested name-processing and subscription failures with distinct numeric
+IDs. Each attempt keeps its own phase; a nested callback cannot relabel the outer getter error.
+Failed observations cannot create membership or send controls. The cached subscription row shows
+successful registrations out of eight plus the latest numeric error, never exception text or
+stack/payload data. Pure tests reject invalid, fractional, out-of-range and string error IDs.
+The throwing conversion fixture validates its behavior before use: Flash Haxe's `Std.string`
+swallows anonymous-object `toString` errors, so an anonymous fixture would falsely test success.
+These injected codes are harness evidence only, not a reproduction or diagnosis of the native
+0.1.3 screenshot's all-source `read failed` result.
+
+Bridge 0.1.5 extends both error scenarios to test its cached `Missing class` row using actual
+AVM2 Error accessors. Only the canonical E1014 class-identifier template is accepted; appended
+stack/private text and other messages must show `not reported`. Pure cases cover bounds,
+delimiters, non-string values, wrong error IDs and reset. This diagnostic must not establish a
+room or send controls. The native 0.1.4 screenshot's processor-entry E1014 is not reproduced by
+these injected errors. The combined harness links bridge classes into its movie, not an isolated
+packaged bridge movie in GFx, so passing it cannot establish native class-resolution compatibility.
 
 When a local Fallout 76 installation is found (or `FCM_FALLOUT76_DATA` points at its `Data`
 directory), preparation extracts `programs/fonts_programs.swf` from the installed Interface BA2
 into ignored, temporary simulator output and supplies it to Ruffle. Harness builds resolve the
-game aliases directly to `Roboto Condensed Light` and `Roboto Condensed Bold`, matching the local
-`fontconfig_en.txt`; production builds retain `$MAIN_Font_Light`/`$MAIN_Font_Bold`. No game font is
+game aliases directly to `Roboto Condensed` and `Roboto Condensed Bold`, matching the local
+`fontconfig_en.txt`; production builds retain `$MAIN_Font`/`$MAIN_Font_Bold`. No game font is
 committed or distributed, and Ruffle font metrics remain non-acceptance evidence.
 
 Harness mode has an explicit xScal/ZFE selector. xScal exposes the observed
@@ -105,9 +250,9 @@ The public xScal source at upstream commit `2c073777b8399960122c4971694f5b6e8be2
 was evaluated and deliberately not retained as an emulator dependency. It provides the MovieRoot
 hook, generic callback registry, and `GetXSRuntimeInfo`, but not the installed runtime's
 `chatInterface`, relay client, plugin/module system, or `Input.*` surface. The emulator must instead
-reproduce a sanitized, versioned contract observed from the locally installed xScal 0.1.15 DLL.
+reproduce a sanitized, versioned contract observed from the Nexus xScal 0.2.16 DLL.
 
-That fixture is `simulator/fixtures/installed-xscal-0.1.15.json`. It records the installed DLL's
+That fixture is `simulator/fixtures/installed-xscal-0.2.16.json`. It records the Nexus DLL's
 version, SHA-256, byte size, supported Fallout runtime, exact chat method names, and numeric input
 callback names without copying the DLL, endpoint, messages, account identifiers, or credentials.
 The browser suite replays authentication gating, cursor polling, synthetic regular/Discord/event

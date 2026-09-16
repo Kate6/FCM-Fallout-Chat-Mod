@@ -184,6 +184,11 @@ Handled by the `messageCreate` listener at `discordService.ts:348`.
    normalized to readable `@name` / `@role` / `#channel` text. Their Discord
    snowflakes are retained in `metadata.entities`; channel entities also carry a
    canonical Discord URL.
+   User mentions prefer a linked real Fallout 76 username. Placeholder account
+   names (`Wanderer`, `pending-*`, `discord:*`, and generated `Overlay<digits>`
+   handles) are never rendered; when no real Fallout name exists, the bridge uses
+   the mentioned member's Discord server display name, global display name, or
+   username in that order.
    Identity is therefore paired by ID rather than inferred from a display name.
    Sharing a known `discord.com/events/...` URL resolves to the existing
    `scheduled_event` metadata and renders the standard event card in FCM.

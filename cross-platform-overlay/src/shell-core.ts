@@ -501,6 +501,7 @@ export interface DragTargetEl {
  * Opt-IN (return true):
  *   • #shell-bar (pre-auth strip)
  *   • any element whose inline style.webkitAppRegion === 'drag'
+ *   • the shell's designated settings/onboarding headers (stylesheet-defined)
  */
 export function isDragTarget(
   target: DragTargetEl | null,
@@ -514,8 +515,10 @@ export function isDragTarget(
     if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return false;
     if (el.isContentEditable) return false;
     if (el.id === 'shell-settings-backdrop' || el.id === 'shell-onboarding-backdrop') return false;
+    if (el.style.webkitAppRegion === 'no-drag') return false;
 
     if (el.id === 'shell-bar') return true;
+    if (el.classList.contains('ob-head') || el.classList.contains('ss-head')) return true;
     if (el.style.webkitAppRegion === 'drag') return true;
 
     el = el.parentElement;

@@ -8,7 +8,8 @@
 //
 // Run with: npm run test:unit
 import { readdirSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { run } from 'node:test';
+import { spec } from 'node:test/reporters';
 import path from 'node:path';
 
 const root = path.join(process.cwd(), 'src');
@@ -21,8 +22,9 @@ if (files.length === 0) {
   process.exit(1);
 }
 
-void (async () => {
-  for (const file of files) {
-    await import(pathToFileURL(file).href);
-  }
-})();
+// Run each TypeScript suite in a child process. forceExit is deliberate: unit
+// fixtures can open Redis/Prisma handles through default dependencies, and a
+// completed test run must not hang waiting for those test-only handles.
+run({ files, isolation: 'process', execArgv: ['--import', 'tsx'], forceExit: true })
+  .compose(spec())
+  .pipe(process.stdout);

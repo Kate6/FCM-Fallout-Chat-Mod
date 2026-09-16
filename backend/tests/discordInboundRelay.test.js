@@ -165,6 +165,88 @@ test('Discord inbound messages carry relaySeq into live broadcast and history pe
   }));
 });
 
+test('Discord inbound mentions fall back from placeholder usernames to the Discord display name', async () => {
+  const handler = mockHandlers.get('messageCreate');
+  const mentionedDiscordId = '185069913252167681';
+  mockPrisma.user.findMany.mockResolvedValueOnce([
+    { discordId: mentionedDiscordId, username: `discord:${mentionedDiscordId}` },
+  ]);
+
+  await handler({
+    id: 'discord-mention-message-id',
+    channelId: 'discord-channel-id',
+    content: `<@${mentionedDiscordId}>`,
+    author: {
+      id: 'discord-user-id',
+      bot: false,
+      username: 'discord-user',
+      globalName: 'Discord User',
+      send: jest.fn().mockResolvedValue(undefined),
+    },
+    webhookId: null,
+    attachments: new Map(),
+    embeds: [],
+    guild: null,
+    guildId: 'dev-guild-id',
+    mentions: {
+      users: new Map([[mentionedDiscordId, {
+        username: 'infestations',
+        globalName: 'Infestations',
+      }]]),
+      members: new Map(),
+      roles: new Map(),
+      channels: new Map(),
+    },
+    channel: { messages: { fetch: jest.fn() } },
+  });
+
+  expect(mockBroadcast).toHaveBeenCalledWith(expect.objectContaining({
+    type: 'chat:message',
+    payload: expect.objectContaining({
+      content: '@Infestations',
+      metadata: {
+        type: 'chat_entities',
+        entities: [{ type: 'user', discordId: mentionedDiscordId, label: 'Infestations' }],
+      },
+    }),
+  }));
+});
+
+test('Discord inbound mentions prefer a linked Fallout 76 username', async () => {
+  const handler = mockHandlers.get('messageCreate');
+  const mentionedDiscordId = '285069913252167681';
+  mockPrisma.user.findMany.mockResolvedValueOnce([
+    { discordId: mentionedDiscordId, username: 'VaultDweller76' },
+  ]);
+
+  await handler({
+    id: 'discord-fo76-mention-message-id',
+    channelId: 'discord-channel-id',
+    content: `<@!${mentionedDiscordId}>`,
+    author: {
+      id: 'discord-user-id', bot: false, username: 'discord-user', globalName: 'Discord User',
+      send: jest.fn().mockResolvedValue(undefined),
+    },
+    webhookId: null,
+    attachments: new Map(),
+    embeds: [],
+    guild: null,
+    guildId: 'dev-guild-id',
+    mentions: {
+      users: new Map([[mentionedDiscordId, {
+        username: 'discord-handle', globalName: 'Discord Display',
+      }]]),
+      members: new Map(), roles: new Map(), channels: new Map(),
+    },
+    channel: { messages: { fetch: jest.fn() } },
+  });
+
+  expect(mockBroadcast).toHaveBeenCalledWith(expect.objectContaining({
+    type: 'chat:message',
+    payload: expect.objectContaining({ content: '@VaultDweller76' }),
+  }));
+});
+
 test('HUD supporter relay uses the immutable star in the Discord author prefix', () => {
   expect(service.buildDiscordRelayPrefix('General', 'Devotek-', ['overseer']))
     .toBe('**[General]** **★ Devotek-**: ');

@@ -8,10 +8,26 @@ class MockXscal {
     public static var callCount(default, null):Int = 0;
     public static var pollCount(default, null):Int = 0;
     public static var historyDoneDeliveries(default, null):Int = 0;
+    public static var serverControlCount(default, null):Int = 0;
+    public static var leaveControlCount(default, null):Int = 0;
+    public static var asyncCompletionDeliveries(default, null):Int = 0;
     static var pressed:Map<Int, Bool> = new Map();
     static var registered:Map<Int, Bool> = new Map();
     static var cursor:Int = 0;
     static var scenarioEvents:Array<Dynamic> = null;
+
+    public static function enqueueEvent(event:Dynamic):Void {
+        if (scenarioEvents == null) scenarioEvents = [];
+        scenarioEvents.push(event);
+    }
+
+    public static function enqueueServerHistory(room:String):Void {
+        if (scenarioEvents == null) scenarioEvents = [];
+        scenarioEvents.push({kind:"chat.message", id:scenarioEvents.length + 1,
+            messageId:"server:" + room + ":fast-travel-fixture", channel:"server",
+            senderUserId:"sim-peer", senderDisplayName:"HarnessPeer",
+            body:"Retained through same-server fast travel", targetUserId:""});
+    }
 
     public static function loadScenario(url:String):Void {
         var loader = new URLLoader();
@@ -78,6 +94,12 @@ class MockXscal {
                 var hosted = scenarioEvents.slice(start, end);
                 for (event in hosted) {
                     if (Reflect.field(event, "body") == "FCMCTL/1/HISTORY-DONE") historyDoneDeliveries++;
+                    var kind:String = Std.string(Reflect.field(event, "kind"));
+                    if (kind == "chat.send.accepted" || kind == "chat.send.failed") {
+                        asyncCompletionDeliveries++;
+                        MockZfe.traceCompletion(kind);
+                        SimLog.emit("ZFE completion delivered kind=" + kind);
+                    }
                 }
                 cursor = end;
                 return response({success:true, cursor:cursor, events:hosted});
@@ -91,6 +113,21 @@ class MockXscal {
             var messageId:String = "sim-send-" + callCount;
             SimLog.emit("CHAT send len=" + body.length);
             if (scenarioEvents == null) scenarioEvents = [];
+            if (channel == "server" && StringTools.startsWith(body, "FCMCTL/1/")) {
+                serverControlCount++;
+                if (body == "FCMCTL/1/LEAVE") leaveControlCount++;
+                if (StringTools.startsWith(body, "FCMCTL/1/ROSTER:")) {
+                    var target:String = Std.string(Reflect.field(args, "targetUserId"));
+                    var separator:Int = target.indexOf(";");
+                    var requestId:String = separator >= 0 ? target.substr(separator + 1) : "";
+                    var controlId:Int = scenarioEvents.length + 1;
+                    scenarioEvents.push({kind:"chat.message", id:controlId,
+                        messageId:"sim-server-ready-" + controlId, channel:"system",
+                        senderUserId:"system", senderDisplayName:"FCM",
+                        body:"FCMCTL/1/SERVER-READY:" + requestId + "|r:sim-room", targetUserId:""});
+                }
+                return response({success:true, messageId:messageId, targetUserId:""});
+            }
             var nextId:Int = scenarioEvents.length + 1;
             scenarioEvents.push({kind:"chat.message", id:nextId, messageId:messageId,
                 channel:channel, senderUserId:"sim-linked-user", senderDisplayName:"Simulator76",
@@ -121,6 +158,11 @@ class MockXscal {
                 registered.remove(unregisterKey);
                 pressed.remove(unregisterKey);
                 return existed;
+            }
+            if (name == "Input.ClearKeys") {
+                registered = new Map();
+                pressed = new Map();
+                return true;
             }
             if (name == "Input.IsKeyPressed") {
                 var key:Int = Std.int(value);

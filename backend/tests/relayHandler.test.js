@@ -3185,6 +3185,109 @@ describe('auth gate integration', () => {
     ws.close();
   });
 
+  test('limited HUD reload recovers a private link notice through RESYNC without granting chat access', async () => {
+    require('../src/config/prisma').default.$queryRaw.mockResolvedValue([]);
+    const connections = [];
+    const open = async () => { const c = await conn5(); connections.push(c); return c; };
+    try {
+      const reg = await open();
+      const account = await waitForMsg(reg.ws, reg.msgs, () => send(reg.ws, { op: 'register', displayName: 'ReloadLink' }));
+      reg.ws.close();
+      const otherReg = await open();
+      const otherAccount = await waitForMsg(otherReg.ws, otherReg.msgs, () => send(otherReg.ws, { op: 'register', displayName: 'OtherLink' }));
+      otherReg.ws.close();
+      const own = await open();
+      const other = await open();
+      await waitForMsg(own.ws, own.msgs, () => send(own.ws, { op: 'subscribe', token: account.token }));
+      await waitForMsg(other.ws, other.msgs, () => send(other.ws, { op: 'subscribe', token: otherAccount.token }));
+      await new Promise(r => setTimeout(r, 50));
+      expect(own.msgs.some(m => m.event?.body?.startsWith('LINK REQUIRED'))).toBe(true);
+      // The old movie consumed the notice; only its native subscriber/cursor survive.
+      const nativeCursor = Math.max(...own.msgs.filter(m => m.event).map(m => m.event.id));
+      own.msgs.length = 0;
+      other.msgs.length = 0;
+      const issue = require('../src/services/linkCodeService').issueLinkCode;
+      issue.mockClear();
+      const ingest = require('../src/services/ingestMessage').ingestMessage;
+      ingest.mockClear();
+      redisMock.publish.mockClear();
+      const rpc = await open();
+      const result = await waitForMsg(rpc.ws, rpc.msgs, () => send(rpc.ws, {
+        op: 'send', token: account.token, channel: 'server', body: 'FCMCTL/1/RESYNC',
+        targetUserId: otherAccount.userId, // Caller cannot redirect a code to another identity.
+      }));
+      expect(result).toMatchObject({ success: true, messageId: expect.any(String) });
+      await new Promise(r => setTimeout(r, 50));
+      const notices = own.msgs.filter(m => m.event?.body?.startsWith('LINK REQUIRED'));
+      expect(notices).toHaveLength(1);
+      expect(notices[0].event.id).toBeGreaterThan(nativeCursor);
+      expect(notices[0].event.body).toContain('code: ABCD-1234');
+      expect(other.msgs).toHaveLength(0);
+      expect(rpc.msgs.some(m => m.op === 'event')).toBe(false);
+      rpc.ws.close();
+      expect(issue).toHaveBeenCalledTimes(1);
+      expect(issue).toHaveBeenCalledWith(account.userId, { reuseActive: true });
+      expect(ingest).not.toHaveBeenCalled();
+      const recovery = redisMock.publish.mock.calls.find(([channel, body]) =>
+        channel === 'relay:control' && JSON.parse(body).kind === 'link-required');
+      expect(recovery).toBeTruthy();
+      expect(JSON.parse(recovery[1])).toMatchObject({ relayUserId: account.userId, code: 'ABCD1234' });
+
+      // A remote owner recreates the same code with a fresh cursor, without issuing it twice.
+      own.msgs.length = 0;
+      await redisMock.publish('relay:control', JSON.stringify({ ...JSON.parse(recovery[1]),
+        sourceInstanceId: '11111111-1111-4111-8111-111111111111' }));
+      await new Promise(r => setTimeout(r, 50));
+      expect(own.msgs.filter(m => m.event?.body?.startsWith('LINK REQUIRED'))).toHaveLength(1);
+      expect(issue).toHaveBeenCalledTimes(1);
+      expect(other.msgs).toHaveLength(0);
+
+      for (const body of ['hello', 'FCMCTL/1/ROSTER:Someone', 'FCMCTL/1/WORLD:world', 'FCMCTL/1/RESYNC extra']) {
+        const blocked = await open();
+        expect(await waitForMsg(blocked.ws, blocked.msgs, () => send(blocked.ws, {
+          op: 'send', token: account.token, channel: 'server', body,
+        }))).toMatchObject({ success: false, error: { code: 'permission_denied' } });
+        blocked.ws.close();
+      }
+      expect(ingest).not.toHaveBeenCalled();
+    } finally {
+      for (const c of connections) c.ws.close();
+    }
+  });
+
+  test('limited link recovery is exact-match, token-validated, rate-limited, and fails closed', async () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_700_100_000_000);
+    const issue = require('../src/services/linkCodeService').issueLinkCode;
+    const request = async (frame) => {
+      const { ws, msgs } = await conn5();
+      try { return await waitForMsg(ws, msgs, () => send(ws, frame)); }
+      finally { ws.close(); }
+    };
+    try {
+      const account = await request({ op: 'register', displayName: 'BoundedRecovery' });
+      // Let the existing register notice finish before altering the code-service stub.
+      await new Promise(r => setTimeout(r, 30));
+      issue.mockClear();
+      const control = { op: 'send', token: account.token, channel: 'server', body: 'FCMCTL/1/RESYNC' };
+      expect(await request({ ...control, token: 'invalid' })).toMatchObject({ error: { code: 'auth_token_invalid' } });
+      expect(await request({ ...control, channel: 'global' })).toMatchObject({ error: { code: 'permission_denied' } });
+      expect(issue).not.toHaveBeenCalled();
+      issue.mockRejectedValueOnce(new Error('synthetic code service failure'));
+      expect(await request(control)).toMatchObject({ error: { code: 'link_unavailable' } });
+      issue.mockResolvedValueOnce(null);
+      expect(await request(control)).toMatchObject({ error: { code: 'link_unavailable' } });
+      for (let attempt = 0; attempt < 4; attempt++) {
+        expect(await request(control)).toMatchObject({ success: true });
+      }
+      expect(await request(control)).toMatchObject({ error: { code: 'rate_limited' } });
+      expect(issue).toHaveBeenCalledTimes(6);
+      const calls = issue.mock.calls.length;
+      await revokeToken(account.userId);
+      expect(await request(control)).toMatchObject({ error: { code: 'auth_token_invalid' } });
+      expect(issue).toHaveBeenCalledTimes(calls);
+    } finally { now.mockRestore(); }
+  });
+
   // ── 2. system notice pushed on register for limited identity ────────────────
 
   test('register for limited identity emits system notice on the same socket', async () => {

@@ -32,6 +32,7 @@ interface RelayBridge {
     discordUsername?: string;
     discordDisplayName?: string;
     discordAvatarUrl?: string | null;
+    avatarUrl?: string | null;
     steamLinked?: boolean;
     steamDisplayName?: string;
     username?: string;
@@ -80,7 +81,7 @@ interface RelayBridge {
   logDiag?(msg: string): void;
   // Discord link/supporter-role refresh: asks main to poll the backend and fires onDiscordStatus.
   refreshDiscordStatus?(): void;
-  onDiscordStatus?(cb: (status: { linked: boolean; discordName: string }) => void): void;
+  onDiscordStatus?(cb: (status: { linked: boolean; discordName: string; discordDisplayName?: string; avatarUrl?: string | null }) => void): void;
   /** Steam OpenID link/status refresh for the desktop install. */
   refreshSteamStatus?(): void;
   onSteamStatus?(cb: (status: { linked: boolean; steamLinked?: boolean; steamDisplayName?: string }) => void): void;

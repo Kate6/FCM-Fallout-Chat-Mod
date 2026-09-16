@@ -171,6 +171,10 @@ If a HUD widget is recreated while that native subscriber remains connected, `po
 empty because its queue was already drained. FCM's optional widget uses an authenticated reserved
 `chat.v1.sendMessage` control (`FCMCTL/1/RESYNC`) to request a bounded replay from the relay; it is
 not a new public `chat.v1` operation.
+For a valid but unlinked relay identity, that same exact control restores only the private
+link-code notice on its live subscriber. Ordinary sends, room controls, and malformed controls
+remain denied. The server bounds requests per identity and does not clear or replace the
+native credential. After the link completes, the widget requests normal history recovery.
 
 Send:
 

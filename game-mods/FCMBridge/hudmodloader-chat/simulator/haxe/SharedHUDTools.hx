@@ -9,6 +9,9 @@ class SharedHUDTools {
     static var active:SharedHUDTools;
     public var isActive:Bool = false;
     var submit:Dynamic;
+    var menuSelect:Dynamic;
+    var menuPrepare:Dynamic;
+    var menuItems:Array<{id:String, label:String, enabled:Bool}> = [];
     var editor:TextField;
     var x:Float = 0;
     var y:Float = 0;
@@ -19,9 +22,20 @@ class SharedHUDTools {
 
     public function new(_:String, __:String) { active = this; }
     public function Register(_:Dynamic):Bool return true;
-    public function RegisterMenu(_:Dynamic, __:Dynamic):Bool return true;
+    public function RegisterMenu(prepare:Dynamic, select:Dynamic):Bool { menuPrepare = prepare; menuSelect = select; return true; }
+    public static function inspectMenu():Array<{id:String, label:String, enabled:Bool}> {
+        if (active == null || active.menuPrepare == null) return [];
+        active.menuItems = [];
+        active.menuPrepare("");
+        return active.menuItems.copy();
+    }
+    public static function selectMenu(item:String):Void {
+        if (active != null && active.menuSelect != null) active.menuSelect(item);
+    }
     public function FormatMenu(_:Dynamic, __:Dynamic, ___:Dynamic):Void {}
-    public function AddMenuItem(_:Dynamic, __:Dynamic, ___:Dynamic = true, ____:Dynamic = false, _____:Dynamic = 250):Void {}
+    public function AddMenuItem(id:Dynamic, label:Dynamic, enabled:Dynamic = true, _:Dynamic = false, __:Dynamic = 250):Void {
+        menuItems.push({id:Std.string(id), label:Std.string(label), enabled:enabled == true});
+    }
     public function ShowMenu():Void { isActive = true; }
     public function CloseMenu():Void { isActive = false; }
     public function FormatOnScreenKeyboard(_:Dynamic, __:Dynamic):Void {}

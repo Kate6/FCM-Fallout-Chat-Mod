@@ -7,11 +7,30 @@ must not add game-memory reads, code injection, or network/port scanning.
 
 ## Current implementation and verification
 
-As of **2026-09-12**, the local source and rebuilt SWF/BA2 are **FCMChatWidget 2.10.78**.
-This is a review candidate, not a publication or installed-game claim. Local Haxe, relay,
-source-anchor, packaging, and SWF/BA2 checks passed during the review; hosted CI and in-game
-acceptance of this candidate have not been run. The last recorded desktop ZFE confirmation
-covers 2.10.74 name colors and emoji, not every later change or every provider. See
+**2026-09-16 source candidates:** FCMChatWidget **2.10.103** and FCMServerBridge **0.1.6** share
+a bounded roster collector. The bridge policy consumes copied observations, not game-owned
+payloads; repeated cache reads do not renew freshness. A new independent Ruffle host tests the
+exact packaged bridge in a fresh application domain under both mock providers. Bridge 0.1.6 DEV
+is **installed locally, native roster acceptance failed** (`payload E1014` on four sources,
+`test provider` on two, no observed roster); widget 2.10.103 is not installed. The previous
+bridge 0.1.5 failed with E1014 and no identified class. See [bridge architecture](background-server-bridge.md) and
+[the test gate](../../testing/hud-automation-plan.md#isolated-packaged-bridge-gate).
+
+Historical **2026-09-15** acceptance: the source and rebuilt SWF/BA2 candidate were
+**FCMChatWidget 2.10.102**, tested locally with official xScal 0.2.16 against hosted Dev and now
+retained inactive for the separate background bridge test.
+The preceding 2.10.101 same-world travel test failed when an empty map masked populated public
+teams. Candidate 2.10.102 permits an overlapping populated player/public-team fallback, retaining
+the existing expiry and disjoint-roster safeguards. Native history, General/Server echoes and
+room continuity through two populated-map loading transitions passed; the exact empty-map
+fallback remains native-test pending. It is not published. The previous
+2.10.100/hosted-Dev ZFE run confirmed linking, history completion, and message
+self-echoes, but same-server fast travel falsely reset Server chat on an empty `TeamMarkers`
+update. The new candidate uses effective map/player roster continuity and bounded empty recovery;
+the Ruffle scenario exercises actual widget state through both ZFE and xScal. Fresh in-game
+empty-map fast-travel and real-hop acceptance is still required. The
+[xScal acceptance record](../../testing/hud-xscal-acceptance-2026-09-15.md) separates automated
+coverage from remaining native checks. See
 [styling test history](../../testing/hud-emoji-status.md) and
 [recovery acceptance](../../testing/hud-recovery.md).
 
@@ -28,11 +47,21 @@ covers 2.10.74 name colors and emoji, not every later change or every provider. 
 | Duplicate/reconnect/send behavior | [Recovery checks](../../testing/hud-recovery.md), [retry receipts](hud-send-retries.md) |
 | Background HUDModLoader mod for desktop Server chat | [Background bridge implementation and acceptance](background-server-bridge.md) |
 
-The separate [FCMServerBridge 0.1.0 background candidate](background-server-bridge.md) uses
+The separate [FCMServerBridge diagnostic candidate](background-server-bridge.md) uses
 HUDModLoader and the same native provider adapter. It has no chat widget: status/linking live
 in the loader menu and chat appears in the desktop overlay through a private account/room
-lease. Backend and renderer changes are local; hosted deployment and in-game acceptance are
-pending. The visible widget's room alone does not enable desktop Server chat.
+lease. The fresh 0.1.5 bridge is installed locally with xScal, paired with a rebuilt isolated
+Dev overlay 1.4.0. Hosted protocol and in-game acceptance remain pending. The visible widget's
+room alone does not enable desktop Server chat.
+
+The previous 0.1.3 run reported an allowed world menu but exceptions on all six roster sources.
+Installed 0.1.4 adds cached getter/processing phases, numeric exception IDs and subscription
+counts; native acceptance is pending and it does not claim to fix the failure. See the background bridge
+guide for current evidence and next checks.
+
+The subsequent native 0.1.4 screenshot shows eight successful subscriptions but
+`processor entry E1014` on all roster paths. Installed (not native-accepted) 0.1.5 adds a bounded
+missing-class identifier diagnostic. The unresolved dependency and functional fix remain pending.
 
 ## Native transport and provider selection
 
@@ -52,22 +81,80 @@ website's `/link` page. Connection success alone does not establish a linked acc
 membership uses authenticated controls built from HUD-published account/world/roster data.
 See the [native relay guide](native-chat-relay/README.md) for the full data path.
 
-### ZFE automatic roster safety (2.10.92)
+### Current game font aliases (2.10.97)
 
-The visible widget fails closed on automatic Server-room roster/leave controls through ZFE. ZFE
-older ZFE builds perform that relay operation synchronously on Fallout's Scaleform/UI thread; an
-unreachable relay was observed blocking the thread for roughly 15 seconds per attempt. Static
-community chat/history remains enabled. xScal retains Server-room binding.
-Restore ZFE automatic binding only after its provider exposes and tests a non-blocking request
-primitive; scheduling the native call from an SWF timer does not make it asynchronous.
+FCMChatWidget body text, prompt text, status text, and punctuation use `$MAIN_Font`; tab labels
+and sender names use `$MAIN_Font_Bold`. This is based on the active Fallout 76 English
+`interface/fontconfig_en.txt`, which maps those two aliases to Roboto Condensed faces. It does
+not map `$MAIN_Font_Light`. Using that nonexistent alias renders the body range as square
+placeholder glyphs, which can make the `Name: message` separator appear missing even though the
+serialized message includes it. The Ruffle harness uses the corresponding direct face names,
+`Roboto Condensed` and `Roboto Condensed Bold`.
+
+### Provider-gated automatic roster safety (2.10.98)
+
+The visible widget enables automatic Server-room roster/leave controls through ZFE only when the
+runtime advertises `zfe-chat-async-control-v1`. Older ZFE builds perform that operation
+synchronously on Fallout's Scaleform/UI thread, so they remain fail-closed; static community
+chat/history still works. xScal retains Server-room binding through its asynchronous
+`chatInterface`. Native Haxe tests execute the capability gates and exact provider payloads. The
+Ruffle suite verifies both packaged provider paths and the GFx-safe receipt decoder source gate;
+pure Haxe executes the exact queued/control completion envelopes. The final
+BSUIDataManager-to-`SERVER-READY` observation remains bounded in-game acceptance because Ruffle
+0.6 does not expose the movie callbacks or Fallout's cross-domain manager boundary needed to
+drive and inspect that private state.
 
 From widget 2.10.94, ordinary ZFE sends require the runtime capability
 `zfe-chat-async-send-v1`. A ZFE build without it gets an update-required message instead of a
 potentially blocking native call. The gate uses the advertised capability, not a version string.
 
+### ZFE asynchronous completion (2.10.100)
+
+With `zfe-chat-async-send-v1`, `chat.v1.sendMessage` returns `status=queued` and a provider-local
+numeric `requestId`; this is not proof that the relay accepted or stored the operation. The widget
+retains the optimistic send or pending Server control and matches that ID against the later
+`chat.send.accepted` or `chat.send.failed` event returned by `pollEvents`. User sends remain
+pending until their durable relay echo/private receipt arrives. Server controls remain pending
+until `FCMCTL/1/SERVER-READY`; terminal failures keep the Server tab hidden and log the stable
+failure code. A 750 ms follow-up poll covers the observed worker completion window without
+waiting for the normal five-second background interval.
+
+The decoder uses the bundled bounded `FcmJson` implementation. In 2.10.99, in-game logs showed
+a 48-byte response taking the synchronous-success path before the network response arrived.
+The exact response body and parser failure were not captured; the build already enabled
+`haxeJSON`, so a missing native JSON global was not established as the cause. Fresh 2.10.100
+logs confirm queued request IDs and terminal failures are now recognized. They also reveal
+`permission_denied` after a HUD reload consumed the original sign-in notice. The relay recovery
+correction below addresses that separate failure. Low-end render coalescing, six-row slices,
+and reusable rows remain enabled.
+
+### Missing sign-in code after a HUD reload
+
+On 2026-09-15, ZFE delivered a link notice at 19:54:52, then loaded a new widget instance at
+19:55:19 while retaining its native subscriber. The new instance had no pinned notice and
+its `RESYNC`, roster, and message requests were denied because the relay identity was unlinked.
+The local backend correction accepts only the exact limited-identity `RESYNC` control to
+reissue that account's private notice, rate-limited and routed across backend replicas.
+It does not grant chat permissions or reset credentials. See the
+[auth recovery contract](native-chat-relay/fcm-integration.md). The correction is deployed to
+hosted Dev as `73bd38be` (2026-09-16 UTC), but not Prod. The public Dev `/relay` smoke test
+consumed the original notice, retained the subscription, and recovered the same valid code on
+two RESYNCs with newer delivery cursors. Unlinked sends remained denied. The initial snapshot
+contained 40 records across all five static channels and exactly one completion marker.
+Temporary test tokens/link codes and sockets were cleaned up. This is live relay evidence,
+not native ZFE/GFx acceptance. The local 2.10.100 ZFE widget now targets hosted Dev; its archive
+is unchanged and its former Prod settings/auth file were backed up before the target switch.
+
+Local verification: 149 relay/auth/link-code tests, TypeScript no-emit checking, the full
+24-test Ruffle suite, Haxe logic/provider/auth suites, and source/package/BA2/SWF checks passed.
+The new WebSocket regression consumes the original notice before requesting recovery on the
+same subscriber, checks a newer cursor and cross-instance delivery, and proves other identities
+receive no code. Additional tests cover code reuse, rate limits, revoked tokens, and service
+failure. Ruffle remains regression evidence, not proof of the native ZFE/GFx lifecycle.
+
 ## Combined General feed
 
-In local candidate 2.10.78, General shows **General, current-room Server, Trading, Events,
+In local candidate 2.10.100, General shows **General, current-room Server, Trading, Events,
 Infests, and Raids**. The six allowed slugs are `global`, `server`, `trade`, `events`, `infests`,
 and `raids`. Tabs filter one retained record list; each row keeps its source channel and message
 identity. Sending from General still sends to `global`. No message is copied or rebroadcast.
@@ -171,6 +258,13 @@ Do not validate rebinds by editing persisted appearance storage alone, and do no
 from `updateChatHotkey` alone. `Data/FCMChat.ini` is authoritative; replacing the BA2 or fragment
 requires a full game restart.
 
+That 0.12.26 result remains historical in-game evidence. Nexus ZFE 0.15.0 targets Steam and
+Xbox/Game Pass runtime 1.7.26.10. Static artifact inspection on 2026-09-15 confirmed that it retains
+FCM's `__ZFE` dispatcher, `zfe-chat-online-v1`, `zfe-chat-async-send-v1`,
+`zfe-chat-async-control-v1`, storage, input, hotkey, and physical `Input.*` contracts. The Ruffle
+provider mock now identifies as 0.15.0. Fresh in-game acceptance is still required before treating
+that static and simulated result as native acceptance.
+
 ### Verified xScal rebind procedure
 
 In-game acceptance on 2026-09-15 with the installed xScal 0.1.15 contract and FCMChatWidget
@@ -187,6 +281,13 @@ Dev history across 16/16/10-event polls and emitted `replay completed` with 41 r
 Manual in-game testing confirmed the rotated actions worked. As with ZFE, exercise every action
 and verify superseded bindings are inactive; registration itself does not suppress an overlapping
 Fallout gameplay action.
+
+That 0.1.15 result remains historical in-game evidence. Nexus xScal 0.2.16 targets Fallout runtime
+1.7.26.10. Static artifact inspection on 2026-09-15 confirmed that it retains FCM's required
+`XSCALCHATV1`/`chatInterface` methods and `Input.RegisterKey`, `Input.IsKeyPressed`,
+`Input.UnregisterKey`, and `Input.ClearKeys` callbacks. The Ruffle contract fixture and suite now
+exercise 0.2.16. Fresh 1.7.26.10 in-game acceptance is still required before promoting that static
+and simulated compatibility result to native acceptance.
 
 Channel and scroll bindings always come from `FCMChat.ini`. Both providers use the visible
 SharedHUDTools editor; only ZFE can use the native draft buffer as a fallback. Provider acceptance

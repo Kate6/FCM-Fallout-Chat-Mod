@@ -481,6 +481,7 @@ function setCollapsed(next: boolean, focusInput = false) {
     if (fullAutoHide) {
       collapsedHidden = [];
       root?.classList.add('fcm-full-auto-hidden');
+      document.documentElement.classList.add('fcm-full-auto-hidden');
     } else {
       applyCollapsedHidden();
     }
@@ -510,6 +511,7 @@ function setCollapsed(next: boolean, focusInput = false) {
     setTimeout(() => {
       if (collapsed) return;
       if (wasFullAutoHide) root?.classList.remove('fcm-full-auto-hidden');
+      if (wasFullAutoHide) document.documentElement.classList.remove('fcm-full-auto-hidden');
       revealCollapsedElements(root, hiddenEls);
       // Jump the feed to the latest message so the user sees the most recent
       // chat after expanding. Defer a frame so the body has laid out first.
@@ -550,8 +552,10 @@ function reassertCollapsed() {
   if (fullAutoHide) {
     collapsedHidden = [];
     root?.classList.add('fcm-full-auto-hidden');
+    document.documentElement.classList.add('fcm-full-auto-hidden');
   } else {
     root?.classList.remove('fcm-full-auto-hidden');
+    document.documentElement.classList.remove('fcm-full-auto-hidden');
     applyCollapsedHidden();
   }
   // Reset any scroll the React overlay applied so the input can't be revealed.
@@ -1397,7 +1401,12 @@ function buildSettingsPanel() {
     hint(s, 'Linking opens Discord in your browser to authorise this install. Click REFRESH STATUS after returning to update the panel. Unlinking signs you out and returns you to the provider login screen. Your chat display name comes from your FO76 name above, or your Discord display name.');
 
     window.relayBridge.onDiscordStatus?.((status) => {
-      commit({ discordLinked: status.linked, discordName: status.discordName || '' });
+      commit({
+        discordLinked: status.linked,
+        discordName: status.discordName || '',
+        discordDisplayName: status.discordDisplayName || currentSettings.discordDisplayName,
+        discordAvatarUrl: status.avatarUrl ?? currentSettings.discordAvatarUrl,
+      });
       renderDiscordStatus();
       renderProfile();
     });
@@ -1470,7 +1479,9 @@ function buildSettingsPanel() {
       if (s.discordName)        patch.discordName = s.discordName;
       if (s.discordUsername)    patch.discordUsername = s.discordUsername;
       if (s.discordDisplayName) patch.discordDisplayName = s.discordDisplayName;
-      if (s.discordAvatarUrl != null) patch.discordAvatarUrl = s.discordAvatarUrl || '';
+      if (s.avatarUrl != null || s.discordAvatarUrl != null) {
+        patch.discordAvatarUrl = s.avatarUrl || s.discordAvatarUrl || '';
+      }
       if (s.steamLinked != null) patch.steamLinked = !!s.steamLinked;
       if (s.steamDisplayName != null) patch.steamDisplayName = s.steamDisplayName;
       if (s.username)           patch.fo76Name = s.username;
@@ -2098,13 +2109,13 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
     document.head.appendChild(noDragStyle);
 
     let moveActive = false;
-    let moveCaptureEl: HTMLElement | null = null;
+    let moveCaptureEl: Element | null = null;
     let clickThroughOn = false;
 
     window.relayBridge.onClickThrough?.((on: boolean) => { clickThroughOn = on; });
 
     const isDragTarget = (target: EventTarget | null): boolean => {
-      if (!(target instanceof HTMLElement)) return false;
+      if (!(target instanceof Element)) return false;
       return isDragTargetCore(
         target as unknown as Parameters<typeof isDragTargetCore>[0],
         document.documentElement as unknown as Parameters<typeof isDragTargetCore>[0],
@@ -2117,9 +2128,10 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
 
     const onMovePointerDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
-      if (clickThroughOn) return;
       const modalOpen = !!document.querySelector('#shell-settings-backdrop.open, #shell-onboarding-backdrop.open');
-      if (modalOpen) return;
+      // Native modal pinning deliberately overrides click-through. Only the
+      // designated header passes isDragTarget; modal controls/backdrops do not.
+      if (clickThroughOn && !modalOpen) return;
       // Diagnostic: record the drag decision for every left-click so a user log
       // tells us whether the top bar is recognised as a drag target (the move IPC
       // is otherwise silent). Drop once the Linux drag issue is confirmed fixed.
@@ -2129,7 +2141,7 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
       } catch { /* noop */ }
       if (!dragOk) return;
       moveActive = true;
-      moveCaptureEl = e.target as HTMLElement;
+      moveCaptureEl = e.target as Element;
       try { moveCaptureEl.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       try { window.relayBridge.moveStart?.(); } catch { /* ignore */ }
       e.preventDefault();
@@ -2195,6 +2207,7 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
     if (msgActivityTimeout) { clearTimeout(msgActivityTimeout); msgActivityTimeout = null; }
     const root = document.getElementById('root');
     root?.classList.remove('fcm-full-auto-hidden');
+    document.documentElement.classList.remove('fcm-full-auto-hidden');
     if (collapsed) {
       collapsed = false;
       // #327: fully reveal — not just the root 'collapsed' class. Previously this
@@ -2219,7 +2232,11 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
     // #fcm-picker-portal and .ss-ac are portaled to <body> (outside #root) and
     // must also count as interactive UI.
     const modalOpen = !!document.querySelector('#shell-settings-backdrop.open, #shell-onboarding-backdrop.open');
-    const overUi = modalOpen
+    // The one-pixel full-hide strip is deliberately transparent, but it is a
+    // wake target. Treat forwarded hover there as interactive so auto
+    // click-through releases mouse-ignore and markActivity can expand it.
+    const fullAutoHidden = document.documentElement.classList.contains('fcm-full-auto-hidden');
+    const overUi = fullAutoHidden || modalOpen
       || !!(e.target as HTMLElement)?.closest('#shell-overlay-host, #shell-bar, #shell-settings-backdrop, #shell-onboarding-backdrop, #fcm-picker-portal, .ss-ac');
     if (overUi !== lastInteractive) {
       lastInteractive = overUi;

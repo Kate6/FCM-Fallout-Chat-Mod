@@ -28,9 +28,18 @@ export function normalizeLinkCode(raw: string): string {
  * Issue a new link code for a relay identity.
  * Called by the relay (WT1) on register/hello when the identity is limited.
  * Any existing active code for this relayUserId is superseded (deleted).
+ * HUD reload recovery may reuse a still-valid code so bounded retries do not
+ * invalidate the code while the user is entering it. Reuse never extends its TTL.
  * Returns the raw code to display in-game as XXXX-XXXX.
  */
-export async function issueLinkCode(relayUserId: string): Promise<string> {
+export async function issueLinkCode(relayUserId: string, options: { reuseActive?: boolean } = {}): Promise<string> {
+  if (options.reuseActive) {
+    const active = await prisma.hudLinkCode.findFirst({
+      where: { relayUserId, usedAt: null, expiresAt: { gt: new Date() }, attempts: { lt: MAX_ATTEMPTS } },
+      select: { code: true },
+    });
+    if (active) return active.code;
+  }
   const code = generateLinkCode();
   const expiresAt = new Date(Date.now() + TTL_MS);
 

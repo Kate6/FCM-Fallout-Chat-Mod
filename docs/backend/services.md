@@ -216,7 +216,7 @@ Serves the local catalog to controllers. All reads include `kind IS NOT NULL` as
 
 **Never wire these to a per-user request path.** The request path serves exclusively from the local catalog.
 
-> **Unit tests:** TypeScript unit tests run via Node's built-in `node:test` + `tsx` (the repo's Jest is configured for compiled `tests/**/*.test.js`). Run with `npm run test:unit` — `src/testRunner.ts` recursively imports every `src/**/*.test.ts`. No extra dependencies.
+> **Unit tests:** TypeScript unit tests run via Node's built-in `node:test` + `tsx` (the repo's Jest is configured for compiled `tests/**/*.test.js`). Run with `npm run test:unit` — `src/testRunner.ts` discovers every `src/**/*.test.ts` and runs each suite in an isolated process. No extra dependencies.
 
 ---
 

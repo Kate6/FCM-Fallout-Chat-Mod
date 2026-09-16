@@ -6,9 +6,10 @@ const startedAt = performance.now();
 const logEl = document.querySelector<HTMLPreElement>('#log')!;
 const statusEl = document.querySelector<HTMLElement>('#status')!;
 const playerHost = document.querySelector<HTMLElement>('#player')!;
-const mode = new URLSearchParams(location.search).get('mode') === 'harness' ? 'harness' : 'artifact';
+const requestedMode = new URLSearchParams(location.search).get('mode');
+const mode = requestedMode === 'packaged-bridge' ? 'packaged-bridge' : requestedMode === 'harness' ? 'harness' : 'artifact';
 const provider = new URLSearchParams(location.search).get('provider') === 'zfe' ? 'zfe' : 'xscal';
-const swfUrl = mode === 'harness' ? '/FCMHarness.swf' : '/FCMChatWidget.swf';
+const swfUrl = mode === 'packaged-bridge' ? '/PackagedBridgeHost.swf' : mode === 'harness' ? '/FCMHarness.swf' : '/FCMChatWidget.swf';
 let longTasks = 0;
 let player: RuffleElement | undefined;
 let keybinds: KeybindProfile = { ...defaultKeybinds };
@@ -94,18 +95,22 @@ async function boot(): Promise<void> {
   await player.ruffle().load({
     url: swfUrl, autoplay: 'on', backgroundColor: '#090806', letterbox: 'on',
     logLevel: 'info', warnOnUnsupportedContent: true, unmuteOverlay: 'hidden',
-    openUrlMode: 'deny', allowNetworking: mode === 'harness' ? 'internal' : 'none', allowScriptAccess: mode === 'harness',
-    parameters: { provider },
+    // Ruffle's "internal" blocks ExternalInterface. Only our isolated local test
+    // host needs that driver; URL opening remains denied and tests block nonlocal requests.
+    openUrlMode: 'deny', allowNetworking: mode === 'packaged-bridge' ? 'all' : mode === 'harness' ? 'internal' : 'none', allowScriptAccess: mode !== 'artifact',
+    parameters: { provider, scenario: new URLSearchParams(location.search).get('scenario') ?? '' },
     ...(gameFontSource ? { fontSources: ['/fonts_programs.swf'] } : {}),
   });
+  // Ruffle 0.6.0 ignores this setter until load creates its instance. Scenario results use
+  // Flash trace (not Haxe's on-stage debug field) after the widget's asynchronous startup.
   player.ruffle().traceObserver = line => log('AVM2', line);
   document.querySelector('#swf-hash')!.textContent = await sha256(swfUrl);
   const manifest = await (await fetch('/sim-manifest.json', { cache: 'no-store' })).json();
-  const installedFixture = await (await fetch('/installed-xscal-0.1.15.json', { cache: 'no-store' })).json();
+  const installedFixture = await (await fetch('/installed-xscal-0.2.16.json', { cache: 'no-store' })).json();
   window.__INSTALLED_XSCAL__ = new InstalledXscalHost(installedFixture);
   document.querySelector('#widget-version')!.textContent = manifest.widgetVersion;
   document.querySelector('#host-mode')!.textContent = mode;
-  document.querySelector('#provider-mode')!.textContent = mode === 'harness' ? provider : 'none';
+  document.querySelector('#provider-mode')!.textContent = mode !== 'artifact' ? provider : 'none';
   const hostedDevEl = document.querySelector('#hosted-dev-mode')!;
   try {
     const hosted = await fetch('/__fcm/hosted-dev/status', { cache: 'no-store' });
@@ -168,12 +173,16 @@ async function saveKeybinds(reset = false): Promise<void> {
 document.querySelector('#apply-keybinds')!.addEventListener('click', () => void saveKeybinds());
 document.querySelector('#reset-keybinds')!.addEventListener('click', () => void saveKeybinds(true));
 
-window.__FCM_SIM__ = { dispatch, submit: text => external('simSubmit', text), setHudMode: mode => external('simSetHudMode', mode), snapshot: () => {
+window.__FCM_SIM__ = { dispatch, packaged: command => {
+  const value = external('simPackaged', command);
+  return value == null ? null : JSON.parse(String(value)) as unknown;
+}, submit: text => external('simSubmit', text), setHudMode: mode => external('simSetHudMode', mode), snapshot: () => {
   const value = external('simSnapshot');
   return value == null ? null : JSON.parse(String(value));
 } };
 window.__FCM_SIM_TEARDOWN__ = () => {
   clearInterval(elapsedTimer);
+  if (mode === 'packaged-bridge') { try { external('simPackaged', 'unload'); } catch { /* Failed boot still removes the player. */ } }
   player?.remove(); player = undefined;
   statusEl.textContent = 'Torn down'; statusEl.dataset.state = 'stopped';
 };
@@ -194,7 +203,7 @@ declare global {
     RufflePlayer?: { newest(): { createPlayer(): RuffleElement } };
     fcmSimLog: (message: unknown) => void;
     fcmHostedDevSend: (channel: unknown, body: unknown) => boolean;
-    __FCM_SIM__?: { dispatch(action: string): Promise<void>; submit(text: string): unknown; setHudMode(mode: string): unknown; snapshot(): Record<string, unknown> | null };
+    __FCM_SIM__?: { dispatch(action: string): Promise<void>; packaged(command: string): unknown; submit(text: string): unknown; setHudMode(mode: string): unknown; snapshot(): Record<string, unknown> | null };
     __FCM_SIM_TEARDOWN__?: () => void;
     __INSTALLED_XSCAL__?: InstalledXscalHost;
   }

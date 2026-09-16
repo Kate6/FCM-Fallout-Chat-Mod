@@ -41,7 +41,12 @@ describe('full auto-hide wiring', () => {
 
     expect(shell).toContain("root?.classList.add('fcm-full-auto-hidden')");
     expect(shell).toContain("root?.classList.remove('fcm-full-auto-hidden')");
+    expect(shell).toContain("document.documentElement.classList.add('fcm-full-auto-hidden')");
+    expect(shell).toContain("document.documentElement.classList.remove('fcm-full-auto-hidden')");
+    expect(shell).toContain("const overUi = fullAutoHidden || modalOpen");
     expect(html).toContain('#root.fcm-full-auto-hidden');
+    expect(html).toContain('html.fcm-full-auto-hidden #shell-bg-dim');
+    expect(html).not.toContain("#root.fcm-full-auto-hidden {\n        visibility: hidden !important;\n        pointer-events: none !important;");
     expect(main).toContain('live renderer can receive a message and request expansion');
     expect(main).not.toContain('collapseToHeader(headerH) {');
   });

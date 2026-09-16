@@ -306,6 +306,7 @@ app.get('/auth/discord/profile', authLimiter, requireLinkAuth, async (req: Reque
   await new Promise<void>((resolve, reject) => req.session.save(err => err ? reject(err) : resolve()));
   const params = new URLSearchParams({ client_id: env.DISCORD_CLIENT_ID,
     redirect_uri: env.DISCORD_REDIRECT_URI, response_type: 'code', scope: 'identify', state });
+  res.setHeader('Cache-Control', 'no-store');
   res.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
 });
 
@@ -348,6 +349,7 @@ app.get('/auth/discord', authLimiter, async (req: Request, res: Response) => {
     scope: 'identify guilds.members.read',
     state,
   });
+  res.setHeader('Cache-Control', 'no-store');
   res.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
 });
 
@@ -495,41 +497,31 @@ app.get('/auth/discord/callback', authLimiter, async (req: Request, res: Respons
       }).catch((err: Error) => logger.warn({ err }, 'Failed to upsert admin_users (non-fatal)'));
     }
 
-    // Update game user record if linked. discordDisplayName is refreshed on
-    // every login so the user's chat label tracks Discord global-name changes.
-    await prisma.user.updateMany({
+    // Persist the canonical account before establishing a browser session.
+    // Display names are not unique identities: using one as the unique username
+    // can fail on a different user's name and strand /link in a 401 sign-in loop.
+    // Match only Discord ID, as the desktop link flow does; never reclaim by name.
+    const discordDisplayName = String(discordUser.global_name || discordUser.username).slice(0, 128);
+    const discordProfile = {
+      discordUsername: discordUser.username,
+      discordAvatar: discordUser.avatar || null,
+      discordDisplayName,
+    };
+    await prisma.user.upsert({
       where: { discordId: discordUser.id },
-      data: {
-        discordUsername: discordUser.username,
-        discordAvatar: discordUser.avatar || null,
-        discordDisplayName: String(discordUser.global_name || discordUser.username).slice(0, 128),
+      update: discordProfile,
+      create: {
+        // Restored/unlinked rows can still own the old discord:<id> slug.
+        // Give new rows an independent internal name; only discordId proves ownership.
+        username: `discord:${discordUser.id}:${uuidv4()}`,
+        installToken: uuidv4(),
+        discordId: discordUser.id,
+        ...discordProfile,
       },
-    }).catch(() => { /* non-fatal */ });
+    });
 
     // Capture avatar to MinIO (fire-and-forget)
     captureAvatar(discordUser.id, discordUser.avatar).catch(() => { /* non-fatal */ });
-
-    // Ensure admin has a game user record so they appear in user management
-    const adminDisplayName = String(discordUser.global_name || discordUser.username).slice(0, 128);
-    const existingGameUser = await prisma.user.findFirst({ where: { discordId: discordUser.id } });
-    if (!existingGameUser) {
-      await prisma.user.create({
-        data: {
-          username: discordUser.global_name || discordUser.username,
-          installToken: uuidv4(),
-          discordId: discordUser.id,
-          discordUsername: discordUser.username,
-          discordDisplayName: adminDisplayName,
-          discordAvatar: discordUser.avatar || null,
-        },
-      }).catch((err: Error) => logger.warn({ err }, 'Failed to auto-create game user for admin'));
-    } else {
-      // Keep discordDisplayName in sync on every admin login
-      await prisma.user.update({
-        where: { id: existingGameUser.id },
-        data: { discordDisplayName: adminDisplayName },
-      }).catch(() => { /* non-fatal */ });
-    }
 
     // Cache the verified role in Redis
     await roleVerificationService.cacheRole(discordUser.id, adminRole).catch(() => { /* non-fatal */ });
@@ -656,6 +648,9 @@ app.get('/auth/discord/link', authLimiter, async (req: Request, res: Response) =
     scope: 'identify guilds.members.read',
     state,
   });
+  // OAuth state is one-time. Prevent a browser from caching this stable link URL
+  // and replaying an old redirect/state on a later link or relink attempt.
+  res.setHeader('Cache-Control', 'no-store');
   res.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
 });
 
@@ -949,12 +944,15 @@ app.get('/api/auth/discord-status/:installToken', async (req: Request, res: Resp
     const discordAvatarUrl = user?.discordId && user.discordAvatar
       ? `https://cdn.discordapp.com/avatars/${user.discordId}/${user.discordAvatar}.png?size=128`
       : null;
+    const avatarUrl = user?.discordId && user.discordAvatar
+      ? buildAvatarUrl(user.discordId)
+      : null;
 
     const redis = await getRedisClient();
     const cached = await redis.get(`discord_link:${installToken}`);
     if (cached) {
       const parsed = JSON.parse(cached);
-      res.json({ data: { linked: true, username: fo76Username, displayName, discordAvatarUrl, ...parsed } });
+      res.json({ data: { linked: true, username: fo76Username, displayName, discordAvatarUrl, avatarUrl, ...parsed } });
       return;
     }
 
@@ -968,13 +966,14 @@ app.get('/api/auth/discord-status/:installToken', async (req: Request, res: Resp
           discordUsername: user.discordUsername,
           discordAvatar: user.discordAvatar,
           discordAvatarUrl,
+          avatarUrl,
           discordDisplayName: user.discordDisplayName || user.discordUsername,
         },
       });
       return;
     }
 
-    res.json({ data: { linked: false, username: fo76Username, displayName, discordAvatarUrl: null } });
+    res.json({ data: { linked: false, username: fo76Username, displayName, discordAvatarUrl: null, avatarUrl: null } });
   } catch (err) {
     logger.error({ err }, 'Failed to check discord-status');
     res.status(500).json({ data: { linked: false } });

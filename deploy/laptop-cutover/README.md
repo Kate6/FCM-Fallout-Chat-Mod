@@ -164,6 +164,30 @@ fail-closed checkpoint in future rehearsals and in Production:
   override (or apply the expected Compose labels before startup), then verify the
   resolved volume names. A warning must not be ignored in Production because a
   future project-name change could attach an empty volume.
+- A `docker save` archive can import with its original source tag (or only an
+  image ID), while the cutover `.env` requires environment-specific local tags.
+  After every `docker load`, verify the expected `FCM_BACKEND_IMAGE` and
+  `MINIO_IMAGE` references resolve locally. Add only local Docker tag aliases
+  for the verified imported image; never let Compose pull an unreviewed image
+  because a local tag is absent.
+- The portable backup `SHA256SUMS` may preserve the source host's absolute
+  paths. On a different host, validate each encrypted archive by its basename
+  against the manifest hash, record the path-format exception, and fail on any
+  missing or mismatched basename. Do not mistake the path prefix difference for
+  a successful verification or for archive corruption.
+- Before restoring Dev on the mothership, inspect all existing FCM Compose
+  projects by Docker labels, not just expected Dev names. A previously running
+  Dokploy Production project contained a live backend and Discord bot after
+  production had moved to Hostinger. Stop the specifically identified obsolete
+  project with `docker compose down` (without `-v`) and prove it is gone before
+  starting a replacement environment.
+- Treat the `releases_downloads` volume as user-visible production state. The
+  release table can retain a valid version and URL while a restored downloads
+  volume contains only install scripts, leaving the advertised Windows ZIP or
+  installer at HTTP 404. Before declaring a target authoritative, compare each
+  currently published release URL with the restored volume, restore the exact
+  release artifacts, then verify public HTTP 200, `Content-Length`, and SHA-256
+  against the source artifact.
 - A remotely managed tunnel resolves its configured origin on the connector's
   Docker network. The backend therefore needs a network alias matching the saved
   origin (`backend-dev` for the current Dev tunnel). Host-local health alone is

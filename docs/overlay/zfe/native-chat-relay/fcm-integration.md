@@ -77,6 +77,18 @@ Some native responses report transport authentication without a linked FCM accou
 not clear the widget’s sticky link gate or the relay’s send permission check. The token can be linked after a web device-code flow;
 the normal relay event flow then refreshes the widget state.
 
+HUD reload recovery also covers limited identities. An exact `server` send of
+`FCMCTL/1/RESYNC`, authenticated with a valid relay token, reissues the private link notice
+to that identity's surviving subscriber(s). It does not enable sending or room controls and
+does not replay stale Server history. Recovery is limited to six requests per ten-second
+identity bucket and fails closed with `link_unavailable` if code generation/delivery fails.
+An existing unexpired, unused code is reused without extending its lifetime; otherwise one
+code is generated on the requesting backend and forwarded over private `relay:control`
+(`link-required`) to other backend instances; recipients allocate fresh delivery cursors but
+never mint another code. Neither the code nor the token is logged. Normal authenticated
+history recovery resumes after linking. This correction requires a backend deployment;
+replacing the widget archive alone does not apply it.
+
 ### Mandatory auth gate — limited until a provider-linked FCM account
 
 The relay permits a bare install to register only as a limited identity so it can
@@ -315,9 +327,11 @@ package contract:
   world poll because `Subscribe()` adds a `CHANGE` listener but does not replay the cached value;
   this ensures a newly joined world can create the `SERVER` tab and trigger history replay even when
   no second provider event is emitted;
-- each provider contributes a replaceable snapshot instead of an ever-growing name cache. An empty
-  or completely disjoint snapshot is treated as a world-session boundary: the widget clears local
-  ephemeral server rows, sends `FCMCTL/1/LEAVE`, then submits a fresh roster and waits for its ACK;
+- each provider contributes a replaceable snapshot instead of an ever-growing name cache.
+  From 2.10.101, fresh `MapMenuData` takes precedence, then `PlayerListData`, with the auxiliary
+  union used only when neither is available. A changed nearby/team list cannot override an
+  unchanged full roster. A disjoint nonempty effective roster clears ephemeral server rows,
+  sends `FCMCTL/1/LEAVE`, and submits a fresh roster on the next poll;
 - a successful fresh roster/world bind invokes the existing relay server-history backfill. Static
   channel history remains durable; `server` history remains the bounded recent Redis history
   described below, not permanent Postgres history.
@@ -423,8 +437,8 @@ when a recreated widget finds a retained subscriber with an empty queue. It repl
 history, while server-room history remains pending until the next accepted roster/world bind.
 Replay identity is scoped to each feed: clearing SERVER rows clears their event/message IDs while
 static deduplication survives a world change. Reconnecting resets native event IDs (which may
-restart) while retaining durable static message IDs. Each roster provider is compared against its
-own previous snapshot, preventing unchanged empty auxiliary lists from repeatedly clearing SERVER.
+restart) while retaining durable static message IDs. Session boundaries compare the effective
+world roster with the last submitted roster, not each auxiliary provider with its own prior list.
 
 Local candidate HUD 2.10.78 combines all six canonical feeds in the General view without changing relay routing.
 Each row retains its original channel for replay identity, echo reconciliation, labels, and
@@ -462,9 +476,14 @@ Widget v2.10.54 also pulls the current values of `PlayerListData`, `TeamMarkers`
 `PartyMenuList`, and `VoiceChatAreaData` after subscribing. This is intentional: the upstream
 `BSUIDataManager.Subscribe()` implementation only attaches the callback and does not invoke it for
 the provider value already in the cache. Provider snapshots are replaced on every refresh, so a
-previous world's names cannot live in the next roster merely because its TTL has not expired. When
-the new snapshot is empty or has no name in common with the last acknowledged roster, the widget
-performs a real leave-before-rebind and clears only local `server` rows. The next accepted roster
+previous world's auxiliary names cannot mask a fresh disjoint map/player roster. Same or
+overlapping effective rosters preserve Server history, selection, and the session nonce. A newly
+empty primary after a nonempty submission gets a bounded 60-second recovery window; repeated
+empty updates do not restart it, and the independent 60-second relay confirmation lease is not
+extended. The earlier lease expiry can therefore still clear unconfirmed state. Initial solo
+binding is not delayed. Explicit MainMenu exits remain immediate. A disjoint nonempty roster,
+or an empty roster after recovery expires, performs leave-before-rebind and clears only local
+`server` rows. The next accepted roster
 bind causes the relay to backfill that current room's recent history, which restores the `SERVER`
 sub-tab and its available history after a world change without leaking the previous room.
 

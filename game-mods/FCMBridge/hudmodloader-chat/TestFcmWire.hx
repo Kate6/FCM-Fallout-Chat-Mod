@@ -25,6 +25,34 @@ class TestFcmWire {
         check("native unquoted events", FcmWire.findEventsArrayStart('{events: [ ]}') == 9);
         check("embedded body word ignored", FcmWire.findEventsArrayStart('{"body":"events: [x]"}') == -1);
         check("missing events rejected", FcmWire.findEventsArrayStart('{"success":true}') == -1);
+        check("ZFE queued send exposes request id",
+            FcmWire.queuedRequestId('{"success":true,"status":"queued","requestId":42}') == 42);
+        check("exact in-game one-digit ZFE queue receipt exposes request id",
+            FcmWire.queuedRequestId('{"success":true,"status":"queued","requestId":1}') == 1);
+        check("whitespace ZFE queue receipt exposes request id",
+            FcmWire.queuedRequestId(' \n { "success" : true, "status" : "queued", "requestId" : 7 } \t') == 7);
+        check("synchronous success is not a queued send",
+            FcmWire.queuedRequestId('{"success":true,"messageId":"m-1"}') == 0);
+        check("failed queue response is not accepted",
+            FcmWire.queuedRequestId('{"success":false,"status":"queued","requestId":42}') == 0);
+        check("string request id is rejected",
+            FcmWire.queuedRequestId('{"success":true,"status":"queued","requestId":"42"}') == 0);
+        check("fractional request id is rejected",
+            FcmWire.queuedRequestId('{"success":true,"status":"queued","requestId":1.5}') == 0);
+        check("nested queue receipt cannot impersonate outer result",
+            FcmWire.queuedRequestId('{"result":{"success":true,"status":"queued","requestId":42}}') == 0);
+        check("ZFE async accepted completion classified",
+            FcmWire.asyncSendCompletion('{"kind":"chat.send.accepted","requestId":42}') == 1);
+        check("ZFE async failed completion classified",
+            FcmWire.asyncSendCompletion('{"kind":"chat.send.failed","requestId":42,"error":{"code":"permission_denied"}}') == -1);
+        check("ordinary chat is not an async completion",
+            FcmWire.asyncSendCompletion('{"kind":"chat.message","id":42}') == 0);
+        check("ZFE async completion request id extracted",
+            FcmWire.asyncRequestId('{"kind":"chat.send.failed","requestId":42}') == 42);
+        check("nested ZFE failure code extracted",
+            FcmWire.asyncErrorCode('{"kind":"chat.send.failed","requestId":42,"error":{"code":"permission_denied"}}') == "permission_denied");
+        check("non-object async envelope is rejected",
+            FcmWire.asyncSendCompletion('[{"kind":"chat.send.accepted","requestId":42}]') == 0);
         if (failures > 0) Sys.exit(1);
     }
 }
