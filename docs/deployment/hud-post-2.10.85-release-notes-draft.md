@@ -163,18 +163,18 @@ exact HUD URL/version and these metadata side effects with the owner. Preserve t
 overlay version/download values; never rebuild or overwrite overlay binaries for this HUD update.
 No API publish, upload, announcement, commit, push or prod merge has occurred in this preparation.
 
-## Built candidate files — blocked, not approved for upload
+## Built 2.10.109 candidate files — final publication approval pending
 
-Directory: `/tmp/fcm-hud-release-2.10.107-VbN645/`.
+Directory: `/tmp/fcm-hud-release-2.10.109-final/`.
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `FCM HUD Mod-2.10.107 (PROD)-Nexus.zip` | 5,991,085 | `3cdc7ca3e8adf10e37c8e0c54029f8a95fe384d333a8b629aed384a943da85ef` |
-| `FCM HUD Mod-2.10.107 (PROD).zip` | 5,992,493 | `f4fee4aa66abe2069c4b6b6ffeefe23cbb83ade6353fd63115a05ef2dc20615e` |
+| `FCM HUD Mod-2.10.109 (PROD)-Nexus.zip` | 5,991,493 | `8ca8d44f0437332feb2fb7bee8084c7dd80f66ca4591681189ad5a24eea1852c` |
+| `FCM HUD Mod-2.10.109 (PROD).zip` | 5,992,903 | `5c36bd3ff135df5b203cb165338e42b929c40f534173d46eaee6aee1a0a8abd6` |
 
 Both contain the exact tested BA2, SHA-256
-`1257a2afa27e1f044a99e829c20829f2ee35cf32388bab4e9fb8d79b505de65a`.
+`e19f41ac36ab33697135f0b53dd48d43c2e87b5ca2309a5e8261d5f80167ab6b`.
 The fresh compile, normalized SWF and BA2-extracted SWF compare byte-for-byte. Production
 endpoint stamps are verified for both providers, Nexus CRCs pass, and the 17-entry Nexus
-manifest contains no executable/script/extender files. All 35 Ruffle cases passed again;
+manifest contains no executable/script/extender files. All 37 Ruffle cases passed;
 the owned server released its test port. Hosted CI for the new uncommitted delta remains pending.
