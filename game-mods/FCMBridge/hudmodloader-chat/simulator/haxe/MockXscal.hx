@@ -11,6 +11,10 @@ class MockXscal {
     public static var serverControlCount(default, null):Int = 0;
     public static var leaveControlCount(default, null):Int = 0;
     public static var asyncCompletionDeliveries(default, null):Int = 0;
+    public static var authReady:Bool = true;
+    public static var authPollCount(default, null):Int = 0;
+    public static var connectCount(default, null):Int = 0;
+    public static var ordinarySendCount(default, null):Int = 0;
     static var pressed:Map<Int, Bool> = new Map();
     static var registered:Map<Int, Bool> = new Map();
     static var cursor:Int = 0;
@@ -59,10 +63,14 @@ class MockXscal {
                 mode:"simulated", capabilities:["xscal-chat-interface"]});
         });
         Reflect.setField(chat, "connect", function(_:Dynamic):String {
+            connectCount++;
             SimLog.emit("CHAT connect accepted");
+            if (!authReady) return response({success:true, status:"connecting", code:"connecting"});
             return response({success:true, status:"authenticated", code:"connected"});
         });
         Reflect.setField(chat, "getAuthState", function(_:Dynamic):String {
+            authPollCount++;
+            if (!authReady) return response({success:true, state:"connecting", status:"connecting"});
             return response({success:true, state:"authenticated", status:"authenticated",
                 userId:"sim-relay-user", linkedUserId:"sim-linked-user", canRetryHudSend:true,
                 canSaveHudLayout:true});
@@ -128,6 +136,7 @@ class MockXscal {
                 }
                 return response({success:true, messageId:messageId, targetUserId:""});
             }
+            ordinarySendCount++;
             var nextId:Int = scenarioEvents.length + 1;
             scenarioEvents.push({kind:"chat.message", id:nextId, messageId:messageId,
                 channel:channel, senderUserId:"sim-linked-user", senderDisplayName:"Simulator76",
@@ -214,6 +223,7 @@ class MockXscal {
 class SimLog {
     public static var count(default, null):Int = 0;
     public static var last(default, null):String = "";
+    public static var recent:Array<String> = [];
     public static function emit(value:String):Void {
         count++;
         var clean = value == null ? "" : value.split("\n").join(" ");
@@ -222,6 +232,8 @@ class SimLog {
         // diagnostics in memory and forward them when ExternalInterface is
         // available, but never contaminate the HUD's rendered surface.
         last = clean;
+        recent.push(clean);
+        if (recent.length > 32) recent.shift();
         if (ExternalInterface.available) {
             try ExternalInterface.call("fcmSimLog", clean) catch (_:Dynamic) {}
         }

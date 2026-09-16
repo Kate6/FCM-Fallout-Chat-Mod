@@ -649,3 +649,419 @@ extend a lease. No such probe was built or installed in this investigation.
 Only documentation was updated to record failed acceptance. No source rebuild, test rerun,
 installation, game input, extender/overlay change, hosted mutation, commit, push or deployment
 occurred. The preceding local regression results remain valid only within their stated limits.
+
+### Visible widget 2.10.104 direct-decoder candidate
+
+[Confirmed, 2026-09-16] The visible 2.10.103 widget under the same Fallout runtime logged
+`Error #1014` for all six roster snapshot sources. It consequently emitted no roster control or
+relay `SERVER-READY`, so the Server tab correctly stayed hidden. A 2.10.100 desktop ZFE session
+had previously parsed roster sources, sent the control, received `SERVER-READY`, selected Server,
+and sent/received a Server message. This establishes the visible-widget regression boundary; it
+does not identify a particular missing GFx class.
+
+[Confirmed] Candidate 2.10.104 removes `FcmHudRosterReader` and its observation classes from the
+visible SWF, while leaving the independent background bridge unchanged. The direct child-SWF
+reader copies bounded names, rejects invalid/damaged lists, keeps no game-owned object, and uses
+per-source copied signature/timestamp evidence: an unchanged getter cache cannot renew a
+Server-room observation, while a fresh push or changed roster can. Unit, source, source/package,
+SWF/BA2, native-adapter/auth, backend relay and overlay logic checks passed. The full Ruffle
+Playwright suite passed all 33 tests across xScal and ZFE, including the relay-confirmed visible
+Server tab, fast-travel continuity, real-hop rebind, expiry and MainMenu leave. These local mocks
+do not prove Fallout GFx compatibility.
+
+[Confirmed] Fallout 76 was closed immediately before installation. The production-target ZFE
+archive was extracted and compared before replacing only desktop
+`Data/FCMChatWidget.ba2` and `FCMChatWidget.version.txt`; the installed BA2 SHA-256 is
+`4a314bf333425e9e61f88bb255831febcef69c4a7af6e05adc6fbfe1fd7c4bc8` and decoded SWF SHA-256 is
+`979eb4e504ed75c8b16a4440ddc63dc4d1fae552e3ecea1d61963db6c7d55277`. The previous pair is
+recoverable under `.extender-backups/before-fcm-hud-2.10.104-lijgTR/`; `FCMChat.ini` and the ZFE
+fragment remained byte-identical. No game input, provider/executable change, hosted mutation,
+commit, push, deployment or publication occurred.
+
+Native acceptance subsequently failed; see the fresh evidence below.
+
+### Visible widget 2.10.104 failed acceptance; 2.10.105 diagnostic candidate
+
+[Confirmed, 2026-09-16] Desktop `zfe.log:11496` records `FCMChatWidget 2.10.104 loaded` at
+11:28:41.357, instance 604693887. The same instance logs `snapshot phase threw: TypeError:
+Error #1014` for all six roster sources through 11:30:11. The user reports the Server subtab is
+still absent. This rejects the 2.10.104 fix hypothesis; it does not identify a missing class.
+
+2.10.105 adds fixed phase labels at provider/payload/decoder/storage boundaries, including
+length and cleanup phases inside the direct decoder. Errors contain only source, fixed phase
+and numeric error ID, throttled to one/source/30 seconds. After the first real failure, one
+local probe tests `Std.isOfType`, `Math.isFinite`, and empty/player/map/public-team synthetic
+payloads. The probe calls only the decoder, never snapshot storage or transport, restores the
+original failure phase, and cannot create/renew a Server binding. Ruffle exercises that
+isolation and privacy for both providers. This candidate is diagnostic, not a functional fix.
+
+[Hypothesized] If synthetic decoding also fails, the failing phase narrows a compiled-runtime
+dependency; if it passes while real payloads fail, investigate the game-owned data boundary.
+The next fresh native log must distinguish those outcomes before another behavior change.
+
+[Confirmed] The 2.10.105 Haxe suites/diagnostics, emoji, native adapter/auth, source anchors,
+SWF/BA2 and package checks passed. Final full Ruffle suite: **33 passed (1.4m)**, including
+seven successful local probes, no raw exception text, one log per repeated source error, and
+unchanged snapshots, timestamps, session nonce, confirmation lease, history and control counts
+through both adapters. A test-only logger buffer captures the actual native-adapter messages;
+ExternalInterface forwarding is unavailable in this harness, so browser-log absence is not proof
+of missing native logging. Teardown released the harness port.
+
+[Confirmed] With no Fallout76 process running, installed only desktop `Data/FCMChatWidget.ba2`
+and `FCMChatWidget.version.txt`. Installed BA2 matches the tested and packaged payload exactly:
+7,171,064 bytes, SHA-256 `788c93bcd639a2b1264d1f25e29851160811f9c9d68732629d0d607f502ca40b`.
+Its decoded SWF is 7,170,975 bytes, SHA-256
+`ec5f14d855ba5610242fa22682da6a0d32de704aca93bd463774bc1ec5a76b9e`.
+Recoverable backup: `.extender-backups/before-fcm-hud-2.10.105-FGvI8a/`.
+HUD settings and the ZFE fragment remain byte-identical. Production-target ZFE/xScal Nexus and
+unified website test packages are under `/tmp/fcm-hud-2.10.105-zI0S0B/`. No laptop install,
+hosted change, commit, push or publication was performed. Native 2.10.105 evidence is pending:
+manually launch, join a world and wait 15 seconds, then inspect only startup/roster/probe lines.
+
+### 2.10.105 native method-entry failure; 2.10.106 restored-reader candidate
+
+[Confirmed, 2026-09-16] `zfe.log:11787` records 2.10.105 startup at 11:47:13, instance
+779076522, with non-blocking Server controls enabled. At lines 11809–11811, integer, number
+and finite probes pass. Lines 11812–11815 show empty/player/map/team synthetic reads all fail
+with `phase=probe entry errorID=1014`. Real sources fail with `phase=decoder call
+decoder=decoder entry errorID=1014` on both pull and push paths. The decoder's first assignment
+to `decoder entered` is never reached. A 25-second filtered tail reproduced the same failures.
+
+[Deduced] Rejection occurs on compiled method entry, independent of game-owned payload contents.
+The source/SWF, old 2.10.100 backup and FFDec exports establish that commit `9adf10b9` replaced
+the earlier widget traversal and closure-based map/team helper. 2.10.104 removed the shared
+classes but retained much of the new unified decoder structure. Local origin/dev and origin/prod
+contain identical affected source; the merge did not discard those fixes. The specific rejected
+bytecode construct remains unidentified.
+
+2.10.106 restores the previous reading split, retains bounded length checks and rejects damaged
+data, while leaving copied observation timestamps and effective-roster/session/history policy
+in place. `readNative` remains only as the diagnostic control and is forbidden in live collection
+by a source guard. Ruffle exercises all six restored sources, malformed/throwing rows, unchanged
+pull timestamps and fresh pushes, followed by the existing same-world/hop/expiry sequence.
+Fresh native results are required before declaring the restoration successful.
+
+[Confirmed] 2.10.106 passes Haxe suites/diagnostics, source anchors, SWF/BA2, emoji and package
+checks. The focused restored-reader scenarios pass for ZFE and xScal, and the full suite passes
+**33 tests (1.4m)** with automatic teardown and a released harness port. The scenarios exercise
+six sources, invalid lengths, throwing names, unchanged-pull freshness, fresh pushes, and the
+existing room/history continuity, hop and expiry checks. These do not emulate GFx verification.
+
+[Confirmed] After verifying the desktop game had exited, installed only the tested BA2 and root
+version stamp. Installed BA2: 7,172,830 bytes, SHA-256
+`46c14f5870916678ae767468894396bcc7b8fdae76fc67ffeff522125d8a9105`.
+Decoded SWF: 7,172,741 bytes, SHA-256
+`0c18fb5ff934d0376a341a828df114eef0626084f093d9346c7aedfe3f00d94a`.
+Backup: `.extender-backups/before-fcm-hud-2.10.106-T1Ga5r/`. HUD settings and the ZFE fragment
+remain byte-identical. Production-target ZFE/xScal Nexus and unified website packages are in
+`/tmp/fcm-hud-2.10.106-kIjthX/`. No laptop install, commit, push, hosted change or publication.
+Fresh native 2.10.106 startup, roster observation, room confirmation and Server-tab acceptance
+remain pending.
+
+### 2.10.106 native roster recovery; 2.10.107 pending-auth correction
+
+[Confirmed, 2026-09-16] Desktop `zfe.log:12189` starts 2.10.106 at 13:58:16.041,
+instance 579797641. At 13:58:33.969 PublicTeamsData reports 13 names; 13:58:36.047
+MapMenuData reports 18. Subsequent map counts reach 20, and TeamMarkers reaches 4 at
+14:03:18.429. This instance has no observed roster E1014. Static history completes at
+13:58:26.550 and new chat events continue, but no authenticated identity or roster control
+appears in this instance through 14:04. The user confirms no Server tab.
+
+[Confirmed] `startConnect()` calls `refreshAuthState()` immediately after native transport
+acceptance, before the log's WSS connection succeeds. In 2.10.106, `pollEvents()` refreshes auth
+only for xScal; `tickRoster()` requires a relay identity and authenticated state. `sendMessage()`
+can lazily refresh a missing identity, explaining how manual sends can mask the startup race.
+Git blame places the xScal-only polling gate in `4cca90fa9` (2026-09-04), not the roster rollback.
+
+[Confirmed] A new delayed-auth AVM2 scenario reproduces this failure on unchanged 2.10.106:
+both adapters receive history/roster while pending; xScal automatically binds and renders Server,
+but ZFE times out with no recovery. It never forces auth refresh or sends an ordinary message.
+The test result is **1 passed / 1 failed**, with ZFE's expected timeout. The mocks previously
+authenticated synchronously, so the existing 33-test suite did not cover this native timing.
+
+2.10.107 rechecks pending or missing-identity ZFE auth during normal event polling. Settled ZFE
+avoids redundant reads; xScal retains continuous checks. Identity, relay acknowledgement, nonce,
+roster freshness and room expiry gates are unchanged. Both delayed-auth scenarios now pass
+without manual auth refresh, a reconnect or ordinary chat send. Fresh native acceptance remains pending.
+
+[Confirmed] The complete 2.10.107 Ruffle suite passes **35 tests (1.6m)**, including both new
+delayed-auth scenarios and all prior visible-widget/background-bridge cases. Teardown removes
+the player and releases the harness port. Haxe widget/scenario diagnostics report `[]`; all
+widget Haxe suites, native API/auth suites, source anchors, emoji generation/embedded/JS checks,
+SWF/BA2 validators and provider/target package checks pass locally. Existing `hud-ruffle` CI runs
+these scenarios; hosted CI has not been run for this uncommitted candidate.
+
+Production-target ZFE and xScal Nexus archives plus the unified website archive are built in
+`/tmp/fcm-hud-2.10.107-BAc2G4/`. Every ZIP contains the identical tested BA2, and the ZFE fragment
+targets `wss://falloutchatmod.com/relay`. BA2: 7,172,866 bytes, SHA-256
+`1257a2afa27e1f044a99e829c20829f2ee35cf32388bab4e9fb8d79b505de65a`.
+Its decoded SWF exactly matches the normalized source build: 7,172,777 bytes, SHA-256
+`6ba7ca536ae3ec1b02374645fb1556c3512d5a24173cdd6b63fe4b6a34a94561`.
+The BTDX v1 GNRL sole-entry path and unchanged hash/flags/sentinel metadata are verified;
+simulator-only drivers are absent. The desktop game is still running 2.10.106, so 2.10.107
+is **not installed**. No laptop install, hosted mutation, commit, push or publication occurred.
+
+[Confirmed, 14:13] The same desktop instance has zero auth log lines, send attempts, canonical
+local send rows, matched own echoes and roster controls; it has zero roster decoder errors.
+The user reports that chat appeared functional and messages could be sent, but the current
+HUD log does not establish a successful send. The saved `Data/ZFE/chat-auth.bin` exists
+(331 bytes, modified 03:56:31 local, before this launch); only metadata was inspected, never
+its contents. File existence does not prove token validity, but there is no basis to clear it
+or require account relinking as part of this correction.
+
+[Confirmed, subsequent authorized install] After `pgrep` confirmed no Fallout76/Fallout76.exe
+process, installed only desktop `Data/FCMChatWidget.ba2` and `FCMChatWidget.version.txt` from
+the tested 2.10.107 ZFE/prod package. Exact byte comparison passes for both installed files;
+the installed BA2 SHA-256 is
+`1257a2afa27e1f044a99e829c20829f2ee35cf32388bab4e9fb8d79b505de65a`.
+Prior BA2/stamp and configuration snapshots are recoverable under
+`.extender-backups/before-fcm-hud-2.10.107-dJcA9w/`. `FCMChat.ini`, the ZFE fragment and
+`hudmodloader.ini` remain byte-identical; saved auth file size/mtime/ctime are unchanged,
+and its contents were not read or modified. No game launch, laptop change or publication.
+Next native check: user launches and joins a world without sending chat first; verify restored
+auth, populated roster, relay confirmation and visible Server tab on this exact build.
+
+### 2.10.107 desktop ZFE automatic startup binding passes
+
+[Confirmed, 2026-09-16] Fresh `zfe.log:12625` records 2.10.107 startup at 14:21:45.337,
+instance 408362226, with the required online/non-blocking control capability accepted.
+At 14:21:50.350 (`:12663`–`:12664`), the normal poll obtains the relay identity and logs
+`authState=authenticated`, without a relink or ordinary message send. The initial roster
+control is queued at 14:21:50.369 and the relay confirms membership at 14:21:51.621 (`:12691`).
+History completes at 14:21:51.617. PublicTeamsData then reports 10 names, TeamMarkers 3, and
+MapMenuData 23. A populated-map roster is sent at 14:22:25.346 (`:12775`), with relay
+confirmation at 14:22:26.107 (`:12784`). No ordinary user-send attempt precedes either bind.
+No roster decoder errors or isolated exceptions appear in the reviewed run through 14:22:46.
+The user reports that it seems to be working.
+
+This accepts desktop ZFE/prod **startup auth restoration, roster reading and automatic room
+binding** for the installed artifact. It does not yet accept ordinary Server-send/echo,
+same-world fast travel, real server-hop/MainMenu behavior, or laptop/xScal on 2.10.107.
+Those native checks and hosted CI/release approval remain outstanding; nothing is published.
+
+### 2.10.107 desktop Server-send and same-room travel check
+
+[Confirmed, 2026-09-16] The same instance 408362226 receives accepted Server-send receipts at
+14:29:54.300 (`zfe.log:13201`, request 16) and 14:30:25.338 (`:13340`, request 18).
+The immediately following event batches each report `ownEchoMatched=1`, `ownEchoAmbiguous=0`,
+`appended=0` and unchanged before/after record counts: each echo reconciles the pending row
+without appending a duplicate. Both use the bounded legacy fallback, not the ID-match branch.
+
+Between those sends, Loading at 14:30:12.747 (`:13255`) returns to All at 14:30:17.452
+(`:13263`). VoiceChatAreaData and TeamMarkers become empty, but no Server-history clear,
+roster boundary, reconnect or room-expiry event occurs. Relay confirmations before and after
+the transition identify the same room (`:13236`, `:13359`); its actual ID is omitted here.
+All reviewed confirmations since startup remain on that one room. Through 14:32:35, this
+widget instance has zero warnings/errors and zero roster decoder exceptions.
+
+Desktop ZFE/prod now passes ordinary Server send/echo and one same-room loading/fast-travel
+cycle with empty auxiliary lists, in addition to automatic startup binding. No real server hop
+or MainMenu leave is observed. Repeated/extended empty-primary fallback and laptop/xScal
+remain unverified for this artifact. This log check does not authorize publication.
+
+### 2.10.107 laptop install and desktop xScal test setup
+
+[Confirmed, 2026-09-16] Following the user's explicit install/switch request, SSH Manager
+confirmed the MSI laptop game was closed and installed only `Data/FCMChatWidget.ba2` and the
+root `FCMChatWidget.version.txt`, replacing 2.10.103 with the tested 2.10.107 artifact.
+The game directory is `C:\Program Files (x86)\Steam\steamapps\common\Fallout76`.
+Prior BA2/stamp and configuration snapshots are recoverable under
+`.extender-backups\before-fcm-hud-2.10.107-2c3cfc01\`. Uploaded and installed hashes match;
+the existing xScal 0.2.16 provider was not changed. `FCMChat.ini`, `hudmodloader.ini`,
+`xscal.ini` and the user's `Fallout76Custom.ini` are byte-identical to their backups.
+No credentials were read or changed, and no legacy/background FCM bridge is registered.
+
+After the desktop game closed, backed up its ZFE `dxgi.dll` and configuration snapshots under
+`.extender-backups/before-xscal-hud-2.10.107-in63Pt/`. Replaced only the root `dxgi.dll` with
+the verified xScal 0.2.16 copy retained in
+`.extender-backups/20260915T-current-xscal-0.2.16-before-zfe-0.15.0/`.
+The desktop HUD BA2/stamp, `FCMChat.ini`, loader registry, ZFE fragment, `xscal.ini` and active
+Proton `Fallout76Custom.ini` remain byte-identical to the pre-switch snapshots. Saved ZFE
+auth metadata is unchanged (331 bytes; original mtime/ctime), and its contents were not read
+or migrated. Existing provider logs and inactive ZFE data remain intact for rollback.
+
+Both installations now have the identical tested HUD BA2 (7,172,866 bytes), SHA-256
+`1257a2afa27e1f044a99e829c20829f2ee35cf32388bab4e9fb8d79b505de65a`, and root version stamp
+`2.10.107`, SHA-256 `07a6b2a82fd5dc1bf0a85808b72c8617ed5b5fcde165e74769940b5554a224b3`.
+Both xScal DLLs are 315,904 bytes, SHA-256
+`185de187aa616ae5db118f463aa43ff760f7819df77ca4a09f6b71714195fd5a`, with chat enabled and
+`relayEndpoint=wss://falloutchatmod.com/relay`. Both archive lists retain
+`HUDModLoader.ba2,FCMChatWidget.ba2` and the loader enables only `FCMChatWidget`.
+
+This is installation/provenance evidence, not fresh native acceptance. Neither game was
+launched by the agent. Next check on each machine: join a world without sending an ordinary
+message first, then inspect fresh xScal logs for auth restoration, populated roster and
+relay-confirmed binding while the user confirms the Server tab. The remaining native matrix,
+hosted CI and release approval are still required. No commit, push, deployment or publication.
+
+### 2.10.107 xScal startup passes; long-session queue-loss recovery blocks release
+
+[Confirmed, 2026-09-16] Desktop `xscal.log:13` loads 2.10.107, instance 875989181.
+The required chat/non-blocking control checks pass (`:15`–`:16`). Authentication settles at
+log elapsed `00:00:32.564` (`:42`), first room confirmation arrives at `00:00:37.536` (`:81`),
+and a 21-name map roster is sent at `00:01:11.937` (`:116`), confirmed at `00:01:16.940`
+(`:118`). This all precedes the Server send at `00:24:06.265` (`:4570`). Its echo at
+`00:24:06.936` (`:4576`) has `ownEchoMatched=1`, `ownEchoFallback=1`, `ownEchoAmbiguous=0`,
+`appended=0`, and 163 records before/after. Reviewed confirmations remain on one room.
+
+[Confirmed] The desktop nevertheless reports its first dropped-event warning at
+`00:06:21.945` (`:446`), followed by a RESYNC at `00:06:23.440` (`:453`). Through elapsed
+`00:30:42.283`, the read-only check counts 341 drop warnings and 98 RESYNC requests, with
+history completing repeatedly at approximately 15-second intervals. No roster decoder error,
+reconnect, Server-confirmation expiry or rejected ordinary send is observed in that window.
+
+[Confirmed] SSH Manager reads the MSI laptop's `xscal.log` at the installed Steam game path.
+Instance 65580425 loads 2.10.107 at log elapsed `00:28:02.974` (`:13`), authenticates at
+`00:28:03.631` (`:42`) and obtains its first room confirmation at `00:28:08.396` (`:80`).
+The public-team roster reaches 11 names and the map reaches 20–22; subsequent populated
+controls receive confirmations (`:125`, `:153`, `:186`). The first short observation window
+had no dropped markers or RESYNC requests. The later read at 19:44:50 UTC, 3,293 log lines,
+instead finds **200 dropped-event warnings and 46 RESYNC requests**: first warning
+`00:33:57.990` (`:480`), first RESYNC `00:33:59.506` (`:485`). That onset is about six minutes
+after widget startup, similar to the desktop. This is not a clean long-session acceptance.
+The user reports the laptop is good, but no laptop `sent ch=server`/matched-echo entry is
+present in this captured log; keep that distinction rather than manufacturing send evidence.
+
+[Confirmed] `FCMChatWidget.hx` marks `_history.dropped` on provider `events.dropped` markers
+and schedules history recovery. [Deduced] Repeated markers are rearming recovery despite
+successful history completion. The reason the provider keeps reporting loss is **unresolved**;
+these logs do not establish actual lost user messages or a provider-side root cause.
+Do not suppress warnings, discard cursor safeguards or claim the queue-loss issue fixed.
+
+The user requested HUD-only packaging, prod promotion and Discord/Nexus preparation. Local
+preparation proceeds, but prod merge/publication remain held for the long-session xScal issue,
+remaining native matrix, commit-message approval and hosted CI for the new commit. The rerun
+of all 35 Ruffle tests passes in 1.6 minutes; pure Haxe/native/auth, package/source/BA2/SWF,
+emoji generation/embedding and widget compiler diagnostics also pass. Automatic teardown
+releases port 41739. These mocks do not clear the newly observed native soak-test failure.
+
+A fresh production compile and normalized SWF match the earlier tested artifact byte-for-byte.
+The rebuilt one-entry BA2 and its extracted SWF also match exactly. Unified Nexus and website
+candidate packages are at `/tmp/fcm-hud-release-2.10.107-VbN645/`; both contain the same BA2
+SHA-256 `1257a2afa27e1f044a99e829c20829f2ee35cf32388bab4e9fb8d79b505de65a`.
+The Nexus ZIP has 17 entries, no scripts/executables/provider DLLs, valid ZIP CRCs and prod
+endpoint examples. It is 5,991,085 bytes, SHA-256
+`3cdc7ca3e8adf10e37c8e0c54029f8a95fe384d333a8b629aed384a943da85ef`.
+The website ZIP is 5,992,493 bytes, SHA-256
+`f4fee4aa66abe2069c4b6b6ffeefe23cbb83ade6353fd63115a05ef2dc20615e`.
+These are **blocked candidates**, not approved release files. Public notes and announcement
+drafts are in [the HUD-only release packet](../deployment/hud-post-2.10.85-release-notes-draft.md).
+
+### 2.10.108 bounded queue-loss diagnostic candidate
+
+The user authorized fixing and retesting the long-session failure before prod promotion.
+[Confirmed] The desktop's last ordinary pre-loss batch reaches cursor 128 at elapsed
+`00:05:56.937` (`xscal.log:425`); the first loss batch reaches 130 at `00:06:21.944` (`:445`).
+[Hypothesized] The onset may be a retained-queue boundary rather than unread message loss.
+Confirm/refute using the dropped marker's cursor/count metadata relative to the last consumed
+cursor; existing logs do not expose those fields. The public xScal repository tree lacks the
+current chat implementation, so it cannot establish the installed provider's queue contract.
+
+Candidate 2.10.108 changes diagnostics only: at most three loss summaries per accepted native
+connection, showing before/after cursor and fixed allowlisted numeric marker/envelope metadata.
+It omits arbitrary keys, string values, message text, names, tokens and account/room IDs. Parse or
+logging failure cannot interrupt normal loss handling. It does not suppress loss, reset auth,
+alter cursor advancement, change recovery backoff, send extra controls or relax Server gates.
+
+Pure privacy/shape tests and a compiled scenario for each provider cover the diagnostic cap,
+unchanged loss recovery and no additional transport/records. The optional Haxe/archive/FFDec
+sub-skills are unavailable; repository compiler diagnostics and archive/SWF validators are used.
+This is an evidence-gathering step, **not a claimed fix**. Native capture is required before
+choosing a corrective change or promoting either this build or the blocked 2.10.107 packages.
+
+[Confirmed] All pure Haxe/source/package/emoji/archive checks and compiler diagnostics pass.
+The complete Ruffle suite passes **37/37 (1.7 minutes)** after correcting its stale expected
+artifact version from 2.10.107 to 2.10.108; automatic teardown was verified by rebinding the
+owned simulator port. The first run's sole failure was that version assertion (36/37 passed).
+
+The diagnostic-only PROD/unified Nexus-format ZIP was built and CRC-checked locally at
+`/tmp/fcm-hud-2.10.108-CeSuk7/FCM-HUD-2.10.108-PROD-DIAGNOSTIC-Nexus.zip`, SHA-256
+`02693398e4610ad92b62887c98b46a09158a2ce66750e42002e6851a9d6ce9a8`.
+Its BA2 matches the checked artifact and embedded normalized SWF. Both games were confirmed
+closed before installing only `Data/FCMChatWidget.ba2` and the root version stamp on the
+desktop and laptop (MSI via SSH Manager). Installed BA2 hashes match on both machines:
+`8a190ae5dc942f4457220f0f2e55b920d7555a55371c40e62adc41d71fe8cc60`.
+Provider DLL, provider/chat/loader settings and archive registration hashes remained unchanged;
+authentication files were not accessed or replaced. Previous widget/stamp backups remain in
+each game root under `.extender-backups/before-fcm-hud-2.10.108-9Peezq` (desktop) and
+`.extender-backups/before-fcm-hud-2.10.108-fd43a578` (laptop).
+
+**Still pending:** launch the diagnostic build and capture its first three queue-loss summaries
+after at least six minutes in-world. The root cause remains unproven; no corrective fix,
+production merge, upload or publication is claimed by this diagnostic installation.
+
+### 2.10.108 native diagnosis and 2.10.109 corrective candidate
+
+[Confirmed] Both installed 2.10.108/xScal sessions reproduced the boundary with matching shape.
+Desktop advanced normally through cursor 128, then logged `before=129 after=130` for marker
+`id=130 dropped=1`. Laptop logged `before=130 after=131` for marker `id=131 dropped=2`.
+In both cases the marker ID is the next contiguous sequence number, so no unread event is skipped.
+
+[Confirmed] The old unconditional handler then requested history. Desktop's replay advanced from
+130 through 207 before receiving contiguous marker `id=208 dropped=77`; laptop likewise advanced
+through 208 before marker `id=209 dropped=77`. Further unconditional recovery repeated roughly
+every 15 seconds. Desktop recorded 47 dropped-marker warnings / 13 resyncs in this capture;
+laptop recorded 62 / 16, with no FCM errors. Authentication, relay-confirmed Server membership,
+roster controls and ordinary messages continued.
+
+[Deduced] xScal's marker count describes entries retired from its bounded queue, while sequence
+continuity determines whether this subscriber missed unread events. Treating every retirement as
+loss caused the HUD's history replay to fill the same queue and sustain the loop.
+
+Candidate 2.10.109 acknowledges dropped markers whose sequence is contiguous with or stale
+relative to the consumed cursor. A forward sequence gap or missing/unusable marker ID still arms
+the existing fail-closed history recovery. Pure tests cover contiguous, stale, forward-gap and
+unidentified markers; compiled xScal and ZFE scenarios reproduce contiguous retirement plus a
+real gap. Fresh native build acceptance remains pending before production promotion.
+
+[Confirmed] Candidate 2.10.109 passes all pure Haxe/source/package/emoji/archive checks, Haxe
+compiler diagnostics, native API/auth suites, the targeted two-provider regression, and the full
+Ruffle suite (**37/37 in 1.7 minutes**). Automatic teardown was verified by rebinding port 41739.
+The tested PROD/unified Nexus-format ZIP is
+`/tmp/fcm-hud-2.10.109-yxpVr1/FCM-HUD-2.10.109-PROD-Nexus.zip`, SHA-256
+`e88cefa1aa48970a33944fff42eb775eb2e0b017c415dcb1e14a27cb94b778bd`.
+The decoded/tested and installed BA2 hash is
+`e19f41ac36ab33697135f0b53dd48d43c2e87b5ca2309a5e8261d5f80167ab6b`.
+
+Both games were confirmed closed immediately before installing only the BA2 and root version
+stamp on desktop and laptop. Provider/config/archive-registration hashes remained unchanged and
+authentication files were not accessed. Recoverable backups are
+`.extender-backups/before-fcm-hud-2.10.109-CIPy9X` on desktop and
+`.extender-backups/before-fcm-hud-2.10.109-d445baf1` on laptop. Fresh native startup, automatic
+Server binding, send/echo, and a soak beyond the previous retention boundary remain pending.
+
+[Confirmed] Fresh 2.10.109 native xScal acceptance clears the queue-retirement regression on both
+machines. Desktop instance `707150630` restored authentication and Server membership, crossed the
+retention boundary with three contiguous `unreadGap=0` markers, and continued normally through
+cursor 152 after 7:07 elapsed: **0 history resyncs, 0 dropped-event warnings, 0 FCM errors**, with
+four relay room confirmations. Laptop first crossed the boundary through cursor 140 with the same
+zero-resync result; its external server disconnect interrupted that session. After reconnect,
+instance `911998730` restored authentication and Server membership automatically, acknowledged
+three more contiguous retirement markers, and continued through 10:31 log elapsed with **0 history
+resyncs, 0 dropped-event warnings, 0 FCM errors** and five room confirmations. No Server send was
+observed in these specific 2.10.109 log blocks, so send/echo relies on the previously accepted path
+until explicitly repeated. The retention/resync fix itself is native-accepted on both machines.
+
+For the requested follow-up ZFE test, both games were confirmed closed and the provider DLL was
+swapped from xScal 0.2.16 to the locally retained ZFE 0.15.0 archive. Installed DLL SHA-256 on both
+machines is `3431d70517fd979e4f5193b1d9fd9d76dae7a8d341fae9838e5249b8f3fcb8b0`.
+The tested 2.10.109 HUD, root stamp, chat/loader configuration and per-machine ZFE fragment hashes
+were preserved; authentication data was not read or replaced. The existing `xscal.ini` is retained
+as inert rollback configuration because xScal's DLL is no longer installed. Provider backups are
+`.extender-backups/before-zfe-0.15.0-hud-2.10.109-vGdLdc` on desktop and
+`.extender-backups/before-zfe-0.15.0-hud-2.10.109-323e68fa` on laptop. Fresh ZFE native acceptance
+is pending.
+
+[Confirmed] Fresh ZFE 0.15.0 launch logs load FCMChatWidget 2.10.109 on both machines, discover
+`zfe-chat-online-v1` on the first attempt, enable the non-blocking Server-control path, synchronize
+Insert, register all physical navigation keys, connect TLS/WSS, restore relay authentication, and
+complete retained history without FCM errors. Desktop resolves populated map rosters and receives
+four relay room confirmations with live chat continuing through cursor 364803. The laptop was
+intentionally not taken through the user's login/world test, so no Server-room confirmation is
+required there; it nevertheless restores relay authentication, receives history/live chat and
+continues through cursor 364803 without an FCM error. Neither session includes a user Server send.
+
+ZFE itself emits a short burst of `mod API bridge live install failed for all member names`
+warnings (15 desktop / 16 laptop) while installing its bridge into unrelated UI movies. The active
+FCM widget already reports its API capability as available and continues successfully afterward;
+these are provider-level warnings, not FCM transport/auth/history failures.

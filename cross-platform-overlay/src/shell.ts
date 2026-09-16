@@ -23,7 +23,6 @@ import {
   accelFromEvent as accelFromEventCore,
   prettyAccel as prettyAccelCore,
   collectChannels as collectChannelsCore,
-  nextNavIndex,
   scaleZoomValue,
   chromeBgAlpha,
   textOpacityValue,
@@ -47,6 +46,8 @@ import {
   type AutoHideMode,
   type ResizeEdge,
 } from './shell-core';
+import { createFontPicker } from './font-picker';
+import { normalizeFontId, resolveFontFamily, SYSTEM_FONT, MONOSPACE_FONT, type FontId } from '../../admin-dashboard/src/features/chat/overlayFonts';
 import { mountSupporterAppearance } from './supporterAppearance';
 
 // ── Settings model (desktop-parity superset) ──────────────────────────────────
@@ -67,6 +68,7 @@ export interface ShellSettings {
   resolvedDisplayName: string; // Chat display name resolved by the backend
   // Mirrored into the React component (fcm_web_overlay_settings):
   themeId: string;          // default 'fo76-wasteland'
+  fontId: FontId;           // independent of color theme
   windowOpacity: number;    // 0.3..1.0  → background/chrome alpha
   textOpacity: number;      // 0.3..1.0
   fontSize: number;         // px
@@ -151,6 +153,7 @@ export const DEFAULT_SHELL_SETTINGS: ShellSettings = {
   discordUsername: '',
   resolvedDisplayName: '',
   themeId: 'fo76-wasteland',
+  fontId: 'theme',
   windowOpacity: 0.9,
   textOpacity: 1.0,
   fontSize: 14,
@@ -209,10 +212,11 @@ const THEMES: { id: string; name: string }[] = [
  *   --shell-primary-dim  accent at low alpha (hover backgrounds)
  *   --shell-text         readable body/loading text
  */
-export function applyShellChromeTheme(themeId?: string) {
+export function applyShellChromeTheme(themeId?: string, fontId: unknown = currentSettings.fontId) {
   const id = themeId || loadShellSettings().themeId;
   const vars = chromeThemeVars(id);
   const root = document.documentElement.style;
+  root.setProperty('--shell-font', resolveFontFamily(fontId, id === 'fo76-wasteland' ? SYSTEM_FONT : MONOSPACE_FONT));
   root.setProperty('--shell-primary', vars.primary);
   root.setProperty('--shell-text', vars.text);
   // 18% alpha tint for hover backgrounds (hex8).
@@ -242,6 +246,7 @@ export function loadShellSettings(): ShellSettings {
   } catch { /* defaults */ }
   // A corrupted or pre-feature value must preserve the existing behavior.
   s.autoHideMode = normalizeAutoHideMode(s.autoHideMode);
+  s.fontId = normalizeFontId(s.fontId);
   // One-time keybind reset (NON-DESTRUCTIVE — issue #136 §3.1): when the persisted
   // version is older, fill only UNSET/blank binds with the current defaults and keep
   // every bind the user actually set, then stamp the version. The old code wiped the
@@ -722,22 +727,6 @@ function subTabSpans(): HTMLElement[] {
   return rows.length >= 2 ? rows[rows.length - 1][1] : rows[0][1];
 }
 
-function activeTabIndex(spans: HTMLElement[]): number {
-  let idx = spans.findIndex(el => getComputedStyle(el).fontWeight === 'bold' || parseInt(getComputedStyle(el).fontWeight, 10) >= 600);
-  if (idx < 0) idx = 0;
-  return idx;
-}
-
-export function navChannel(dir: 1 | -1) {
-  markActivity();
-  const spans = subTabSpans();
-  if (spans.length === 0) return;
-  const cur = activeTabIndex(spans);
-  const next = nextNavIndex(cur, dir, spans.length);
-  if (next < 0) return;
-  spans[next].click();
-}
-
 export function openComponentSettings() {
   markActivity();
   // The settings cog is the gear SVG button in the header. Click its container.
@@ -1087,7 +1076,7 @@ function buildSettingsPanel() {
     setIdleFadeFromSeconds(currentSettings.idleCollapseSeconds);
     scheduleFlush(currentSettings);
   };
-  // commit: applyLive + remount the React component so settings it reads natively
+  // commit: applyLive + notify the React component so settings it reads natively
   // (theme, opacities, hints) take effect, and flush to main immediately.
   const commit = (patch: Partial<ShellSettings>) => {
     currentSettings = { ...currentSettings, ...patch };
@@ -1141,7 +1130,7 @@ function buildSettingsPanel() {
       if (live) set(v);
     });
     // live=false → commit on release; live=true with onRelease → live preview on
-    // every tick PLUS a heavier commit (e.g. React remount) once on release.
+    // every tick PLUS a persisted commit once on release.
     if (!live) input.addEventListener('change', () => set(parseFloat(input.value)));
     else if (onRelease) input.addEventListener('change', () => onRelease(parseFloat(input.value)));
 
@@ -1654,6 +1643,13 @@ function buildSettingsPanel() {
     ddWrap.append(ddBtn, ddPop);
     themeRow.append(ddWrap); s.append(themeRow);
 
+    const fontRow = el('div', { className: 'ss-row' });
+    fontRow.append(el('label', { className: 'ss-lbl' }, 'Font'));
+    fontRow.append(createFontPicker(currentSettings.fontId,
+      currentSettings.themeId === 'fo76-wasteland' ? SYSTEM_FONT : MONOSPACE_FONT,
+      fontId => commit({ fontId })));
+    s.append(fontRow);
+
     slider(s, 'Background Opacity', 0, 1, 0.01, () => currentSettings.windowOpacity, v => applyLive({ windowOpacity: v }), v => `${Math.round(v * 100)}%`, true);
     // Text opacity previews live; commits on release so the component re-applies its text alpha.
     slider(s, 'Text Opacity', 0.3, 1, 0.01, () => currentSettings.textOpacity, v => applyLive({ textOpacity: v }), v => `${Math.round(v * 100)}%`, true, v => commit({ textOpacity: v }));
@@ -1856,9 +1852,10 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
   // overwrite the renderer's preference with a stale mirror.
   if (webSettingsSyncHandler) window.removeEventListener('fcm-web-settings-changed', webSettingsSyncHandler);
   webSettingsSyncHandler = (event: Event) => {
-    const detail = (event as CustomEvent<{ mutedPartyIds?: unknown }>).detail;
+    const detail = (event as CustomEvent<{ mutedPartyIds?: unknown; fontId?: unknown }>).detail;
     if (!Array.isArray(detail?.mutedPartyIds)) return;
-    currentSettings = { ...currentSettings, mutedPartyIds: detail.mutedPartyIds.filter((id): id is string => typeof id === 'string') };
+    currentSettings = { ...currentSettings, fontId: normalizeFontId(detail.fontId), mutedPartyIds: detail.mutedPartyIds.filter((id): id is string => typeof id === 'string') };
+    applyShellChromeTheme(currentSettings.themeId);
     persistShellSettings(currentSettings);
   };
   window.addEventListener('fcm-web-settings-changed', webSettingsSyncHandler);
@@ -2180,23 +2177,24 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
   }
 
   // Esc closes the settings panel.
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && panelEl?.classList.contains('open')) closeSettings(); }, true);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && panelEl?.classList.contains('open') && !panelEl.querySelector('[role="listbox"].open')) closeSettings(); }, true);
 
   window.relayBridge.onCommand((cmd) => {
-    if (cmd === 'channel:next') navChannel(1);
-    else if (cmd === 'channel:prev') navChannel(-1);
+    if (cmd === 'channel:next' || cmd === 'channel:prev') markActivity();
     else if (cmd === 'settings:open') toggleSettings();
     else if (cmd === 'party:recent') window.dispatchEvent(new CustomEvent('fcm-recent-party'));
   });
 
+  let blurInputGeneration = 0;
   // On focus-input, jump the feed to the latest message (idempotent; only on explicit activation).
-  window.relayBridge.onFocusInput(() => { scrollMessagesToBottomDeferred(); });
+  window.relayBridge.onFocusInput(() => { blurInputGeneration++; scrollMessagesToBottomDeferred(); });
 
   // Overlay shown without input capture — blur so keystrokes stay in the game.
   window.relayBridge.onBlurInput?.(() => {
+    const generation = ++blurInputGeneration;
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     setTimeout(() => {
-      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      if (generation === blurInputGeneration && document.activeElement instanceof HTMLElement) document.activeElement.blur();
     }, 100);
   });
 

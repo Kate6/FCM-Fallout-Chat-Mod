@@ -281,7 +281,16 @@ export async function refreshSupporterFromDiscord(
       // cross-process safety net.
       logger.warn({ err, userId: request.userId, discordId }, '[supporterSync] live role refresh slot unavailable; using local cooldown (non-fatal)');
     }
-    if (!acquired) return;
+    if (!acquired) {
+      // Another replica recently performed (or is performing) the authoritative
+      // Discord check. Do not leave this sender behind that replica's stale
+      // pre-refresh `none` projections: the tier and resolved-cosmetics caches are
+      // shared, cheap to rebuild, and are the values consumed immediately after
+      // this helper by the HUD send path.
+      await (deps.bustTier ?? bustTierCache)(discordId);
+      await (deps.bustCosmetics ?? bustCosmeticsCache)(request.userId);
+      return;
+    }
 
     let roles: readonly string[] | null;
     try {

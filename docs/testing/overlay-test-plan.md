@@ -135,8 +135,8 @@ pipeline with zero extra config). Backend keeps Jest. Electron + browser E2E use
 | `persistLocal` WEB mirror | shell.ts:242 | stateful | **Export.** WEB mirror forces windowOpacity:1 + fontSize:14, carries theme/textOpacity/showHints | P1 |
 | `tickIdle` guards | shell.ts:614 | stateful | **Export.** fake timers; no collapse while fade off / panels open / `__fcmMenuOpen` / input focused; collapse after IDLE_FADE_MS=25000 | P1 |
 | `markMessageActivity` debounce | shell.ts:598 | stateful | **Export.** fake timers; burst within 1500ms → one markActivity | P1 |
-| `navChannel`/activeTabIndex cycling | shell.ts:755 | stateful | jsdom fixture spans; active by fontWeight bold, next/prev wrap, no-op when zero | P1 |
-| Shell auth state machine (onStatus) | main.tsx:185 | ui-component | RTL render `<Shell>`; capture onStatus cb; authenticated/discord_required/error(429)/authStuck-25s; remount only on identity change | P1 |
+| Shared conversation cycling | `channelNavigation.ts`, `overlayStability.test.tsx`, `usability-smoke.mjs` | stateful | Covered: hidden channels, party boundaries, wrap and one command/one transition; removed shell DOM-click navigation | P1 |
+| Shell auth state machine (onStatus) | main.tsx | ui-component | Identity normalization covered by `auth-identity.test.ts`; real Electron smoke checks same-account updates retain state and account changes discard drafts. Login-wall/error/stuck timing remains separate coverage work | P1 |
 | `wireShellInputBehaviour` /hide intercept | main.tsx:146 | stateful | **Export.** mock relayBridge; Enter on editable '/hide'→preventDefault+hideViaSlash; focus-input prefers contenteditable | P1 |
 | `cmpVersions` helper | overlay-core.js | pure | newer/older/equal semver, multi-digit (`1.3.9` vs `1.3.10`), malformed input → P0 |
 | `showUpdateNotification` trigger logic | main.js | stateful | fires when latestVersion > APP_VERSION; not when equal/older; once-per-session guard (`updateNotifiedThisSession`) suppresses reconnect toasts; click calls `shell.openExternal(NEXUS_MOD_URL)` | P1 |
@@ -252,7 +252,7 @@ tests they enable** — otherwise the test depends on an electron mock or a full
 | Hoist `isDragTarget` to module scope + export | drag P0 | LOW |
 | Export visual/idle helpers (`applyScale`, `applyWindowVisual`, `persistLocal`, `tickIdle`, `markMessageActivity`, `setCollapsed`) or thin wrappers | P1 shell tests | LOW |
 | Inject `window.relayBridge` as a seam / mock factory instead of reading global | clean IPC assertions | MED — used throughout; provide a factory rather than rewiring every call. |
-| Factor Shell auth/identity remount decision into a pure reducer (main.tsx:277) | remount-on-identity test | MED |
+| Shell auth/identity normalization extracted as `auth-identity.ts` | Covered: partial fields, revocation/unlink, rename and account boundary | Complete |
 | Make idle/collapse timing constants injectable | deterministic timer tests | LOW |
 | Split entry-module side effects (mountShellBar, React root, initShell) so logic imports without firing chrome | importing under vitest | MED |
 
@@ -434,3 +434,39 @@ into.
 > `init()`); bridge.ts patches global `window.fetch`/`WebSocket` (install/teardown per test or poison the
 > shared jsdom env); everything timer-heavy needs disciplined `vi.useFakeTimers`; never let a test hit
 > `falloutchatmod.com` — always route through the mock relay.
+
+## Overlay usability regression coverage (2026-09-16)
+
+The feedback assumes app **1.3.100** and confirms the **keyboard hide/show
+shortcut**. Reporter OS, exact binding and released artifact remain unconfirmed.
+Implementation targets the current development desktop/shared renderer.
+
+- `cross-platform-overlay/__tests__/hide-show.test.js`: production window actions
+  with mocked Electron adapters, 20 hide/show cycles, focus return before hide,
+  other-app ownership and standalone restore.
+- Overlay `auth-identity`, `font-picker`, and existing shell/focus/foreground tests:
+  partial status semantics, account reset, keyboard font choice and persistence
+  mapping. Dashboard `overlayFonts`, `channelNavigation`, `historyPagination`,
+  `overlayStability`, and existing history/WS tests exercise the shared component.
+- `scripts/usability-smoke.mjs`: real Electron/preload/shared renderer against a
+  localhost fixture and isolated temporary profile. Live font/theme changes keep
+  the composer, draft and socket; cycling makes one transition; ten disconnects
+  retain messages and the visible reading anchor; native settings survive restart
+  and browser-storage removal; switching accounts discards the previous draft.
+  Font scales 9/14/22 at widths 320/520/800 keep the composer within the viewport;
+  screenshots and `result.json` capture the successful run.
+  Run after `npm --prefix cross-platform-overlay run build:renderer` with
+  `xvfb-run -a -s '-screen 0 1920x1080x24' npm --prefix cross-platform-overlay run test:interaction`.
+  Dashboard and overlay dependencies must be installed. Evidence is written to
+  ignored `cross-platform-overlay/test-results/overlay-usability/`. Owned test
+  processes, relay and temporary profile are removed in `finally`.
+- Unit suites run in required `unit-vitest`; the Electron interaction script runs
+  in required `overlay-launch-smoke-linux`. Local results do not imply hosted CI
+  passed; label-gated CI runs against the reviewed commit.
+
+Remaining native acceptance before release: on Windows and supported Linux game
+sessions, complete a 30-minute soak with 20 hide/show cycles, hide after typing
+then immediate game movement, Insert, rapid Alt-Tab and a custom toggle binding.
+Cover click-through on/off, idle-collapse modes, windowed/borderless presentation,
+font sizes 9/14/22 and narrow/wide overlay bounds. Record OS/build/binding, foreground
+behavior and diagnostics. Headless Electron cannot prove game focus restoration.

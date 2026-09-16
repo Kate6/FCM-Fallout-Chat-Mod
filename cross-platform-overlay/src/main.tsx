@@ -21,7 +21,9 @@ import { shouldExitTextEntryOnEscape, shellToWebSettings } from './shell-core';
 import { shouldShowDevPersonaLogins } from './bridge-core';
 
 // 3) THE REAL COMPONENT — unmodified, imported straight from the dashboard source.
-import ChatOverlay from '@dashboard/features/chat/ChatOverlay';
+import ChatOverlay, { resetRememberedChatSelection } from '@dashboard/features/chat/ChatOverlay';
+import { OVERLAY_SETTINGS_EVENT } from '@dashboard/features/chat/overlayFonts';
+import { reconcileIdentity, type AuthenticatedIdentity } from './auth-identity';
 import type { AuthUser } from '@dashboard/contexts/AuthContext';
 
 // Seed the component's localStorage settings from the persisted shell settings
@@ -34,7 +36,10 @@ import { loadShellSettings, DEFAULT_SHELL_SETTINGS, applyShellChromeTheme } from
 // --shell-primary-dim) to :root BEFORE first paint, so the pre-auth / loading /
 // error screens + the shell-bar window buttons follow the theme from the very
 // first frame (not hardcoded green). Re-applied on theme change via shell.ts.
-try { applyShellChromeTheme(loadShellSettings().themeId); } catch { /* ignore */ }
+try {
+  const appearance = loadShellSettings();
+  applyShellChromeTheme(appearance.themeId, appearance.fontId);
+} catch { /* ignore */ }
 // DEV-ONLY: ?fontsize=N seeds the persisted shell scale BEFORE loadShellSettings,
 // so the CSS-zoom path is exercised in tests (reproduces the user's fontSize 16
 // case where the picker landed centered). Behind a query param → never in prod.
@@ -113,7 +118,7 @@ function DevPersonaLoginButtons({ themePrimary }: { themePrimary: string }) {
             }}
             style={{
               background: 'rgba(20,32,20,0.9)', border: `1px solid ${themePrimary}55`,
-              color: themePrimary, fontFamily: '"Courier New", monospace', cursor: pendingPersona ? 'wait' : 'pointer',
+              color: themePrimary, fontFamily: 'var(--shell-font, monospace)', cursor: pendingPersona ? 'wait' : 'pointer',
               fontSize: 10, padding: '4px 10px', opacity: 0.7, fontWeight: 'normal',
             }}
           >
@@ -278,6 +283,11 @@ function wireShellInputBehaviour() {
     window.relayBridge.returnToGame?.();
   });
 
+  window.relayBridge.onBlurInput?.(() => {
+    focusRequestSeq++;
+    clearPendingFocusRetries();
+  });
+
   // Focus-to-chat (Insert / tray): focus the component's input textarea or
   // rich contentEditable div (overlay-only, when custom emoji input is active).
   window.relayBridge.onFocusInput(() => {
@@ -327,20 +337,9 @@ function Shell() {
   const isDevRef = useRef(false);
   // Synthetic persona login is limited to unpackaged builds on a known DEV relay.
   const [showDevPersonaLogins, setShowDevPersonaLogins] = useState(false);
-  // Bumping this key remounts the ChatOverlay so it re-reads its settings from
-  // localStorage (the component only loads them on mount). Driven by the shell
-  // settings panel and the header refresh button.
+  // Reset only for explicit refresh or a verified account boundary.
   const [mountKey, setMountKey] = useState(0);
-  // Tracks whether we've already authenticated once. A SECOND authenticated
-  // status (after a Discord link or a rename re-register) must remount the chat
-  // so it re-opens the WS under the new identity + reloads history — otherwise
-  // the log stays blank/stale after linking.
-  const hasAuthedRef = useRef(false);
-  // Identity fingerprint of the last authenticated status. Used to remount the
-  // chat ONLY when the identity actually changes (Discord link / rename / new
-  // account) — never on a plain focus-triggered refreshDiscordStatus, which was
-  // remounting and snapping the user back to General, losing their party tab.
-  const lastIdentityRef = useRef('');
+  const identityRef = useRef<AuthenticatedIdentity | null>(null);
   // Reactive signed-in user passed into the ChatOverlay Outlet context. Seeded
   // from stubUser defaults; role/avatarUrl/displayName are filled in from each
   // relay:status so mod controls (mute/kick/ban) appear without a restart once a
@@ -359,17 +358,23 @@ function Shell() {
   useEffect(() => {
     // Wait until the main process has registered + has a session token before
     // mounting the component (so its first /api/channels + WS calls succeed).
-    window.relayBridge.onStatus((s: { state: string; message?: string; displayName?: string; discordLinked?: boolean; discordName?: string; steamLinked?: boolean; steamDisplayName?: string; role?: string | null; avatarUrl?: string | null; username?: string | null; userId?: string | null }) => {
+    const unsubscribeStatus = window.relayBridge.onStatus((s: { state: string; message?: string; displayName?: string; discordLinked?: boolean; discordName?: string; steamLinked?: boolean; steamDisplayName?: string; role?: string | null; avatarUrl?: string | null; username?: string | null; userId?: string | null }) => {
       if (s.state === 'authenticated') {
-        // Reactively update the signed-in user so ChatOverlay's mod-control gating
-        // (user.role ∈ {owner, admin, moderator}) reflects the real backend role.
-        setUser((prev) => ({
-          ...prev,
-          role: s.role || 'user',
-          avatarUrl: resolveAvatarUrl(s.avatarUrl) ?? prev.avatarUrl,
-          ...(s.username ? { username: s.username } : {}),
-          ...(s.displayName ? { fo76Name: s.displayName } : {}),
-          ...(s.userId ? { id: s.userId } : {}),
+        const { identity, resetChat } = reconcileIdentity(identityRef.current, s);
+        identityRef.current = identity;
+        if (resetChat) {
+          queryClient.clear();
+          resetRememberedChatSelection();
+          setMountKey(k => k + 1);
+          window.relayBridge.logDiag?.('[chat-lifecycle] reset reason=account-changed');
+        }
+        setUser(prev => ({
+          ...(resetChat ? stubUser : prev),
+          role: identity.role,
+          ...(s.avatarUrl !== undefined ? { avatarUrl: resolveAvatarUrl(s.avatarUrl) } : {}),
+          ...(s.username !== undefined ? { username: s.username } : {}),
+          fo76Name: identity.displayName,
+          ...(identity.userId ? { id: identity.userId } : {}),
         }));
         // Pre-populate fo76Name in settings from the register response displayName
         // if the user hasn't set one yet (i.e. it's still the default empty string).
@@ -397,31 +402,6 @@ function Shell() {
             }
           } catch { /* best-effort */ }
         }
-        // Remount ONLY when the identity actually changed (Discord link / rename /
-        // new account) — NOT on every authenticated status. A window-focus
-        // refreshDiscordStatus re-fires 'authenticated' with the SAME identity;
-        // remounting there reset the chat to General and lost the active party tab.
-        //
-        // Stability rule: if the incoming value for role or displayName is empty/null
-        // BUT lastIdentityRef already has a real value for that field (user was already
-        // authenticated), treat the incoming empty as "unchanged" by preserving the
-        // previous field value in the key. A transient null role from a focus-triggered
-        // re-register must not count as an identity change — that was the flash source.
-        const prevParts = lastIdentityRef.current.split('|');
-        const prevRole = prevParts[3] ?? '';
-        const prevDisplayName = prevParts[1] ?? '';
-        const stableRole = (s.role || !prevRole) ? (s.role || '') : prevRole;
-        const stableDisplayName = (s.displayName || !prevDisplayName) ? (s.displayName || '') : prevDisplayName;
-        const idKey = `${s.userId || ''}|${stableDisplayName}|${!!s.discordLinked}|${stableRole}|${!!s.steamLinked}`;
-        if (hasAuthedRef.current && idKey !== lastIdentityRef.current) {
-          // This remounts <ChatOverlay> (WS teardown + chat:history reload) — i.e. a
-          // visible "chat reloaded". Log WHY so we can confirm/deny it from main.log
-          // when users report the reload-on-Insert bug.
-          window.relayBridge.logDiag?.(`mountKey bump (chat reload): "${lastIdentityRef.current}" -> "${idKey}"`);
-          setMountKey(k => k + 1);
-        }
-        lastIdentityRef.current = idKey;
-        hasAuthedRef.current = true;
         setReady(true);
         // Successful auth clears both the error screen and the provider-required wall.
         setDiscordRequired(false);
@@ -500,6 +480,10 @@ function Shell() {
         // Show the blocking login wall and suppress the normal chat UI.
         setDiscordRequired(true);
         setError(null);
+        identityRef.current = null;
+        queryClient.clear();
+        resetRememberedChatSelection();
+        setUser(stubUser);
         setReady(false);
         // Keep the game-gate disabled so the login wall is always reachable.
         try { window.relayBridge.notifyChatActive?.(false); } catch { /* optional */ }
@@ -507,7 +491,7 @@ function Shell() {
     });
 
     // Reflect click-through mode for visibility (purely cosmetic banner).
-    window.relayBridge.onClickThrough(() => { /* could surface a badge */ });
+    const unsubscribeClickThrough = window.relayBridge.onClickThrough(() => { /* could surface a badge */ });
 
     // Populate the isDev flag from the main-process info (set once per session).
     window.relayBridge.getInfo().then((info) => {
@@ -515,9 +499,8 @@ function Shell() {
       setShowDevPersonaLogins(shouldShowDevPersonaLogins(!!info?.isDev, info?.relayHost || ''));
     }).catch(() => { /* non-fatal */ });
 
-    // Init the desktop-parity shell once. When settings change, remount the
-    // component so theme/opacity/font/hints take effect immediately.
-    initShell({ onSettingsChange: () => setMountKey(k => k + 1) });
+    // Deliver preferences in place: changing Appearance must not discard chat.
+    initShell({ onSettingsChange: () => window.dispatchEvent(new Event(OVERLAY_SETTINGS_EVENT)) });
 
     // Auto-refresh provider link/supporter-role status when the window regains focus (the user
     // may have just returned from the OAuth browser flow). Throttled to once
@@ -535,12 +518,17 @@ function Shell() {
 
     // Header refresh button → refresh provider/supporter state, then remount
     // (re-fetches channels + history).
-    const onRefresh = () => setMountKey(k => k + 1);
+    const onRefresh = () => {
+      window.relayBridge.logDiag?.('[chat-lifecycle] reset reason=manual-refresh');
+      setMountKey(k => k + 1);
+    };
     window.addEventListener('fcm-shell-refresh', onRefresh);
     // Header gear → open the full desktop-parity settings panel.
     const onSettings = () => openSettings();
     window.addEventListener('fcm-shell-settings', onSettings);
     return () => {
+      if (typeof unsubscribeStatus === 'function') unsubscribeStatus();
+      if (typeof unsubscribeClickThrough === 'function') unsubscribeClickThrough();
       window.removeEventListener('fcm-shell-refresh', onRefresh);
       window.removeEventListener('fcm-shell-settings', onSettings);
       window.removeEventListener('focus', onWindowFocus);
@@ -558,11 +546,11 @@ function Shell() {
     const themePrimary = 'var(--shell-primary, #18FF62)';
     const btnBase: React.CSSProperties = {
       background: 'rgba(20,32,20,0.9)', border: `1px solid ${themePrimary}`,
-      color: themePrimary, fontFamily: '"Courier New", monospace',
+      color: themePrimary, fontFamily: 'var(--shell-font, monospace)',
       cursor: 'pointer', letterSpacing: '0.08em', fontWeight: 'bold',
     };
     return (
-      <div id="shell-discord-login-wall" style={{ fontFamily: '"Courier New", monospace', padding: 20, fontSize: 13, color: themeText, display: 'flex', flexDirection: 'column', gap: 12, background: 'rgba(8,18,8,0.96)', minHeight: '100vh', boxSizing: 'border-box' }}>
+      <div id="shell-discord-login-wall" style={{ fontFamily: 'var(--shell-font, monospace)', padding: 20, fontSize: 13, color: themeText, display: 'flex', flexDirection: 'column', gap: 12, background: 'rgba(8,18,8,0.96)', minHeight: '100vh', boxSizing: 'border-box' }}>
         <div style={{ color: themePrimary, fontWeight: 'bold', letterSpacing: '0.1em', fontSize: 14 }}>
           FALLOUT CHAT MOD
         </div>
@@ -602,7 +590,7 @@ function Shell() {
     const themeText = 'var(--shell-text, #18FF62)';
     const themePrimary = 'var(--shell-primary, #18FF62)';
     return (
-      <div style={{ fontFamily: '"Courier New", monospace', padding: 16, fontSize: 13, color: themeText }}>
+      <div style={{ fontFamily: 'var(--shell-font, monospace)', padding: 16, fontSize: 13, color: themeText }}>
         <div style={{ color: '#FF6644', marginBottom: 10 }}>
           {is429 ? '⚠ Rate limited (HTTP 429)' : `Relay error: ${error}`}
         </div>
@@ -623,7 +611,7 @@ function Shell() {
           }}
           style={{
             background: 'rgba(20,32,20,0.9)', border: `1px solid ${themePrimary}`,
-            color: themePrimary, fontFamily: '"Courier New", monospace',
+            color: themePrimary, fontFamily: 'var(--shell-font, monospace)',
             fontSize: 11, padding: '6px 14px', cursor: 'pointer', letterSpacing: '0.06em',
           }}
         >
@@ -641,7 +629,7 @@ function Shell() {
   if (!ready) {
     const themePrimary = 'var(--shell-primary, #18FF62)';
     return (
-      <div style={{ color: 'var(--shell-text, #18FF62)', fontFamily: '"Courier New", monospace', padding: 16, fontSize: 13 }}>
+      <div style={{ color: 'var(--shell-text, #18FF62)', fontFamily: 'var(--shell-font, monospace)', padding: 16, fontSize: 13 }}>
         Authenticating with relay…
         {authStuck && (
           <div style={{ marginTop: 12 }}>
@@ -653,7 +641,7 @@ function Shell() {
               onClick={() => { setAuthStuck(false); location.reload(); }}
               style={{
                 background: 'rgba(20,32,20,0.9)', border: `1px solid ${themePrimary}`,
-                color: themePrimary, fontFamily: '"Courier New", monospace',
+                color: themePrimary, fontFamily: 'var(--shell-font, monospace)',
                 fontSize: 11, padding: '6px 14px', cursor: 'pointer', letterSpacing: '0.06em',
               }}
             >

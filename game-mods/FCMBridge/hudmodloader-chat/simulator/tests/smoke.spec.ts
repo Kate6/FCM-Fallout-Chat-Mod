@@ -13,7 +13,7 @@ test.afterEach(async ({ page, request }) => {
 test('loads the exact production widget artifact and records browser key delivery', async ({ page }) => {
   await page.goto('/?mode=artifact');
   await expect(page.locator('#status')).toHaveAttribute('data-state', 'ready', { timeout: 20_000 });
-  await expect(page.locator('#widget-version')).toHaveText('2.10.103');
+  await expect(page.locator('#widget-version')).toHaveText('2.10.109');
   await page.locator('#focus-stage').click();
   await page.keyboard.press('Insert');
   await page.keyboard.press('ArrowUp');
@@ -113,6 +113,23 @@ test('packages independent tab ranges, file-key precedence, ZFE synchronization,
 });
 
 for (const provider of ['xscal', 'zfe']) {
+  test(`acknowledges contiguous ${provider} retention without weakening gap recovery`, async ({ page }) => {
+    await page.goto(`/?mode=harness&provider=${provider}&scenario=queue-loss`);
+    await expect(page.locator('#log')).toContainText(/QUEUE-(RETENTION PASS|DIAGNOSTIC FAIL)/, { timeout: 25_000 });
+    const log = await page.locator('#log').textContent();
+    expect(log).toContain(`QUEUE-RETENTION PASS ${provider} contiguous=acknowledged gap=recovered private=omitted`);
+    expect(log).not.toContain('QUEUE-DIAGNOSTIC FAIL');
+  });
+
+  test(`automatically binds Server after delayed ${provider} authentication`, async ({ page }) => {
+    await page.goto(`/?mode=harness&provider=${provider}&scenario=delayed-auth`);
+    await expect(page.locator('#log')).toContainText(/DELAYED-AUTH (PASS|FAIL)/, { timeout: 25_000 });
+    const log = await page.locator('#log').textContent();
+    expect(log).toContain(`DELAYED-AUTH PENDING ${provider} history=received roster=read controls=blocked`);
+    expect(log).toContain(`DELAYED-AUTH PASS ${provider} automatic=auth,roster,tab reconnects=0 user-sends=0`);
+    expect(log).not.toContain('DELAYED-AUTH FAIL');
+  });
+
   test(`preserves background bridge membership through ${provider} fast travel`, async ({ page }) => {
     await page.goto(`/?mode=harness&provider=${provider}&scenario=bridge-fast-travel`);
     await expect(page.locator('#log')).toContainText(`HARNESS bridge constructed provider=${provider}`);
@@ -134,7 +151,11 @@ for (const provider of ['xscal', 'zfe']) {
     await expect(page.locator('#log')).toContainText(/ROSTER-SCENARIO (PASS|FAIL)/, { timeout: 25_000 });
     const log = await page.locator('#log').textContent();
     expect(log).toContain(`ROSTER-SCENARIO PASS ${provider}`);
+    expect(log).toContain('RESTORED-READER PASS sources=6 cached-pull=stale fresh-push=accepted damaged=rejected');
     expect(log).not.toContain('ROSTER-SCENARIO FAIL');
+    expect(log).toContain('ROSTER-DIAGNOSTICS PASS probes=local-only repeated-error=throttled evidence=unchanged');
+    expect(log).toContain('ROSTER-PROBES PASS count=7 error=numeric-only phases=fixed private-error=omitted');
+    expect(log).not.toContain('PRIVATE-ROSTER-ERROR');
     for (let cycle = 0; cycle < 3; cycle++) {
       expect(log).toContain(`ROSTER-CYCLE PASS ${cycle} source=PublicTeamsData history=preserved controls=unchanged`);
     }

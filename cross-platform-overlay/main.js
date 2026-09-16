@@ -2555,9 +2555,21 @@ ipcMain.on('window:set-opacity', (_evt, v) => {
 //     transfer focus to the game, so we additionally ask the window manager to
 //     activate the FO76 window via wmctrl/xdotool (best-effort; silent if the
 //     tool isn't installed — blur is still applied as a fallback).
-ipcMain.on('overlay:return-to-game', () => {
+let pendingGameFocusReturn = null;
+function cancelGameFocusReturn() {
+  if (pendingGameFocusReturn) {
+    try { pendingGameFocusReturn.kill(); } catch { /* already exited */ }
+    pendingGameFocusReturn = null;
+  }
+}
+
+function returnFocusToGame() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (!gameRunning) { diag('[return-to-game] skipped — game not running'); return; }
+  if (!gameRunning || !mainWindow.isFocused()) {
+    diag('[return-to-game] skipped — game stopped or overlay no longer focused');
+    return;
+  }
+  cancelGameFocusReturn();
   diag('[return-to-game] returning focus to FO76, clickThrough=' + clickThrough + ' platform=' + process.platform);
   try { mainWindow.blur(); } catch { /* ignore */ }
   // Force the renderer to blur whichever DOM element currently has focus.
@@ -2582,18 +2594,34 @@ ipcMain.on('overlay:return-to-game', () => {
       'Add-Type @"',
       'using System;using System.Runtime.InteropServices;',
       'public class FG{',
+      ' [DllImport("user32")] public static extern IntPtr GetForegroundWindow();',
+      ' [DllImport("user32")] public static extern int GetClassName(IntPtr h,System.Text.StringBuilder b,int n);',
+      ' [DllImport("user32")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);',
       ' [DllImport("user32")] public static extern bool SetForegroundWindow(IntPtr h);',
       ' [DllImport("user32")] public static extern bool ShowWindow(IntPtr h,int n);',
       ' [DllImport("user32")] public static extern void keybd_event(byte k,byte s,uint f,IntPtr e);',
       '}',
       '"@',
       "$p=Get-Process Fallout76,Project76_GamePass -EA SilentlyContinue | ?{$_.MainWindowHandle -ne 0} | select -First 1",
-      'if($p){$h=$p.MainWindowHandle;',
+      '$fg=[FG]::GetForegroundWindow();[uint32]$owner=0;[void][FG]::GetWindowThreadProcessId($fg,[ref]$owner)',
+      '$class=New-Object System.Text.StringBuilder 256;[void][FG]::GetClassName($fg,$class,256)',
+      // Check at activation time: a slow PowerShell startup must not pull focus
+      // back after the user has switched to another application. Desktop/zero
+      // are the desktop fallback Windows can choose when the overlay hides.
+      `if($p -and ($owner -eq ${process.pid} -or $owner -eq $p.Id -or $owner -eq 0 -or $class.ToString() -eq 'Progman' -or $class.ToString() -eq 'WorkerW')){$h=$p.MainWindowHandle;`,
       '[FG]::keybd_event(0x12,0,0,[IntPtr]::Zero);[FG]::keybd_event(0x12,0,2,[IntPtr]::Zero);',
       '[FG]::ShowWindow($h,9);[FG]::SetForegroundWindow($h)}',
     ].join('\n');
     try {
       const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', ps], { windowsHide: true });
+      pendingGameFocusReturn = child;
+      const timeout = setTimeout(() => { if (pendingGameFocusReturn === child) cancelGameFocusReturn(); }, 3000);
+      timeout.unref?.();
+      child.on('exit', (code) => {
+        clearTimeout(timeout);
+        if (pendingGameFocusReturn === child) pendingGameFocusReturn = null;
+        diag('[return-to-game] win32 helper exited code=' + code);
+      });
       child.on('error', (e) => diag('[return-to-game] win32 activate failed: ' + String(e && e.message || e)));
     } catch (e) { diag('[return-to-game] win32 spawn threw: ' + String(e && e.message || e)); }
   }
@@ -2602,11 +2630,17 @@ ipcMain.on('overlay:return-to-game', () => {
     // wmctrl matches the window title substring; xdotool matches by name/class.
     // Try wmctrl first (most common), then xdotool. FO76 under Proton shows a
     // window titled "Fallout76.exe"/"Fallout76". Both are no-ops if absent.
-    exec('wmctrl -a Fallout76', (err) => {
-      if (err) {
-        exec("xdotool search --name 'Fallout76' windowactivate", () => { /* best-effort */ });
+    const child = exec('wmctrl -a Fallout76', { timeout: 1500 }, (err) => {
+      if (pendingGameFocusReturn !== child) return;
+      pendingGameFocusReturn = null;
+      if (err && !err.killed) {
+        const fallback = exec("xdotool search --name 'Fallout76' windowactivate", { timeout: 1500 }, () => {
+          if (pendingGameFocusReturn === fallback) pendingGameFocusReturn = null;
+        });
+        pendingGameFocusReturn = fallback;
       }
     });
+    pendingGameFocusReturn = child;
   }
 
   // Re-apply click-through (blur may cause Electron to reset mouse-ignore),
@@ -2614,7 +2648,8 @@ ipcMain.on('overlay:return-to-game', () => {
   if (clickThrough && !modalInteractive) {
     try { setMouseIgnore(true, true); } catch { /* ignore */ }
   }
-});
+}
+ipcMain.on('overlay:return-to-game', () => returnFocusToGame());
 
 // Open a URL in the user's default browser (Discord OAuth link/relink/login).
 ipcMain.on('shell:open-external', (_evt, url) => {
@@ -2891,6 +2926,7 @@ function refreshDiscordStatus(attempt = 0, oauthPoll = null) {
                 if (userRole !== prevRoleLink) rebuildTray();
                 sendToRenderer('relay:status', {
                   state: 'authenticated',
+                  userId: r.userId || null,
                   displayName: r.displayName || d.displayName || discordName,
                   discordLinked: !!r.discordLinked,
                   discordName: r.discordName || discordName,
@@ -3110,6 +3146,7 @@ function refreshSteamStatus(attempt = 0) {
                 if (userRole !== prevRoleSteam) rebuildTray();
                 sendToRenderer('relay:status', {
                   state: 'authenticated',
+                  userId: r.userId || null,
                   displayName: r.displayName || d.displayName || '',
                   discordLinked: !!r.discordLinked,
                   discordName: r.discordName || '',
@@ -3144,7 +3181,7 @@ ipcMain.on('steam:refresh-status', () => refreshSteamStatus(0));
 // backend upserts by installToken and calls refreshClientIdentity to update any
 // open WS sockets in place). On success we update the in-memory session token
 // (a fresh one is issued by register) and broadcast a new 'relay:status' so the
-// renderer remounts the component with the updated displayName.
+// renderer updates the current account without discarding its chat state.
 //
 // Graceful conflict handling: the backend returns 409 when the name is already
 // taken by another user (and it isn't a Discord self-reclaim). We surface that
@@ -3163,7 +3200,7 @@ ipcMain.handle('identity:set-name', async (_evt, rawName) => {
   // installToken }; the backend upserts by installToken so this RENAMES the row.
   const renameState = { ...st, username: name };
   try {
-    const { token, displayName, discordLinked, discordName, discordUsername, discordDisplayName, discordAvatarUrl, steamLinked, steamDisplayName, username: savedUsername, userRole: renameRole, avatarUrl: renameAvatarUrl } =
+    const { token, userId: renamedUserId, displayName, discordLinked, discordName, discordUsername, discordDisplayName, discordAvatarUrl, steamLinked, steamDisplayName, username: savedUsername, userRole: renameRole, avatarUrl: renameAvatarUrl } =
       await registerForToken(renameState, clientKey);
     sessionToken = token;
     flushPendingWsOpens();
@@ -3179,11 +3216,11 @@ ipcMain.handle('identity:set-name', async (_evt, rawName) => {
     const prevRoleRename = userRole;
     userRole = renameRole || null;
     if (userRole !== prevRoleRename) rebuildTray();
-    // Re-broadcast authenticated status so the renderer remounts the overlay and
-    // the chat now renders under the new name. The WS identity was already
+    // Re-broadcast authenticated status so chat updates to the new name in place. The WS identity was already
     // refreshed server-side by register → refreshClientIdentity.
     sendToRenderer('relay:status', {
       state: 'authenticated',
+      userId: renamedUserId || null,
       displayName: displayName || name,
       discordLinked: !!discordLinked,
       discordName: discordName || '',
@@ -3454,6 +3491,7 @@ function stopRepaintTimer() {
 
 function _doShow() {
   if (!mainWindow) return;
+  cancelGameFocusReturn();
   if (mainWindow.isMinimized()) mainWindow.restore();
   try { mainWindow.setFocusable(true); } catch { /* not critical */ }
   mainWindow.show();
@@ -3497,6 +3535,8 @@ function hideWindow() {
 // hideWindowUserExplicit: called when the USER intentionally hides (Delete / /hide / tray Hide).
 // Sets userHidden=true so reevaluateVisibility won't auto-restore until game-launch or Insert/Show.
 function hideWindowUserExplicit() {
+  // Capture/return keyboard ownership before hide() drops isFocused().
+  if (gameRunning && mainWindow && mainWindow.isFocused()) returnFocusToGame();
   userHidden = true;
   diag('[hide] user explicit hide — userHidden=true');
   hideWindow();
@@ -3517,7 +3557,9 @@ function toggleWindow() {
     hideWindowUserExplicit(); // Delete = explicit hide-to-tray (not quit)
   } else {
     userHidden = false; // show clears the flag
-    _doShow(); // bypass gate -- explicit hotkey should always show
+    // Delete restores the feed for reading; Insert is the typing action.
+    if (gameRunning) showWindowInactive();
+    else _doShow(); // retain standalone/tray recovery
   }
 }
 
@@ -3583,6 +3625,7 @@ function dispatchFocusInput(reason) {
 
 function focusToChat() {
   if (!mainWindow) return;
+  cancelGameFocusReturn();
   // Treat the window as hidden if it is not visible OR if it is hidden-to-tray
   // (userHidden=true means the user pressed Delete; the window should be hidden
   // but defend against edge cases where isVisible() is true yet tray-hidden).
@@ -4166,6 +4209,7 @@ function _runForegroundPoll(available, tried) {
           // "overlay won't stay above the game" diagnosable without a manual capture.
           vdiag('[foreground] active-window class changed: "' + lastForegroundProc + '" → "' + line +
             '" (isGame=' + isGameClass(line) + ' unknown=' + overlayCore.isUnknownForegroundClass(line) + ' gameRunning=' + gameRunning + ')');
+          if (!isGameClass(line) && !overlayCore.isOverlayClass(line) && !overlayCore.isUnknownForegroundClass(line)) cancelGameFocusReturn();
           lastForegroundProc = line;
           if (gameRunning) applyZOrder();
           applyFocusClickThrough();
@@ -4233,7 +4277,9 @@ while ($true) {
         pollerRestartCount = 0;
         if (!pollerEverEmitted) { pollerEverEmitted = true; diag('[foreground] win32 poller: first line ("' + line.toLowerCase() + '")'); }
         if (fgFailClosed) { fgFailClosed = false; diag('[foreground] win32 poller recovered — re-evaluating hotkeys'); }
-        lastForegroundProc = line.toLowerCase();
+        const foreground = line.toLowerCase();
+        if (foreground && foreground !== 'explorer' && !isGameClass(foreground) && !overlayCore.isOverlayClass(foreground)) cancelGameFocusReturn();
+        lastForegroundProc = foreground;
         if (gameRunning) applyZOrder();
         applyFocusClickThrough();
         refreshShortcuts();

@@ -22,6 +22,27 @@ Bounds are loaded from `overlay-state.json` at launch and **clamped to the activ
 
 ---
 
+## Explicit hide/show and keyboard ownership
+
+The keyboard toggle (`Delete` by default), `/hide`, and tray Hide share
+`hideWindowUserExplicit()`. When the overlay is focused and the game is running,
+it calls `returnFocusToGame()` before `hide()` loses the focus context. Restoring
+with the toggle uses `showWindowInactive()` during gameplay. `Insert` deliberately
+focuses the composer; a standalone restore still activates the app.
+
+The focus-return operation skips requests once another application owns focus.
+Its owned helper is cancelled by a new typing/active-show request or a foreground
+poll reporting another app. The Windows helper also checks foreground ownership
+at activation time, allowing only this overlay, the game, or the desktop fallback;
+it times out after three seconds. Linux uses bounded `wmctrl`/`xdotool` attempts.
+Renderer blur notifications cancel pending focus retries; an old delayed blur
+cannot override a newer Insert request. `userHidden`, click-through, modal pins,
+and context-gated shortcut registration retain their existing rules.
+
+`__tests__/hide-show.test.js` executes the production window actions with mocked
+Electron adapters, including 20 cycles. Actual game foreground transfer, rapid
+Alt-Tab and custom keyboard bindings still require native acceptance testing.
+
 ## Drag and resize
 
 The renderer's shell strip uses CSS `-webkit-app-region: drag`. Edge resize zones in `shell.ts` compute new bounds on pointer move and send them through IPC (`overlay:resize-bounds`).

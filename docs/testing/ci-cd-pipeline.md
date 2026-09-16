@@ -221,9 +221,21 @@ to all downstream jobs being skipped, which would otherwise produce a misleading
 
 ## Linux overlay smoke details (`overlay-launch-smoke-linux`)
 
-Single build + launch-smoke check:
+The renderer is built once, then the job runs:
 
-1. **Packaged-launch smoke** — `npx electron-builder --linux dir` then
+1. **Drag interaction smoke** — `scripts/drag-smoke.mjs` exercises real
+   renderer/preload/main window-move IPC under Xvfb.
+2. **Overlay usability interaction** — `npm --prefix cross-platform-overlay run
+   test:interaction` under Xvfb runs `scripts/usability-smoke.mjs` against an
+   isolated localhost relay and temporary profile. It covers live font/theme
+   changes, one-step navigation, same-account updates, ten real disconnects with
+   draft/message/reading-anchor retention, native preference persistence, and
+   clearing the draft on account switch. Layout checks cover font scales 9/14/22
+   at widths 320/520/800. The production backoff is preserved, so
+   the disconnect loop takes several minutes. Screenshots/failure logs upload as
+   `overlay-usability-evidence`, alongside a machine-readable result on success;
+   all owned processes/profile data are removed.
+3. **Packaged-launch smoke** — `npx electron-builder --linux dir` then
    `xvfb-run -a node scripts/ci-launch-smoke.mjs`. Catches crash-on-launch regressions (e.g.
    v1.3.82's `Cannot find module './overlay-core'` which bricked users; since auto-update is removed,
    such a crash requires a manual reinstall — gate is non-negotiable).

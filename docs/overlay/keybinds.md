@@ -9,7 +9,7 @@ The Electron overlay uses **global shortcuts** (Electron `globalShortcut`) regis
 | Default key | Action name | Behavior |
 |-------------|-------------|----------|
 | `Insert` | `focus` | **Focus-to-chat**: shows the overlay if hidden **or in tray** (clears `userHidden`), re-asserts always-on-top, expands if collapsed, focuses the chat input. On Windows, uses `app.focus({ steal: true })` to bypass the foreground-lock so the user can type immediately without Alt-Tabbing. |
-| `Delete` | `toggle` | **Hide-to-tray**: hides the window to the system tray. The app keeps running; it does NOT quit. Sets `userHidden = true` so the game gate will not auto-restore the overlay. |
+| `Delete` | `toggle` | **Hide/show**: hides to tray and sets `userHidden = true`. If the overlay was accepting keyboard input, requests return to the running game before hiding. Press again to restore for reading without taking game focus; outside gameplay, restores as an active standalone window. `Insert` remains the focus-to-chat action. |
 | `End` | `clickThrough` | Toggle click-through: interactive mode ↔ pass-through (mouse events fall to the game behind). |
 | `PageDown` | `nextChannel` | Advance to the next sub-channel tab (renderer-driven via `overlay:command`). |
 | `PageUp` | `prevChannel` | Go to the previous sub-channel tab (renderer-driven). |

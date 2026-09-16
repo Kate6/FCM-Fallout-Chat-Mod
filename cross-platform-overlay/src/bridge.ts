@@ -36,8 +36,10 @@ interface RelayBridge {
     steamLinked?: boolean;
     steamDisplayName?: string;
     username?: string;
-  }) => void): void;
-  onClickThrough(cb: (on: boolean) => void): void;
+    userId?: string | null;
+    role?: string | null;
+  }) => void): (() => void) | void;
+  onClickThrough(cb: (on: boolean) => void): (() => void) | void;
   // Shell window controls (the web component has no chrome of its own).
   minimizeWindow(): void;
   hideWindow(): void;

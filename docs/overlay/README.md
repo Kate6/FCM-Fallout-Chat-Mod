@@ -86,6 +86,21 @@ Settings also exposes Steam unlink. When Discord (or another provider) remains l
 removed without interrupting the session. When Steam is the last provider, the backend revokes
 the session and the overlay returns to the provider login wall.
 
+## Font selection
+
+**Settings → Appearance → Font** selects Theme default, System sans, Arial,
+Verdana, or Monospace, with a sample preview. The picker supports arrow keys,
+Home/End, Enter/Space and Escape. Explicit choices survive color-theme changes;
+Theme default preserves the previous theme typography. Fonts use local system
+stacks with Linux fallbacks, without downloading font files.
+
+The validated `fontId` setting is saved in shell/browser settings and the native
+`overlay-state.json` mirror. Missing or invalid values resolve to Theme default.
+Changes apply to the shared chat, composer, tabs, footer and shell controls without
+remounting chat, replacing its socket or clearing the draft. The existing Scale
+control remains the single Electron zoom multiplier. Deliberate fixed-width
+wiki labels and launch-code digits retain their formatting.
+
 ## Chat appearance in Settings
 
 **Settings → Appearance → Chat appearance** is the desktop equivalent of Profile →

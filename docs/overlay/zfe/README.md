@@ -7,14 +7,29 @@ must not add game-memory reads, code injection, or network/port scanning.
 
 ## Current implementation and verification
 
-**2026-09-16 source candidates:** FCMChatWidget **2.10.103** and FCMServerBridge **0.1.6** share
-a bounded roster collector. The bridge policy consumes copied observations, not game-owned
-payloads; repeated cache reads do not renew freshness. A new independent Ruffle host tests the
-exact packaged bridge in a fresh application domain under both mock providers. Bridge 0.1.6 DEV
-is **installed locally, native roster acceptance failed** (`payload E1014` on four sources,
-`test provider` on two, no observed roster); widget 2.10.103 is not installed. The previous
-bridge 0.1.5 failed with E1014 and no identified class. See [bridge architecture](background-server-bridge.md) and
-[the test gate](../../testing/hud-automation-plan.md#isolated-packaged-bridge-gate).
+**2026-09-16 source candidate:** visible FCMChatWidget **2.10.109** uses the bounded numeric-only
+2.10.108 evidence to distinguish xScal's contiguous 128-entry retirement marker from an actual
+unread cursor gap. Contiguous/stale markers no longer replay history; forward gaps and unidentified
+markers retain fail-closed recovery. Fresh native acceptance is pending before production.
+
+**Previous 2.10.107:** adds automatic pending-ZFE
+auth refresh after native 2.10.106 restored populated roster reads but still failed to join
+Server: the startup auth read preceded the handshake and only xScal was rechecked afterward.
+The real-widget delayed-auth scenarios cover both providers. Fresh desktop ZFE/prod 2.10.107
+logs confirm automatic authentication and Server-room binding before any ordinary chat send,
+with populated roster reads and no decoder errors. Two Server-send echoes reconcile without
+duplicates, and one loading/fast-travel cycle retains the room with empty auxiliary lists.
+Real hop/MainMenu, extended empty-primary fallback and laptop/xScal acceptance remain pending.
+2.10.106 restored earlier traversal after **2.10.105 confirmed** decoder method-entry E1014 even
+on synthetic payloads. The rejected method is diagnostic-only;
+probe results never become roster evidence or renew leases.
+The widget retains copied names plus source timestamps only; unchanged getter reads do
+not renew freshness. FCMServerBridge **0.1.6** retains its separate shared decoder and is
+**previously installed locally with failed native roster acceptance** (`payload E1014` on four sources,
+`test provider` on two, no observed roster). It remains inactive during the visible-widget test.
+Neither candidate is published; the visible widget's desktop ZFE startup binding, Server-send/
+echo and one same-room travel cycle have passed fresh native checks.
+See [bridge architecture](background-server-bridge.md) and the [test gate](../../testing/hud-automation-plan.md#isolated-packaged-bridge-gate).
 
 Historical **2026-09-15** acceptance: the source and rebuilt SWF/BA2 candidate were
 **FCMChatWidget 2.10.102**, tested locally with official xScal 0.2.16 against hosted Dev and now

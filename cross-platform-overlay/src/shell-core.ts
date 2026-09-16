@@ -1,3 +1,4 @@
+import { normalizeFontId, type FontId } from '../../admin-dashboard/src/features/chat/overlayFonts';
 // shell-core.ts — pure, side-effect-free helpers extracted from shell.ts.
 //
 // Nothing in this module touches the DOM directly, electron, or module-level
@@ -347,6 +348,7 @@ export function revealCollapsedElements(
 // "mirror carries every component-facing field" invariant is unit-tested.
 export interface WebMirrorInput {
   themeId: string;
+  fontId?: FontId;
   textOpacity: number;
   showHints: boolean;
   showTimestamps: boolean;
@@ -361,6 +363,7 @@ export interface WebMirrorInput {
 }
 export interface WebMirrorSettings {
   themeId: string;
+  fontId: FontId;
   windowOpacity: number;
   textOpacity: number;
   fontSize: number;
@@ -378,6 +381,7 @@ export interface WebMirrorSettings {
 export function shellToWebSettings(s: WebMirrorInput): WebMirrorSettings {
   return {
     themeId: s.themeId,
+    fontId: normalizeFontId(s.fontId),
     // Chrome opacity is applied via the --fcm-chrome-bg-alpha CSS variable, so the
     // component must NOT also dim the whole window → its own windowOpacity is 1.
     windowOpacity: 1,
