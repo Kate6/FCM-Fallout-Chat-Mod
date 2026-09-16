@@ -77,6 +77,18 @@ Some native responses report transport authentication without a linked FCM accou
 not clear the widget’s sticky link gate or the relay’s send permission check. The token can be linked after a web device-code flow;
 the normal relay event flow then refreshes the widget state.
 
+HUD reload recovery also covers limited identities. An exact `server` send of
+`FCMCTL/1/RESYNC`, authenticated with a valid relay token, reissues the private link notice
+to that identity's surviving subscriber(s). It does not enable sending or room controls and
+does not replay stale Server history. Recovery is limited to six requests per ten-second
+identity bucket and fails closed with `link_unavailable` if code generation/delivery fails.
+An existing unexpired, unused code is reused without extending its lifetime; otherwise one
+code is generated on the requesting backend and forwarded over private `relay:control`
+(`link-required`) to other backend instances; recipients allocate fresh delivery cursors but
+never mint another code. Neither the code nor the token is logged. Normal authenticated
+history recovery resumes after linking. This correction requires a backend deployment;
+replacing the widget archive alone does not apply it.
+
 ### Mandatory auth gate — limited until a provider-linked FCM account
 
 The relay permits a bare install to register only as a limited identity so it can

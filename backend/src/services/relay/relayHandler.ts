@@ -158,14 +158,14 @@ const LINK_URL                  = deriveLinkUrl(env.FCM_PUBLIC_BASE_URL);
  * Dynamic import so this module compiles solo before WT2 merges into the same
  * deployment. If WT2's linkCodeService is absent, returns null (no-op).
  */
-function issueLinkCode(relayUserId: string): Promise<string | null> {
+function issueLinkCode(relayUserId: string, reuseActive = false): Promise<string | null> {
   // Use require() so this works in both CJS (Jest/tests) and bundled ESM.
   // Dynamic import() fails in Jest's CJS transform context without --experimental-vm-modules.
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
     const svc: any = require('../../services/linkCodeService');
     if (typeof svc.issueLinkCode === 'function') {
-      return Promise.resolve(svc.issueLinkCode(relayUserId));
+      return Promise.resolve(svc.issueLinkCode(relayUserId, { reuseActive }));
     }
   } catch (err: any) {
     if (
@@ -192,12 +192,16 @@ function issueLinkCode(relayUserId: string): Promise<string | null> {
  *
  * Delivered directly on `ws` — not broadcast (only the registering/hello-ing client sees it).
  */
-async function pushLinkNotice(ws: WebSocket, relayUserId: string): Promise<void> {
-  const code = await issueLinkCode(relayUserId);
+function linkNoticeBody(code: string | null): string {
   // Format code as XXXX-XXXX if it looks like an 8-char hex/alphanum string.
   const formatted = code && code.length === 8
     ? `${code.slice(0, 4)}-${code.slice(4)}`
     : code ?? '????-????';
+  return `LINK REQUIRED - visit ${LINK_URL}, sign in, and enter code: ${formatted} (expires 10m)`;
+}
+
+async function pushLinkNotice(ws: WebSocket, relayUserId: string): Promise<void> {
+  const code = await issueLinkCode(relayUserId);
 
   const redis  = await getRedisClient();
   const cursor = await redis.incr('relay:seq');
@@ -208,11 +212,42 @@ async function pushLinkNotice(ws: WebSocket, relayUserId: string): Promise<void>
     channel:           'system',
     senderUserId:      'system',
     senderDisplayName: 'FCM',
-    body:              `LINK REQUIRED - visit ${LINK_URL}, sign in, and enter code: ${formatted} (expires 10m)`,
+    body:              linkNoticeBody(code),
     targetUserId:      '',
     createdAt:         new Date().toISOString(),
   };
   send(ws, { op: 'event', cursor, event });
+}
+
+/** Recover a consumed notice on the surviving native subscription, not the transient RPC. */
+async function pushRecoveredLinkNoticeLocal(relayUserId: string, code: string): Promise<void> {
+  const targets = [...subscribers].filter(sub => sub.userId === relayUserId
+    && !sub.linkedUserId && sub.ws.readyState === 1);
+  if (targets.length === 0) return;
+  const cursor = await nextRelaySeq();
+  const event = {
+    id: cursor, kind: 'chat.message', channel: 'system', senderUserId: 'system',
+    senderDisplayName: 'FCM', body: linkNoticeBody(code), targetUserId: '',
+    createdAt: new Date().toISOString(),
+  };
+  const frame = JSON.stringify({ op: 'event', cursor, event });
+  for (const sub of targets) {
+    // A link-completion callback may have run during the sequence reservation.
+    if (!subscribers.has(sub) || sub.linkedUserId) continue;
+    if (!sendSubscriberFrame(sub, frame, cursor)) subscribers.delete(sub);
+  }
+}
+
+async function recoverLinkNotice(relayUserId: string): Promise<void> {
+  // Reuse a valid code or mint once, then share it with the subscriber's backend.
+  // Minting per replica would invalidate the code already displayed by another replica.
+  const code = await issueLinkCode(relayUserId, true);
+  if (!code || !/^[0-9A-Z]{8}$/.test(code)) throw new Error('Link code unavailable');
+  await pushRecoveredLinkNoticeLocal(relayUserId, code);
+  const redis = await getRedisClient();
+  await redis.publish(RELAY_CONTROL_CHANNEL, JSON.stringify({
+    kind: 'link-required', relayUserId, code, sourceInstanceId: relayInstanceId,
+  }));
 }
 
 /**
@@ -806,6 +841,14 @@ async function ensurePubSub(): Promise<void> {
         && (typeof parsed.sourceInstanceId !== 'string' || !UUID_RE.test(parsed.sourceInstanceId))) return;
       if (parsed.sourceInstanceId === relayInstanceId) return;
 
+      if (parsed.kind === 'link-required'
+        && typeof parsed.relayUserId === 'string' && /^user_[0-9a-f]{32}$/i.test(parsed.relayUserId)
+        && typeof parsed.code === 'string' && /^[0-9A-Z]{8}$/.test(parsed.code)) {
+        pushRecoveredLinkNoticeLocal(parsed.relayUserId, parsed.code).catch(() =>
+          logger.warn('[relayHandler] remote link notice recovery failed'));
+        return;
+      }
+
       if (parsed.kind === 'hud-send-receipt' && typeof parsed.relayUserId === 'string'
         && /^user_[0-9a-f]{32}$/i.test(parsed.relayUserId)
         && (typeof parsed.linkedUserId === 'string' || parsed.linkedUserId === null)
@@ -1085,6 +1128,24 @@ async function handleSend(ws: WebSocket, frame: Record<string, unknown>): Promis
   // Auth gate: limited identities cannot send (check before any user lookup).
   // We check this BEFORE ban/mute to avoid unnecessary DB queries for limited users.
   if (!identity.isLinked) {
+    // Native subscriptions outlive a HUD movie. RESYNC must be able to restore the
+    // consumed sign-in notice before linking, but must NOT admit chat, room controls,
+    // history from a stale room, or a caller-selected recipient. Identity is token-owned.
+    if (slug === 'server' && body === HISTORY_RESYNC_SENTINEL) {
+      if (!(await checkWorldControlRateLimit(identity.userId))) {
+        await deliver(errEnvelope('rate_limited', 'Link recovery is temporarily rate limited'));
+        return;
+      }
+      try {
+        await recoverLinkNotice(identity.userId);
+      } catch {
+        logger.warn('[relayHandler] link notice recovery failed');
+        await deliver(errEnvelope('link_unavailable', 'Sign-in code is temporarily unavailable'));
+        return;
+      }
+      sendControlAck(ws);
+      return;
+    }
     await deliver(errEnvelope('permission_denied', `Account not linked — complete the link flow at ${LINK_URL}`));
     return;
   }
