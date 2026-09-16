@@ -511,7 +511,9 @@ app.get('/auth/discord/callback', authLimiter, async (req: Request, res: Respons
       where: { discordId: discordUser.id },
       update: discordProfile,
       create: {
-        username: `discord:${discordUser.id}`,
+        // Restored/unlinked rows can still own the old discord:<id> slug.
+        // Give new rows an independent internal name; only discordId proves ownership.
+        username: `discord:${discordUser.id}:${uuidv4()}`,
         installToken: uuidv4(),
         discordId: discordUser.id,
         ...discordProfile,

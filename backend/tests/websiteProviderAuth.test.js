@@ -223,7 +223,11 @@ describe('Discord browser sign-in to HUD code entry', () => {
       providers: [{ provider: 'discord', username: 'Dweller' }],
     });
     expect(accounts[0]).toEqual({ id: 'unrelated-account', username: 'Dweller', discordId: '99999999999999999' });
-    expect(accounts[1]).toMatchObject({ username: `discord:${discordId}`, discordId, discordDisplayName: 'Dweller' });
+    expect(accounts[1]).toMatchObject({
+      username: expect.stringMatching(new RegExp(`^discord:${discordId}:[0-9a-f-]{36}$`)),
+      discordId,
+      discordDisplayName: 'Dweller',
+    });
     expect(prismaStub.user.upsert).toHaveBeenCalledWith(expect.objectContaining({ where: { discordId } }));
     expect(mockBrowserSession.discordUser.role).toBe('member');
     expect(prismaStub.adminUser.upsert).not.toHaveBeenCalled();
@@ -237,6 +241,21 @@ describe('Discord browser sign-in to HUD code entry', () => {
     expect(accounts).toHaveLength(2);
     expect(accounts[1]).toMatchObject({ id: 'existing-account', username: 'Chosen name', installToken: 'existing-install', discordDisplayName: 'Dweller' });
     expect(prismaStub.user.create).not.toHaveBeenCalled();
+  });
+
+  test('an unlinked legacy Discord placeholder cannot block or claim the authenticated account', async () => {
+    const legacy = { id: 'legacy-account', username: `discord:${discordId}`, discordId: null, installToken: 'legacy-install' };
+    accounts.push({ ...legacy });
+    const callback = await request(app).get('/auth/discord/callback?code=code&state=state');
+    expect(callback.status).toBe(302);
+    expect(callback.headers.location).toMatch(/\/link$/);
+    expect((await request(app).get('/api/link/game')).status).toBe(200);
+    expect(accounts[1]).toEqual(legacy);
+    expect(accounts).toHaveLength(3);
+    expect(accounts[2]).toMatchObject({ id: 'signed-in-account', discordId, discordDisplayName: 'Dweller' });
+    expect(accounts[2].username).not.toBe(legacy.username);
+    expect(accounts[2].installToken).not.toBe(legacy.installToken);
+    expect(require('../src/websocket/handlers').resolveDisplayName(accounts[2])).toBe('Dweller');
   });
 
   test('account persistence failure does not establish a successful sign-in session', async () => {

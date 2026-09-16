@@ -53,9 +53,11 @@ All main API routes mount under `/api/` and are subject to `apiLimiter` (100 req
 
 Browser Discord sign-in (`/auth/discord?intent=link`) persists the canonical FCM account
 by **Discord ID** before saving the signed-in session and returning to `/link` for HUD
-code entry. New accounts use an internal `discord:<id>` username; the visible name lives
-in `discordDisplayName`. An existing account's chosen username and install token are
-preserved. A matching display name never authorizes claiming or merging another account.
+code entry. New accounts use an internal `discord:<id>:<random UUID>` username; the visible
+name lives in `discordDisplayName`. The random suffix avoids collisions with restored or
+unlinked records that still own an old `discord:<id>` username; those records are never
+claimed or modified by matching that slug. An existing account's chosen username and install
+token are preserved. A matching display name never authorizes claiming or merging another account.
 Account persistence errors fail the callback instead of silently redirecting into a
 `/api/link/game` 401 loop. OAuth state remains session-bound, single-use, and valid for
 five minutes; after an expired/replayed callback, restart at `/link` rather than refreshing
