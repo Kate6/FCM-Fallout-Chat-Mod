@@ -497,41 +497,29 @@ app.get('/auth/discord/callback', authLimiter, async (req: Request, res: Respons
       }).catch((err: Error) => logger.warn({ err }, 'Failed to upsert admin_users (non-fatal)'));
     }
 
-    // Update game user record if linked. discordDisplayName is refreshed on
-    // every login so the user's chat label tracks Discord global-name changes.
-    await prisma.user.updateMany({
+    // Persist the canonical account before establishing a browser session.
+    // Display names are not unique identities: using one as the unique username
+    // can fail on a different user's name and strand /link in a 401 sign-in loop.
+    // Match only Discord ID, as the desktop link flow does; never reclaim by name.
+    const discordDisplayName = String(discordUser.global_name || discordUser.username).slice(0, 128);
+    const discordProfile = {
+      discordUsername: discordUser.username,
+      discordAvatar: discordUser.avatar || null,
+      discordDisplayName,
+    };
+    await prisma.user.upsert({
       where: { discordId: discordUser.id },
-      data: {
-        discordUsername: discordUser.username,
-        discordAvatar: discordUser.avatar || null,
-        discordDisplayName: String(discordUser.global_name || discordUser.username).slice(0, 128),
+      update: discordProfile,
+      create: {
+        username: `discord:${discordUser.id}`,
+        installToken: uuidv4(),
+        discordId: discordUser.id,
+        ...discordProfile,
       },
-    }).catch(() => { /* non-fatal */ });
+    });
 
     // Capture avatar to MinIO (fire-and-forget)
     captureAvatar(discordUser.id, discordUser.avatar).catch(() => { /* non-fatal */ });
-
-    // Ensure admin has a game user record so they appear in user management
-    const adminDisplayName = String(discordUser.global_name || discordUser.username).slice(0, 128);
-    const existingGameUser = await prisma.user.findFirst({ where: { discordId: discordUser.id } });
-    if (!existingGameUser) {
-      await prisma.user.create({
-        data: {
-          username: discordUser.global_name || discordUser.username,
-          installToken: uuidv4(),
-          discordId: discordUser.id,
-          discordUsername: discordUser.username,
-          discordDisplayName: adminDisplayName,
-          discordAvatar: discordUser.avatar || null,
-        },
-      }).catch((err: Error) => logger.warn({ err }, 'Failed to auto-create game user for admin'));
-    } else {
-      // Keep discordDisplayName in sync on every admin login
-      await prisma.user.update({
-        where: { id: existingGameUser.id },
-        data: { discordDisplayName: adminDisplayName },
-      }).catch(() => { /* non-fatal */ });
-    }
 
     // Cache the verified role in Redis
     await roleVerificationService.cacheRole(discordUser.id, adminRole).catch(() => { /* non-fatal */ });

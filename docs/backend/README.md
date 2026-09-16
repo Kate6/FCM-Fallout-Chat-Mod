@@ -51,6 +51,16 @@ All main API routes mount under `/api/` and are subject to `apiLimiter` (100 req
   Discord OAuth link/login callbacks refresh `avatars/<discordId>.png` in MinIO; OAuth
   start redirects are `no-store` because their CSRF state is single-use.
 
+Browser Discord sign-in (`/auth/discord?intent=link`) persists the canonical FCM account
+by **Discord ID** before saving the signed-in session and returning to `/link` for HUD
+code entry. New accounts use an internal `discord:<id>` username; the visible name lives
+in `discordDisplayName`. An existing account's chosen username and install token are
+preserved. A matching display name never authorizes claiming or merging another account.
+Account persistence errors fail the callback instead of silently redirecting into a
+`/api/link/game` 401 loop. OAuth state remains session-bound, single-use, and valid for
+five minutes; after an expired/replayed callback, restart at `/link` rather than refreshing
+the callback URL. Regression coverage: `backend/tests/websiteProviderAuth.test.js`.
+
 The dashboard SPA (`admin-dashboard/dist/`) is served as `express.static` from the same origin as the backend in production.
 
 ## Request / Response Envelope Conventions
