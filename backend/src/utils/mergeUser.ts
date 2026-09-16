@@ -34,7 +34,14 @@ export async function mergeUserInto(
 
   // ── Simple re-point tables (no unique collision possible) ────────────────
   await tx.message.updateMany({ where: { userId: placeholderId }, data: { userId: canonicalId } });
-await tx.session.updateMany({ where: { userId: placeholderId }, data: { userId: canonicalId } });
+  await tx.session.updateMany({ where: { userId: placeholderId }, data: { userId: canonicalId } });
+  // Keep every HUD device bound to the canonical account. Without this update,
+  // deleting the placeholder sets linked_user_id to NULL and the device falls
+  // back to a limited/anonymous identity on its next relay message.
+  await tx.hudPairingToken.updateMany({
+    where: { linkedUserId: placeholderId },
+    data: { linkedUserId: canonicalId },
+  });
   await tx.auditLog.updateMany({ where: { actorId: placeholderId }, data: { actorId: canonicalId } });
   await tx.playerReport.updateMany({ where: { userId: placeholderId }, data: { userId: canonicalId } });
   await tx.staffApplication.updateMany({ where: { userId: placeholderId }, data: { userId: canonicalId } });

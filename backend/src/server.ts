@@ -2158,20 +2158,21 @@ app.post('/admin/debug/merge-users', apiLimiter, requireAdminKey, async (req: Re
     if (!target.discordAvatar      && source.discordAvatar)      patch.discordAvatar      = source.discordAvatar;
     if (!target.discordDisplayName && source.discordDisplayName) patch.discordDisplayName = source.discordDisplayName;
 
-    // Null out discordId on source FIRST to avoid unique-constraint collision
-    // when we copy it onto target.
-    await prisma.user.update({
-      where: { id: sourceId },
-      data: { discordId: null },
-    });
+    const updated = await prisma.$transaction(async (tx) => {
+      // Null out discordId on source FIRST to avoid a unique collision when it
+      // is the identity being retained on the canonical target.
+      if (patch.discordId) {
+        await tx.user.update({ where: { id: sourceId }, data: { discordId: null } });
+      }
 
-    const updated = await prisma.user.update({
-      where: { id: targetId },
-      data: patch,
-      select: { id: true, username: true, discordId: true, discordUsername: true, discordDisplayName: true, steamDisplayName: true },
-    });
+      await tx.user.update({ where: { id: targetId }, data: patch });
+      await mergeUserInto(targetId, sourceId, tx);
 
-    await prisma.user.delete({ where: { id: sourceId } });
+      return tx.user.findUniqueOrThrow({
+        where: { id: targetId },
+        select: { id: true, username: true, discordId: true, discordUsername: true, discordDisplayName: true, steamDisplayName: true },
+      });
+    });
 
     res.json({ data: { message: 'Merged', target: updated, deletedSourceId: sourceId } });
   } catch (err) { next(err); }
