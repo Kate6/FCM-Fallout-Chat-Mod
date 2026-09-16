@@ -18,7 +18,7 @@ describe('withOAuthAttempt', () => {
   });
 
   it('refreshes the href before the browser follows the link', () => {
-    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('click-attempt');
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-000000000001');
     render(
       <OAuthStartLink href="/auth/discord?intent=link" onClick={(event) => event.preventDefault()}>
         Sign in
@@ -28,6 +28,6 @@ describe('withOAuthAttempt', () => {
     const link = screen.getByRole('link', { name: 'Sign in' });
     fireEvent.click(link);
 
-    expect(link).toHaveAttribute('href', '/auth/discord?intent=link&attempt=click-attempt');
+    expect(link).toHaveAttribute('href', '/auth/discord?intent=link&attempt=00000000-0000-4000-8000-000000000001');
   });
 });

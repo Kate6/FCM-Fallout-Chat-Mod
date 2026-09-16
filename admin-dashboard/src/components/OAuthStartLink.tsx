@@ -9,7 +9,7 @@ type OAuthStartLinkProps = AnchorHTMLAttributes<HTMLAnchorElement> & {
  * OAuth credential: the backend still generates, stores, and validates the
  * single-use CSRF `state` value.
  */
-export function withOAuthAttempt(href: string, attempt = globalThis.crypto.randomUUID()): string {
+export function withOAuthAttempt(href: string, attempt: string = globalThis.crypto.randomUUID()): string {
   const url = new URL(href, window.location.origin);
   url.searchParams.set('attempt', attempt);
   return `${url.pathname}${url.search}${url.hash}`;
