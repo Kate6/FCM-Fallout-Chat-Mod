@@ -107,6 +107,7 @@ On callback:
 - Validates CSRF state and retrieves the stored `installToken`.
 - Requires guild membership (403 with Pip-Boy HTML if not a member).
 - Handles account reclaim: if a prior row already owns that `discordId`, all FK tables are migrated into the canonical row via `mergeUserInto()` (Prisma transaction), including retained messages and active HUD pairing tokens. The `installToken` is updated, and `refreshClientIdentity()` pushes the updated name to any open WebSocket sessions.
+- QA-build Discord OAuth follows the same reclaim rule. A fresh QA install token never detaches Discord into a second user row; any install placeholder is merged into the existing Discord/Steam account before the QA session is issued.
 - Stores the result in Redis (`discord_link:<installToken>`, 10-min TTL).
 - Returns a Pip-Boy-styled HTML success/error page (displayed in the browser window).
 

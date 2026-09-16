@@ -4,13 +4,19 @@ const request = require('supertest');
 const redisMock = { set: jest.fn().mockResolvedValue('OK'), getDel: jest.fn().mockResolvedValue(null) };
 jest.mock('../src/config/redis', () => ({ getRedisClient: jest.fn().mockResolvedValue(redisMock) }));
 
-// Prisma mock for the real defaultQaCallbackDeps.upsertUser detach-then-upsert path.
+const mergeUserIntoMock = jest.fn().mockResolvedValue(undefined);
+jest.mock('../src/utils/mergeUser', () => ({ mergeUserInto: mergeUserIntoMock }));
+
+// Prisma mock for the real defaultQaCallbackDeps.upsertUser canonical reclaim path.
 const prismaMock = {
   user: {
-    updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    findFirst: jest.fn().mockResolvedValue(null),
+    findUnique: jest.fn().mockResolvedValue(null),
+    update: jest.fn(),
     upsert: jest.fn().mockResolvedValue({ id: 'user-1', username: 'discord:discord-1' }),
   },
 };
+prismaMock.$transaction = jest.fn(async callback => callback(prismaMock));
 jest.mock('../src/config/prisma', () => ({ __esModule: true, default: prismaMock }));
 
 const env = require('../src/config/environment');
@@ -96,39 +102,34 @@ test('invalid/expired state -> 400, nothing minted', async () => {
   expect(d.minted).toHaveLength(0);
 });
 
-// Regression: a returning tester who reinstalls (new installToken) must not hit
-// the User.discordId @unique constraint, even when their PRIOR row has a real
-// onboarded username (not a `discord:`/`pending-` placeholder). The detach must
-// release the link from ANY other install, scoped only by `NOT: { installToken }`.
-describe('defaultQaCallbackDeps.upsertUser — discordId detach before upsert', () => {
+// Regression: a returning tester who signs in from a new install must reclaim
+// their existing provider account. Detaching Discord and creating a new row
+// strands HUD messages, pairing tokens, Steam, and supporter cosmetics.
+describe('defaultQaCallbackDeps.upsertUser — canonical Discord reclaim', () => {
   const identity = { id: 'discord-1', username: 'Tester', global_name: 'Tester', avatar: null };
 
   beforeEach(() => {
-    prismaMock.user.updateMany.mockClear().mockResolvedValue({ count: 1 });
+    mergeUserIntoMock.mockClear();
+    prismaMock.$transaction.mockClear();
+    prismaMock.user.findFirst.mockClear().mockResolvedValue(null);
+    prismaMock.user.findUnique.mockClear().mockResolvedValue(null);
+    prismaMock.user.update.mockClear().mockResolvedValue({ id: 'canonical-user', username: 'Existing' });
     prismaMock.user.upsert.mockClear().mockResolvedValue({ id: 'user-1', username: 'discord:discord-1' });
   });
 
-  test('detaches the discordId from other installs without restricting by username', async () => {
-    await defaultQaCallbackDeps.upsertUser(identity, 'inst-new');
+  test('merges a fresh-install placeholder into the existing Steam and Discord account', async () => {
+    prismaMock.user.findFirst.mockResolvedValue({ id: 'canonical-user', username: 'Existing' });
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'fresh-placeholder' });
 
-    expect(prismaMock.user.updateMany).toHaveBeenCalledTimes(1);
-    const where = prismaMock.user.updateMany.mock.calls[0][0].where;
-    expect(where.discordId).toBe('discord-1');
-    expect(where.NOT).toEqual({ installToken: 'inst-new' });
-    // The bug was an extra username scope that skipped real-name rows — assert it's gone.
-    expect(where.OR).toBeUndefined();
-    expect(JSON.stringify(where)).not.toMatch(/username/);
-  });
+    const result = await defaultQaCallbackDeps.upsertUser(identity, 'inst-new');
 
-  test('detach runs before the upsert (so the unique link is free)', async () => {
-    const order = [];
-    prismaMock.user.updateMany.mockImplementation(async () => { order.push('updateMany'); return { count: 1 }; });
-    prismaMock.user.upsert.mockImplementation(async () => { order.push('upsert'); return { id: 'user-1', username: 'discord:discord-1' }; });
-
-    await defaultQaCallbackDeps.upsertUser(identity, 'inst-new');
-
-    expect(order).toEqual(['updateMany', 'upsert']);
-    expect(prismaMock.user.upsert.mock.calls[0][0].where).toEqual({ installToken: 'inst-new' });
+    expect(mergeUserIntoMock).toHaveBeenCalledWith('canonical-user', 'fresh-placeholder', prismaMock);
+    expect(prismaMock.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'canonical-user' },
+      data: expect.objectContaining({ installToken: 'inst-new', discordId: 'discord-1' }),
+    }));
+    expect(prismaMock.user.upsert).not.toHaveBeenCalled();
+    expect(result).toEqual({ id: 'canonical-user', displayName: 'Tester' });
   });
 
   test('uses a unique placeholder username for a fresh QA install', async () => {

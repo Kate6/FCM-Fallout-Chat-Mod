@@ -6,6 +6,7 @@ import logger from '../config/logger';
 import env from '../config/environment';
 import { verifyQaRole } from '../services/qaAuthService';
 import { captureAvatar } from '../services/avatarService';
+import { mergeUserInto } from '../utils/mergeUser';
 
 const STATE_TTL = 300; // 5 min
 const GRANT_TTL = 600; // 10 min
@@ -158,46 +159,47 @@ export const defaultQaCallbackDeps: QaCallbackDeps = {
     return Array.isArray(m.roles) ? m.roles : [];
   },
   async upsertUser(identity, installToken) {
-    // Mirror the link-flow upsert at server.ts:734-753. Upsert by installToken so
-    // the desktop-app user record is updated in-place; placeholder username keeps
-    // the @unique username constraint clean.
     const displayName = String(identity.global_name || identity.username).slice(0, 128);
-    // Detach this discordId from ANY OTHER install row before the upsert, so a
-    // returning tester who reinstalls (new installToken) does not hit the
-    // User.discordId @unique constraint. The `NOT: { installToken }` guard already
-    // protects the current install's own row, so this is safe to apply regardless
-    // of username — a Discord identity links to exactly one install at a time, and
-    // the latest login wins. (Previously this was scoped to placeholder
-    // `discord:`/`pending-` usernames, which silently skipped a row whose username
-    // had become a real onboarded name and then collided on re-auth — see #<pr>.)
-    await prisma.user.updateMany({
-      where: {
-        discordId: identity.id,
-        NOT: { installToken },
-      },
-      data: { discordId: null },
+    const discordProfile = {
+      discordId: identity.id,
+      discordUsername: identity.username,
+      discordAvatar: identity.avatar ?? null,
+      discordDisplayName: displayName,
+      discordAuthedAt: new Date(),
+    };
+
+    // A verified Discord ID is the canonical account anchor. A QA build may
+    // arrive with a new install token and an install-scoped placeholder, but it
+    // must reclaim the existing Discord/Steam account rather than detach Discord
+    // and strand the placeholder's HUD history on a second user row.
+    const existingAccount = await prisma.user.findFirst({
+      where: { discordId: identity.id, NOT: { installToken } },
+      select: { id: true, username: true },
     });
+    if (existingAccount) {
+      const placeholder = await prisma.user.findUnique({
+        where: { installToken },
+        select: { id: true },
+      });
+      await prisma.$transaction(async (tx) => {
+        if (placeholder && placeholder.id !== existingAccount.id) {
+          await mergeUserInto(existingAccount.id, placeholder.id, tx);
+        }
+        await tx.user.update({
+          where: { id: existingAccount.id },
+          data: { installToken, ...discordProfile },
+        });
+      });
+      return { id: existingAccount.id, displayName };
+    }
+
     const user = await prisma.user.upsert({
       where: { installToken },
-      update: {
-        discordId: identity.id,
-        discordUsername: identity.username,
-        discordAvatar: identity.avatar ?? null,
-        discordDisplayName: displayName,
-        discordAuthedAt: new Date(),
-      },
+      update: discordProfile,
       create: {
         installToken,
-        // A Discord identity can return with a fresh install token while its prior
-        // detached row still owns the old synthetic username. Use a per-row
-        // placeholder so the username @unique constraint cannot strand QA login.
-        // resolveDisplayName() already treats pending-* values as non-displayable.
         username: `pending-qa-${uuidv4()}`,
-        discordId: identity.id,
-        discordUsername: identity.username,
-        discordAvatar: identity.avatar ?? null,
-        discordDisplayName: displayName,
-        discordAuthedAt: new Date(),
+        ...discordProfile,
       },
       select: { id: true, username: true },
     });
