@@ -159,6 +159,30 @@ describe('overlay lifecycle and navigation', () => {
     expect(screen.getByText('Existing chat stays here')).toBeInTheDocument();
   });
 
+  it('back-applies cosmetics from a HUD-origin live message to retained overlay rows', async () => {
+    const { container } = await mount();
+    const socket = sockets[0];
+    act(() => {
+      socket.open();
+      socket.emit({ type: 'chat:history', payload: { messages: [{
+        id: 'old-hud-message', content: 'Old HUD message', username: 'Devotek', user_id: 'devotek-user',
+        channel_id: 'general', source: 'relay', created_at: '2026-09-16T12:00:00Z',
+      }] } });
+    });
+    await screen.findByText('Old HUD message');
+    expect(container.querySelectorAll('[data-fcm-supporter-star="true"]')).toHaveLength(0);
+
+    act(() => socket.emit({ type: 'chat:message', payload: {
+      id: 'new-hud-message', content: 'New HUD message', username: 'Devotek', userId: 'devotek-user',
+      channelId: 'general', source: 'relay', timestamp: '2026-09-16T12:01:00Z',
+      effectId: 'shimmer', badges: ['supporter'], starColor: '#70F835',
+    } }));
+
+    await screen.findByText('New HUD message');
+    expect(container.querySelectorAll('[data-fcm-supporter-star="true"]')).toHaveLength(2);
+    expect(container.querySelectorAll('.fcm-name-fx--shimmer')).toHaveLength(2);
+  });
+
   it('keeps a pending older-page request when an unrelated history reply arrives', async () => {
     const { container } = await mount();
     const socket = sockets[0];

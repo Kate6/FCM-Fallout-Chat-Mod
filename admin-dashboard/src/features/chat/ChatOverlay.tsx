@@ -264,6 +264,33 @@ export function mergeHistoryMessages<T extends { id: string; timestamp?: string 
   return merged.slice(-cap);
 }
 
+type MessageCosmetics = {
+  nameColor?: string | null;
+  effectId?: string | null;
+  tag?: string | null;
+  badges?: string[];
+  starColor?: string | null;
+};
+
+const COSMETIC_FIELDS = ['nameColor', 'effectId', 'tag', 'badges', 'starColor'] as const;
+
+/** Return a projection only when the server explicitly supplied cosmetic fields. */
+export function cosmeticsFromMessage(payload: Record<string, any>): MessageCosmetics | null {
+  if (!COSMETIC_FIELDS.some(field => Object.prototype.hasOwnProperty.call(payload, field))) return null;
+  return {
+    nameColor: payload.nameColor ?? null,
+    effectId: payload.effectId ?? null,
+    tag: payload.tag ?? null,
+    badges: Array.isArray(payload.badges) ? payload.badges : [],
+    starColor: payload.starColor ?? null,
+  };
+}
+
+/** Apply a server-resolved appearance without changing message identity/content. */
+export function withMessageCosmetics<T extends MessageCosmetics>(message: T, cosmetics: MessageCosmetics): T {
+  return { ...message, ...cosmetics };
+}
+
 /**
  * The active main tab's "cutout" divider span, in LAYOUT px (offsetLeft/offsetWidth)
  * — NOT getBoundingClientRect, which on Electron 39 (Chromium 138) returns
@@ -5333,7 +5360,7 @@ export default function ChatOverlay() {
                     createdAt: frame.payload.timestamp || new Date().toISOString(),
                   }, ...prev].slice(0, 500));
                 }
-                setMessages(prev => [...prev.slice(-(MESSAGE_CAP - 1)), {
+                const liveMessage: ChatMessage = {
                   id: frame.payload.id,
                   content: frame.payload.content,
                   username: frame.payload.username,
@@ -5353,7 +5380,23 @@ export default function ChatOverlay() {
                   tag: frame.payload.tag ?? null,
                   badges: frame.payload.badges ?? [],
                   starColor: frame.payload.starColor ?? null,
-                }]);
+                };
+                const liveCosmetics = cosmeticsFromMessage(frame.payload);
+                if (liveMessage.userId && liveCosmetics) {
+                  knownCosmetics.current.set(liveMessage.userId, liveCosmetics);
+                }
+                setMessages(prev => {
+                  // A HUD send can be the first frame carrying a freshly resolved
+                  // supporter projection. Repaint retained rows for that immutable
+                  // user ID so the overlay does not leave old entries unstyled.
+                  const corrected = liveMessage.userId && liveCosmetics
+                    ? prev.map(message => message.userId === liveMessage.userId
+                      && message.source !== 'bot' && message.username !== '[Vault-Tec]'
+                      ? withMessageCosmetics(message, liveCosmetics)
+                      : message)
+                    : prev;
+                  return [...corrected.slice(-(MESSAGE_CAP - 1)), liveMessage];
+                });
                 if (!isPublicMode && frame.payload.metadata?.type === 'scheduled_event' && typeof frame.payload.metadata.eventCode === 'string') {
                   wsRef.current?.send(JSON.stringify({
                     type: 'event:attendance-state',
@@ -5482,7 +5525,7 @@ export default function ChatOverlay() {
                   // History rows are snake_case; the backend adds camelCase `avatarUrl`.
                   const av = m.avatarUrl ?? null;
                   const uid = m.user_id ?? m.userId;
-                  return {
+                  const message: ChatMessage = {
                     id: m.id, content: m.content, username: m.username,
                     userId: uid, channelId: m.channel_id ?? m.channelId,
                     source: m.source || 'game', timestamp: m.created_at ?? m.createdAt,
@@ -5495,6 +5538,8 @@ export default function ChatOverlay() {
                     badges: m.badges ?? [],
                     starColor: m.starColor ?? null,
                   };
+                  const known = uid ? knownCosmetics.current.get(uid) : null;
+                  return known ? withMessageCosmetics(message, known) : message;
                 });
                 if (!isPublicMode) {
                   const eventCodes = new Set(
