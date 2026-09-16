@@ -180,6 +180,8 @@ test('does not call Discord when another backend owns the Redis refresh slot', a
 
   let fetchCount = 0;
   let syncCount = 0;
+  let tierBustCount = 0;
+  let cosmeticsBustCount = 0;
   await refreshSupporterFromHudSend({ userId: 'fcm-user-redis-locked' }, {
     isConfigured: () => true,
     getUser: async () => ({ discordId: 'discord-supporter-redis-locked' }),
@@ -192,12 +194,15 @@ test('does not call Discord when another backend owns the Redis refresh slot', a
       syncCount++;
       return { tier: 'supporter' as const, changed: true };
     },
-    bustCosmetics: async () => {},
+    bustTier: async () => { tierBustCount++; },
+    bustCosmetics: async () => { cosmeticsBustCount++; },
     refreshPresentation: async () => true,
   });
 
   assert.equal(fetchCount, 0);
   assert.equal(syncCount, 0);
+  assert.equal(tierBustCount, 1);
+  assert.equal(cosmeticsBustCount, 1);
 });
 
 test('uses a trusted Discord ID supplied by the relay without another user lookup', async () => {

@@ -3,10 +3,25 @@
 FCMChatWidget is the optional HUDModLoader chat widget for Fallout 76. It uses ZFE or xScal's
 native chat bridge and FCM's `/relay`. It is independent of the desktop overlay.
 
-**Local candidate: 2.10.103 (2026-09-16), not installed or native-accepted.** It shares the bounded
-roster decoder with invisible bridge 0.1.6, rejects damaged snapshots, and does not renew
-freshness from unchanged getter caches. Fresh pushes remain distinct from polling. See
-[build status](BUILD.md) and the [isolated package gate](../../../docs/testing/hud-automation-plan.md#isolated-packaged-bridge-gate).
+**Local candidate: 2.10.109 (2026-09-16); native fix acceptance pending.** Fresh 2.10.108 logs
+from both xScal machines prove the 128-entry marker describes already-consumed queue retirement:
+its ID is the next contiguous cursor. 2.10.109 acknowledges that marker without history replay,
+while forward gaps and unidentified loss markers retain fail-closed recovery. The bounded,
+private-data-free diagnostics remain. Do not publish until the new build passes native soak.
+
+**Previous 2.10.107 evidence: desktop ZFE startup, Server sends and one travel cycle pass.**
+2.10.105 proved that the replacement decoder fails before method entry even on synthetic data.
+2.10.106 restores the earlier widget traversal and map/team helper while retaining copied
+observation timestamps, bounded reads, rejection of damaged lists, and newer session/history
+safeguards. Native 2.10.106 now reads populated rosters without the previous decoder error,
+but its startup auth check can precede ZFE's asynchronous handshake. 2.10.107 rechecks pending
+auth on the normal event poll so Server joining no longer depends on first sending a message.
+The existing auth and relay-confirmation gates remain mandatory. Fresh desktop ZFE logs confirm
+automatic auth and Server binding without first sending a message, two Server-send echoes without
+duplicate rows, and room continuity through one loading/fast-travel cycle. Real hop/MainMenu,
+extended empty-primary fallback and laptop/xScal remain pending; this is not release approval.
+The rejected unified decoder remains diagnostic-only. The invisible bridge remains
+on its separate 0.1.6 decoder. See [build status](BUILD.md).
 
 **Previous candidate: 2.10.102 (2026-09-15).** Same-server fast travel preserves the Server tab,
 history, and session when the effective roster is unchanged or overlapping. Full map/player
@@ -17,8 +32,8 @@ An empty map now permits a populated player/public-team fallback that overlaps t
 disjoint cached fallback names and nearby-only lists cannot override that empty primary.
 Native 2.10.102 with xScal 0.2.16/hosted Dev passed history, General/Server send echoes and room
 continuity through two loading transitions. The map stayed populated, so the exact empty-map
-fallback remains native-test pending. The visible HUD is now retained **inactive** while the
-user tests the separate FCMServerBridge; settings and the prior HUD were backed up. See the
+fallback remains native-test pending. That build was subsequently retained **inactive** for the
+separate FCMServerBridge test; the desktop is now testing the visible widget again. See the
 [acceptance record](../../../docs/testing/hud-xscal-acceptance-2026-09-15.md).
 
 ZFE sends and Server-room controls correlate the

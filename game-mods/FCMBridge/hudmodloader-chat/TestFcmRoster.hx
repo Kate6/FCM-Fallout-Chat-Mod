@@ -11,6 +11,28 @@ class TestFcmRoster {
         check("public team roster uses nested members",
             FcmRoster.readNames("PublicTeamsData", {publicTeams:[{members:[
                 {playerName:"Alice"}, {playerName:"Local"}, {playerName:"Carol"}]}]}, "Local").join("|") == "Alice|Carol");
+        check("restored map reader accepts a valid empty list", FcmRoster.readNames("MapMenuData", {MarkerData:[]}, "Local").length == 0);
+        check("restored map reader rejects a missing list", FcmRoster.readNames("MapMenuData", {}, "Local") == null);
+        check("restored map reader rejects coerced lengths", FcmRoster.readNames("MapMenuData", {MarkerData:{length:"1"}}, "Local") == null);
+        check("restored map reader rejects unbounded lengths", FcmRoster.readNames("MapMenuData", {MarkerData:{length:2049}}, "Local") == null);
+        check("restored team reader rejects missing member lists", FcmRoster.readNames("PublicTeamsData", {publicTeams:[{}]}, "Local") == null);
+        for (key in ["PlayerListData", "PartyMenuList", "TeamMarkers", "VoiceChatAreaData", "MapMenuData", "PublicTeamsData"]) {
+            var data:Dynamic = switch key {
+                case "TeamMarkers": {Markers:[{displayName:"Peer"}, {displayName:"Local", isLocal:true}]};
+                case "VoiceChatAreaData": {participants:[{name:"Peer"}, {name:"Local", isSelf:true}]};
+                case "MapMenuData": {MarkerData:[{markerType:"PlayerRemote", text:"Peer"}]};
+                case "PublicTeamsData": {publicTeams:[{members:[{playerName:"Peer"}, {playerName:"Local"}]}]};
+                default: [{displayName:"Peer"}, {displayName:"Local", isLocalPlayer:true}];
+            };
+            var native = FcmRoster.readNative(key, data, "Local");
+            check("native child decoder accepts " + key, native.valid && native.skipped == 0 && native.names.join("|") == "Peer");
+            check("valid decode finishes phase " + key, FcmRoster.readPhase == "decoder complete");
+        }
+        var malformed = FcmRoster.readNative("PlayerListData", {length:"2"}, "Local");
+        check("native child decoder rejects a coerced length", !malformed.valid && malformed.names.length == 0);
+        check("invalid length retains its failure phase", FcmRoster.readPhase == "length type");
+        check("native child decoder strips wire-unsafe roster decoration",
+            FcmRoster.readNative("PlayerListData", [{displayName:" Peer|A<title>"}], "Local").names.join("|") == "PeerA");
         check("main menu is an explicit world boundary", FcmRoster.isMainMenu({menuStackA:[{menuName:"MainMenu"}]}));
         check("map menu is not a world boundary", !FcmRoster.isMainMenu({menuStackA:[{menuName:"MapMenu"}]}));
         var roster = new FcmRoster();

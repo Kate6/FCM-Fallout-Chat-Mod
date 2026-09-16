@@ -51,7 +51,7 @@
         padding: 0 4px;
         background: transparent;
         user-select: none;
-        font-family: "Courier New", monospace;
+        font-family: var(--shell-font, "Courier New", monospace);
       }
       #shell-bar .shell-btn {
         -webkit-app-region: no-drag;
@@ -195,7 +195,7 @@
         display: flex; flex-direction: column;
         background: rgba(8,12,8,0.985);
         border: 1px solid color-mix(in srgb, var(--shell-primary, #C8A840) 45%, transparent);
-        color: var(--shell-primary, #C8A840); font-family: "Courier New", "Consolas", monospace;
+        color: var(--shell-primary, #C8A840); font-family: var(--shell-font, "Courier New", monospace);
         box-shadow: 0 8px 32px rgba(0,0,0,0.75);
       }
       /* Header strip */
@@ -332,7 +332,7 @@
       #shell-settings .ss-kbbtn {
         min-width: 110px; padding: 1px 8px; line-height: 1.25; cursor: pointer;
         background: rgba(20,32,20,0.9); border: 1px solid color-mix(in srgb, var(--shell-primary, #C8A840) 30%, transparent);
-        color: var(--shell-text, #E8DFC0); font-family: "Courier New", monospace; font-size: 11px; text-align: center;
+        color: var(--shell-text, #E8DFC0); font-family: var(--shell-font, "Courier New", monospace); font-size: 11px; text-align: center;
       }
       #shell-settings .ss-kbbtn:hover { border-color: color-mix(in srgb, var(--shell-primary, #C8A840) 60%, transparent); }
       #shell-settings .ss-kbbtn.listening { background: rgba(51,34,0,0.9); color: var(--shell-primary, #C8A840); }
@@ -393,7 +393,7 @@
         min-height: 32px; height: 32px; box-sizing: border-box;
         display: inline-flex; align-items: center; justify-content: center;
         background: rgba(20,32,20,0.9); border: 1px solid color-mix(in srgb, var(--shell-primary, #C8A840) 35%, transparent);
-        color: var(--shell-text, #E8DFC0); font-family: "Courier New", monospace; font-size: 11px; letter-spacing: 0.06em;
+        color: var(--shell-text, #E8DFC0); font-family: var(--shell-font, "Courier New", monospace); font-size: 11px; letter-spacing: 0.06em;
       }
       #shell-settings .ss-fbtn:hover { border-color: color-mix(in srgb, var(--shell-primary, #C8A840) 70%, transparent); color: #fff; }
 
@@ -422,7 +422,7 @@
         position: fixed; z-index: 12000; display: none;
         background: rgba(8,12,8,0.99); border: 1px solid color-mix(in srgb, var(--shell-primary, #C8A840) 55%, transparent);
         box-shadow: 0 8px 24px rgba(0,0,0,0.8); overflow-y: auto;
-        font-family: "Courier New", monospace;
+        font-family: var(--shell-font, "Courier New", monospace);
       }
       .ss-ac.open { display: block; }
       .ss-ac-item {
@@ -547,7 +547,7 @@
         --ob-accent: #C8A840;
         border: 1px solid rgba(200,168,64,0.55);
         /* Body copy reads in the theme TEXT color (legible), not the amber primary. */
-        color: var(--ob-text); font-family: "Courier New", "Consolas", monospace;
+        color: var(--ob-text); font-family: var(--shell-font, "Courier New", monospace);
         box-shadow: 0 12px 48px rgba(0,0,0,0.9);
       }
       /* All onboarding children honor the panel's width — a flex/grid child with
@@ -670,15 +670,15 @@
       #shell-onboarding .ob-theme-tab {
         font-size: 8px; letter-spacing: 0.12em; font-weight: bold;
         padding: 4px 7px; border-bottom: 1px solid transparent;
-        flex-shrink: 0; font-family: "Courier New", monospace;
+        flex-shrink: 0; font-family: var(--shell-font, "Courier New", monospace);
       }
       #shell-onboarding .ob-theme-msg {
         font-size: 9px; padding: 5px 7px; flex: 1;
-        font-family: "Courier New", monospace; white-space: nowrap; overflow: hidden;
+        font-family: var(--shell-font, "Courier New", monospace); white-space: nowrap; overflow: hidden;
       }
       #shell-onboarding .ob-theme-input {
         font-size: 9px; padding: 4px 7px; border-top: 1px solid transparent;
-        flex-shrink: 0; font-family: "Courier New", monospace; font-style: italic;
+        flex-shrink: 0; font-family: var(--shell-font, "Courier New", monospace); font-style: italic;
       }
       #shell-onboarding .ob-theme-name {
         font-size: 10px; padding: 5px 8px; color: var(--ob-text); letter-spacing: 0.04em;
@@ -707,7 +707,7 @@
       #shell-onboarding .ob-fbtn {
         padding: 8px 16px; cursor: pointer;
         background: rgba(20,32,20,0.9); border: 1px solid rgba(200,168,64,0.35);
-        color: var(--ob-text); font-family: "Courier New", monospace;
+        color: var(--ob-text); font-family: var(--shell-font, "Courier New", monospace);
         font-size: 11px; letter-spacing: 0.06em; white-space: nowrap;
       }
       #shell-onboarding .ob-fbtn:hover { border-color: rgba(200,168,64,0.75); color: #fff; }

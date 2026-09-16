@@ -43,6 +43,7 @@ class RosterScenario {
     }
 
     static function run(widget:FCMChatWidget):Void {
+        restoredReader(widget);
         MockGameData.publish("TeamMarkers", {Markers:[{name:"HarnessPeer"}]});
         widget.checkWorldId();
         drain(widget);
@@ -58,6 +59,36 @@ class RosterScenario {
         var controls = MockXscal.serverControlCount;
         var leaves = MockXscal.leaveControlCount;
         var records = widget._records.copy();
+
+        var snapshots = haxe.Json.stringify(widget._rosterSnapshots.entries);
+        var observations = haxe.Json.stringify(widget._rosterSourceObservations);
+        var observationAt = widget._lastRosterObservationAt;
+        var confirmationAt = widget._serverSession.confirmedAt;
+        widget._rosterReadPhase = "decoder call";
+        FcmRoster.readPhase = "decoder entry";
+        MockXscal.SimLog.recent = [];
+        widget.rosterReadFailed("PlayerListData", "snapshot", new flash.errors.Error("PRIVATE-ROSTER-ERROR", 1014));
+        var warningAt = widget._rosterReadWarnings[0].at;
+        widget.rosterReadFailed("PlayerListData", "snapshot", new flash.errors.Error("PRIVATE-ROSTER-ERROR", 1014));
+        check("synthetic diagnostics are one-shot and restore the failing phase", widget._rosterRuntimeProbed
+            && FcmRoster.readPhase == "decoder entry" && widget._rosterReadWarnings.length == 1
+            && widget._rosterReadWarnings[0].at == warningAt);
+        var diagnosticLog = MockXscal.SimLog.recent.join("\n");
+        check("diagnostics emit numeric error and fixed phases without exception text",
+            diagnosticLog.indexOf("snapshot phase=decoder call decoder=decoder entry errorID=1014") >= 0
+            && diagnosticLog.indexOf("PRIVATE-ROSTER-ERROR") < 0);
+        for (probe in ["type-int", "type-number", "finite", "empty", "player", "map", "teams"])
+            check("local probe passes exactly once: " + probe, diagnosticLog.split(probe + " ok=true").length == 2);
+        check("duplicate errors do not repeat diagnostic logs", MockXscal.SimLog.recent.length == 8);
+        check("synthetic diagnostics cannot alter world evidence, leases, history or transport",
+            haxe.Json.stringify(widget._rosterSnapshots.entries) == snapshots
+            && haxe.Json.stringify(widget._rosterSourceObservations) == observations
+            && widget._lastRosterObservationAt == observationAt && widget._serverSession.confirmedAt == confirmationAt
+            && widget._serverSession.target() == nonce && widget._serverSession.room == room
+            && widget._records.length == records.length && MockXscal.serverControlCount == controls
+            && MockXscal.leaveControlCount == leaves);
+        flash.Lib.trace("ROSTER-DIAGNOSTICS PASS probes=local-only repeated-error=throttled evidence=unchanged");
+        flash.Lib.trace("ROSTER-PROBES PASS count=7 error=numeric-only phases=fixed private-error=omitted");
 
         MockGameData.setHudMode("Loading");
         MockGameData.publish("TeamMarkers", {Markers:[]});
@@ -163,4 +194,54 @@ class RosterScenario {
         check("main menu leaves once and clears despite cached roster", !widget._serverSessionReady
             && serverRows(widget) == 0 && MockXscal.leaveControlCount == leaves + 3);
     }
+
+    static function restoredReader(widget:FCMChatWidget):Void {
+        var savedSnapshots = widget._rosterSnapshots;
+        var savedSources = widget._rosterSourceObservations;
+        var savedAt = widget._lastRosterObservationAt;
+        widget._rosterSnapshots = new FcmRoster();
+        widget._rosterSourceObservations = [];
+        var controls = MockXscal.serverControlCount;
+        for (key in ["PlayerListData", "PartyMenuList", "TeamMarkers", "VoiceChatAreaData", "MapMenuData", "PublicTeamsData"]) {
+            var data:Dynamic = switch key {
+                case "TeamMarkers": {Markers:[{name:"Peer"}, {name:widget._displayName, isLocal:true}]};
+                case "VoiceChatAreaData": {participants:[{name:"Peer"}, {name:widget._displayName, isSelf:true}]};
+                case "MapMenuData": {MarkerData:[{markerType:"PlayerRemote", text:"Peer<title>"}, {markerType:"Location", text:"Not a player"}]};
+                case "PublicTeamsData": {publicTeams:[{members:[{playerName:"Peer"}, {playerName:widget._displayName}]}]};
+                default: [{displayName:"Peer"}, {displayName:widget._displayName, isLocalPlayer:true}];
+            };
+            widget.collectRoster(key, data);
+            var matched = false;
+            for (entry in widget._rosterSnapshots.entries) if (entry.key == key)
+                matched = entry.names.join("|") == "Peer";
+            check("restored native path decodes " + key, matched);
+        }
+        var source = widget._rosterSourceObservations[0];
+        source.at = 1;
+        widget.collectRoster("PlayerListData", [{displayName:"Peer"}]);
+        check("unchanged pull cannot refresh old observation", source.at == 1);
+        for (entry in widget._rosterSnapshots.entries) if (entry.key == "PlayerListData")
+            check("stored snapshot keeps old pull time", entry.at == 1);
+        widget.collectRoster("PlayerListData", [{displayName:"Peer"}], true);
+        check("fresh push can refresh observation", source.at > 1);
+        var before = haxe.Json.stringify(widget._rosterSnapshots.entries);
+        var observationAt = widget._lastRosterObservationAt;
+        widget.collectRoster("PlayerListData", {length:"1"});
+        widget.collectRoster("PublicTeamsData", {publicTeams:[{members:{length:"1"}}]});
+        widget.collectRoster("MapMenuData", {MarkerData:[{markerType:"PlayerRemote", text:new ThrowingWidgetRosterName()}]});
+        widget.collectRoster("PlayerListData", [{displayName:new ThrowingWidgetRosterName()}]);
+        check("malformed and damaged lists cannot replace or refresh evidence",
+            haxe.Json.stringify(widget._rosterSnapshots.entries) == before
+            && widget._lastRosterObservationAt == observationAt);
+        check("reading a roster never sends transport directly", MockXscal.serverControlCount == controls);
+        widget._rosterSnapshots = savedSnapshots;
+        widget._rosterSourceObservations = savedSources;
+        widget._lastRosterObservationAt = savedAt;
+        flash.Lib.trace("RESTORED-READER PASS sources=6 cached-pull=stale fresh-push=accepted damaged=rejected");
+    }
+}
+
+private class ThrowingWidgetRosterName {
+    public function new() {}
+    public function toString():String { throw new flash.errors.Error("PRIVATE-ROSTER-NAME", 1010); }
 }

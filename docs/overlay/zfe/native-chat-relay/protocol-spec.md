@@ -413,9 +413,12 @@ attachments continue to be rejected by the Discord bridge.
 For an authenticated HUD send, the relay performs a bounded authoritative Discord
 member-role refresh before decoration: once per linked Discord account per minute across
 the deployment, coordinated by Redis. It derives the Discord ID from the linked FCM user,
-never from the HUD frame. A successful refresh updates the entitlement and invalidates
-resolved cosmetics only when the effective tier changes, before the message is broadcast,
-so every subscriber and the sender's acknowledgement receive current supporter fields. The backend
+never from the HUD frame. A successful refresh updates the entitlement and invalidates the tier
+and resolved-cosmetics caches before the message is broadcast, including when the effective tier
+is unchanged. If another backend replica owns the one-minute refresh slot, the sender's replica
+still clears those shared read caches before decoration; this prevents the first few HUD messages
+from retaining a stale pre-refresh `none` projection. Every subscriber and the sender's
+acknowledgement therefore receive current supporter fields. The backend
 delivers a finalized static-channel event directly to native subscribers on the same process before
 publishing the web broadcast to Redis; other instances use the Redis subscriber path. The shared
 instance guard prevents the direct and Redis paths from delivering the same event twice.

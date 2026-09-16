@@ -14,11 +14,13 @@ The user's 0.1.5 screenshot still reports `processor entry E1014` for all six so
 eight subscriptions, world allowed, and `Missing class - not reported`. This is failed native
 acceptance; the unidentified runtime exception is not claimed fixed by this refactor.
 
-The visible HUD 2.10.103 and bridge now share `FcmHudRosterReader`. It owns native roster decoding,
-normalizes bounded strings, and emits observations with source, local revision, timestamp and
-fixed failure reason. `FcmBridgeState` receives copied values only: its snapshots no longer retain
-native payloads, and its menu input is a decoded allowed/loading observation. Manager/push
-envelopes remain in the game-facing adapter so readiness provenance is preserved.
+The bridge continues to use `FcmHudRosterReader`, which normalizes bounded strings and emits
+observations with source, local revision, timestamp and fixed failure reason. The visible HUD's
+2.10.104 candidate uses its own direct decoder, but also failed native acceptance with E1014.
+HUD 2.10.105 adds diagnostics to that path; neither change establishes a bridge fix.
+`FcmBridgeState` receives copied values only: its snapshots no longer retain native payloads, and
+its menu input is a decoded allowed/loading observation. Manager/push envelopes remain in the
+game-facing adapter so readiness provenance is preserved.
 
 An unchanged getter cache keeps its original observation time. A validated push, changed payload
 identity or changed normalized contents advances its local revision/time; these revisions are

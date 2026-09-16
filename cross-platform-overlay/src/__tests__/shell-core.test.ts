@@ -463,6 +463,11 @@ describe('shouldResetIdleOnVisibility', () => {
 });
 
 describe('shellToWebSettings (mirror)', () => {
+  it('persists independent font choice and normalizes unknown saved fonts', () => {
+    expect(shellToWebSettings({ ...input, fontId: 'verdana' }).fontId).toBe('verdana');
+    expect(shellToWebSettings({ ...input, fontId: 'removed-font' as never }).fontId).toBe('theme');
+    expect(shellToWebSettings(input).fontId).toBe('theme');
+  });
   const input = {
     themeId: 'amber',
     textOpacity: 0.7,

@@ -77,7 +77,7 @@ class FCMChatWidget extends MovieClip {
     // 2.10.0 is the first build that reports clientVersion to the relay. The relay
     // treats "no version reported" as "oldest possible client" and gates any new wire
     // field on this, so the version bump IS the capability signal.
-    static inline var VERSION:String  = "2.10.103"; // Shared bounded roster decoder; native acceptance pending
+    static inline var VERSION:String  = "2.10.109"; // Ignore contiguous queue retirement; recover real cursor gaps
     static inline var SETTINGS_PATH:String = "settings.ini";
     // This is a top-level ZFE command, not a relay operation. ZFE owns the DPAPI/local auth file
     // and must clear it; the SWF is not allowed to write arbitrary files from the HUD domain.
@@ -317,6 +317,7 @@ class FCMChatWidget extends MovieClip {
     var _connectDelay:Int        = CONNECT_RETRY_MS;
     var _connectAttempts:Int     = 0;
     var _cursor:Int              = 0;
+    var _queueLossDiagnosticCount:Int = 0;
     var _consecutivePollFailures:Int = 0;
     // Timer callbacks are native event boundaries. Keep the last phase visible to the guarded
     // wrapper so a target-build exception is logged and isolated instead of escaping as an
@@ -3697,6 +3698,7 @@ class FCMChatWidget extends MovieClip {
         bumpAutoHide();   // start the idle countdown (hides after autoHideSec if nothing happens)
         refreshAuthState();
         _cursor = 0;
+        _queueLossDiagnosticCount = 0;
         startPollTimer();
         startXscalWarmup();
         maybeRequestHistoryResync();
@@ -3794,8 +3796,7 @@ class FCMChatWidget extends MovieClip {
             }
         }
         // Promptly refresh authState so _linkedUserId/_authState become authoritative;
-        // ZFE's pollEvents does not call refreshAuthState each tick, so without this
-        // the HUD can stay "limited" for one more poll interval after a live link.
+        // Do not wait for the next normal auth poll after a live link.
         try { refreshAuthState(); } catch (_:Dynamic) {}
         // A RESYNC attempted while the identity was still limited is rejected by
         // the relay. Re-arm the bounded recovery state and schedule a fresh request
@@ -4459,9 +4460,12 @@ class FCMChatWidget extends MovieClip {
         _eventPollPhase = "link-refresh";
         maybeRefreshLinkCode();
         if (!_connected) return 0;
-        // xScal's connect() is asynchronous. Refreshing here advances its
-        // pending -> authenticated transition without issuing another connect.
-        if (_api.provider == FcmNativeApi.XSCAL) {
+        // Both providers can finish their handshake after connect returns. ZFE must
+        // refresh its pending identity without requiring the user to send a message.
+        // Keep xScal's continuous status checks; settled ZFE avoids redundant auth
+        // reads during history-drain bursts. This reads provider-local auth state.
+        if (_api.provider == FcmNativeApi.XSCAL
+                || _authState != "authenticated" || _relayUserId.length == 0) {
             _eventPollPhase = "auth-refresh";
             refreshAuthState();
             if (!_connected) return 0;
@@ -4571,10 +4575,26 @@ class FCMChatWidget extends MovieClip {
             i = j + 1;
 
             if (FcmWire.isDroppedEvent(obj)) {
+                var cursorBefore:Int = _cursor;
+                var unreadGap:Bool = FcmWire.droppedMarkerHasUnreadGap(obj, cursorBefore);
                 updateCursorFromEvent(obj);
                 parsedCount++;
-                droppedCount++;
-                _history.dropped = true;
+                if (unreadGap) {
+                    droppedCount++;
+                    _history.dropped = true;
+                }
+                // A lifetime cap retains privacy-safe evidence for both acknowledged native
+                // retirement and true forward gaps without flooding the provider log.
+                if (_queueLossDiagnosticCount < 3) {
+                    _queueLossDiagnosticCount++;
+                    try {
+                        zfeLog("info", "queue-loss", "queue-loss diagnostic=" + _queueLossDiagnosticCount
+                            + " before=" + cursorBefore + " after=" + _cursor
+                            + " unreadGap=" + (unreadGap ? "1" : "0")
+                            + " marker[" + FcmWire.queueLossSummary(obj) + "]"
+                            + " envelope[" + FcmWire.queueLossSummary(rs) + "]");
+                    } catch (_:Dynamic) {} // Diagnostics cannot interrupt normal recovery.
+                }
                 continue;
             }
 
@@ -6662,7 +6682,9 @@ class FCMChatWidget extends MovieClip {
     // Keep a replaceable snapshot per UI provider. The old global _seenNames map merged names
     // forever, so names from the previous world remained in the next ROSTER control until TTL.
     var _rosterSnapshots:FcmRoster = new FcmRoster();
-    var _rosterReader:FcmHudRosterReader = new FcmHudRosterReader();
+    // Copy-only timestamps for the direct GFx-safe roster decoder. Never retain
+    // a game-owned provider/payload object across a poll or world boundary.
+    var _rosterSourceObservations:Array<{key:String, signature:String, at:Float}> = [];
     var _rosterCallbackKeys:Array<String> = [];
     var _rosterCallbacks:Map<String, Dynamic> = new Map();
     var _rosterManager:Dynamic = null;
@@ -6672,6 +6694,9 @@ class FCMChatWidget extends MovieClip {
     var _lastRosterReadWarningAt:Float = -30000;
     var _rosterLogCount:Int = 0;
     var _lastRosterLogAt:Float = 0;
+    var _rosterReadPhase:String = "not started";
+    var _rosterReadWarnings:Array<{key:String, at:Float}> = [];
+    var _rosterRuntimeProbed:Bool = false;
 
     /** Remove the exact callbacks registered by subscribeRoster(). */
     function unsubscribeRoster(mgr:Dynamic = null):Void {
@@ -6696,7 +6721,8 @@ class FCMChatWidget extends MovieClip {
 
     /** Clear provider snapshots at a session boundary; stale names must never seed a new world. */
     function resetRosterObservation(reason:String, detach:Bool = false):Void {
-        if (detach) { unsubscribeRoster(); _rosterReader.clear(); }
+        if (detach) unsubscribeRoster();
+        _rosterSourceObservations = [];
         setServerSessionReady(false, "");
         _rosterSnapshots = new FcmRoster();
         _serverSession.begin(Std.string(flash.Lib.getTimer()) + "-" + Std.string(Std.random(1000000000)));
@@ -6776,19 +6802,143 @@ class FCMChatWidget extends MovieClip {
         s = StringTools.replace(s, "|", "");
         return StringTools.trim(s);
     }
-    /** Both FCM entry points use the same bounded game-object decoder. */
+    /** Restore the pre-2.10.103 widget reader, keeping copied observation timestamps
+     * and effective-roster session policy separate from native object traversal. */
     function collectRoster(key:String, d:Dynamic, pushed:Bool = false):Void {
         if (_serverAtMainMenu) return;
-        var now = flash.Lib.getTimer();
-        var observation = _rosterReader.payload(key, d, _displayName, now, pushed);
-        if (observation.skipped > 0 && now - _lastRosterReadWarningAt >= 30000) {
-            _lastRosterReadWarningAt = now;
-            zfeLog("warn", "roster", key + " unreadable entries=" + observation.skipped);
+        var now:Float = flash.Lib.getTimer();
+        _rosterReadPhase = "widget reader entered";
+        if (key == "MapMenuData" || key == "PublicTeamsData") {
+            var rawRows:Dynamic = uiField(d, key == "MapMenuData" ? "MarkerData" : "publicTeams");
+            if (rawRows == null || uiField(rawRows, "length") == null) return;
+            _rosterReadPhase = "map team helper";
+            var names = FcmRoster.readNames(key, d, _displayName);
+            if (names == null) return; // Invalid/damaged list cannot renew room evidence.
+            var clean:Array<String> = [];
+            for (name in names) {
+                var value = bareName(name);
+                if (value.length > 0 && value.toLowerCase() != _displayName.toLowerCase()) clean.push(value);
+            }
+            rememberRosterSnapshot(key, clean, now, pushed);
+            return;
         }
-        if (observation.reason != "") return;
-        storeRosterSnapshot(key, observation.names, observation.at);
+        var arr:Dynamic = null;
+        if (key == "TeamMarkers") { try { arr = d.Markers; } catch (e:Dynamic) {} }
+        else if (key == "VoiceChatAreaData") { try { arr = d.participants; } catch (e:Dynamic) {} }
+        else if (key == "PlayerListData" || key == "PartyMenuList") arr = d;
+        if (arr == null) return;
+        var n:Int = 0;
+        _rosterReadPhase = "widget list length";
+        try {
+            var rawLength:Dynamic = uiField(arr, "length");
+            if (!Std.isOfType(rawLength, Int) && !Std.isOfType(rawLength, Float)) return;
+            n = Std.int(rawLength);
+            if (n != rawLength || n < 0 || n > 2048) return;
+        } catch (e:Dynamic) { return; }
+
+        var snapshot:Array<String> = [];
+        var localName:String = bareName(_displayName).toLowerCase();
+        var skippedEntries:Int = 0;
+        _rosterReadPhase = "widget row traversal";
+        for (i in 0...n) {
+            try {
+                var e0:Dynamic = arr[i];
+                if (e0 == null) continue;
+                if (uiBool(uiField(e0, "isLocalPlayer"))
+                        || uiBool(uiField(e0, "isLocal"))
+                        || uiBool(uiField(e0, "isSelf"))) continue;
+                var nm:String = "";
+                for (cand in ["displayName", "characterName", "name", "playerName"]) {
+                    var v:Dynamic = uiField(e0, cand);
+                    if (v != null && Std.string(v).length > 0) { nm = Std.string(v); break; }
+                }
+                nm = bareName(nm);
+                if (nm.length > 0 && nm.toLowerCase() != localName
+                        && snapshot.indexOf(nm) < 0 && snapshot.length < 24) snapshot.push(nm);
+            } catch (e:Dynamic) {
+                skippedEntries++;
+            }
+        }
+        if (skippedEntries > 0 && now - _lastRosterReadWarningAt >= 30000) {
+            _lastRosterReadWarningAt = now;
+            zfeLog("warn", "roster", key + " skipped native entries=" + skippedEntries);
+        }
+        if (skippedEntries > 0) return;
+        snapshot.sort(function(a, b) return (a < b) ? -1 : (a > b ? 1 : 0));
+        rememberRosterSnapshot(key, snapshot, now, pushed);
     }
 
+    /** An unchanged getter cache must keep its observation time even on the restored reader. */
+    function rememberRosterSnapshot(key:String, snapshot:Array<String>, now:Float, pushed:Bool):Void {
+        var signature = snapshot.join("|");
+        var source = null;
+        for (entry in _rosterSourceObservations) if (entry.key == key) { source = entry; break; }
+        var observedAt:Float = now;
+        if (source == null) {
+            source = {key:key, signature:signature, at:now};
+            _rosterSourceObservations.push(source);
+        } else if (pushed || source.signature != signature) {
+            source.signature = signature;
+            source.at = now;
+        } else {
+            // Re-reading an unchanged getter cache is not fresh world evidence.
+            observedAt = source.at;
+        }
+        _rosterReadPhase = "snapshot store";
+        storeRosterSnapshot(key, snapshot, observedAt);
+        _rosterReadPhase = "snapshot complete";
+    }
+
+    /** Emit only fixed phases and numeric error IDs, at most once/source/30 seconds. */
+    function rosterReadFailed(key:String, path:String, error:Dynamic):Void {
+        var now:Float = flash.Lib.getTimer();
+        var warning = null;
+        for (entry in _rosterReadWarnings) if (entry.key == key) { warning = entry; break; }
+        if (warning != null && now - warning.at < 30000) return;
+        if (warning == null) _rosterReadWarnings.push({key:key, at:now});
+        else warning.at = now;
+        var code:Int = 0;
+        try { code = Std.int(error.errorID); } catch (_:Dynamic) {}
+        zfeLog("warn", "roster", key + " " + path + " phase=" + _rosterReadPhase
+            + " decoder=" + FcmRoster.readPhase + " errorID=" + code);
+        try { probeRosterRuntime(); } catch (probeError:Dynamic) {
+            var probeCode:Int = 0;
+            try { probeCode = Std.int(probeError.errorID); } catch (_:Dynamic) {}
+            zfeLog("warn", "roster-probe", "probe method entry errorID=" + probeCode);
+        }
+    }
+
+    /** One-shot local checks after a real failure. No game reads, snapshot writes or transport.
+     * These results are diagnostics only and can never establish a world or renew a lease. */
+    function probeRosterRuntime():Void {
+        if (_rosterRuntimeProbed) return;
+        _rosterRuntimeProbed = true;
+        var savedPhase = FcmRoster.readPhase;
+        for (probe in ["type-int", "type-number", "finite", "empty", "player", "map", "teams"]) {
+            var ok = false;
+            FcmRoster.readPhase = "probe entry";
+            try {
+                if (probe == "type-int") ok = Std.isOfType(0, Int);
+                else if (probe == "type-number") ok = Std.isOfType(0.5, Float);
+                else if (probe == "finite") ok = Math.isFinite(1.0);
+                else {
+                    var key = "PlayerListData";
+                    var data:Dynamic = [];
+                    if (probe == "player") data = [{displayName:"FcmProbe"}];
+                    else if (probe == "map") { key = "MapMenuData"; data = {MarkerData:[{markerType:"PlayerRemote", text:"FcmProbe"}]}; }
+                    else if (probe == "teams") { key = "PublicTeamsData"; data = {publicTeams:[{members:[{playerName:"FcmProbe"}]}]}; }
+                    var result = FcmRoster.readNative(key, data, "");
+                    ok = result.valid && result.skipped == 0 && result.names.length == (probe == "empty" ? 0 : 1);
+                }
+                zfeLog("info", "roster-probe", probe + " ok=" + ok + " phase=" + FcmRoster.readPhase);
+            } catch (error:Dynamic) {
+                var code:Int = 0;
+                try { code = Std.int(error.errorID); } catch (_:Dynamic) {}
+                zfeLog("warn", "roster-probe", probe + " phase=" + FcmRoster.readPhase + " errorID=" + code);
+            }
+        }
+        FcmRoster.readPhase = savedPhase;
+    }
 
     function storeRosterSnapshot(key:String, snapshot:Array<String>, now:Float):Void {
         var previousSnapshot:Array<String> = _rosterSnapshots.replace(key, snapshot, now);
@@ -6805,7 +6955,8 @@ class FCMChatWidget extends MovieClip {
         var dc:Dynamic = null;
         try { dc = evt.data; } catch (e:Dynamic) {}
         if (dc == null) { try { dc = evt.target.data; } catch (e:Dynamic) {} }
-        if (dc != null) collectRoster(key, dc, true);
+        if (dc != null) try { collectRoster(key, dc, true); }
+            catch (error:Dynamic) { rosterReadFailed(key, "push", error); }
         if ((now - _auxLogAt) < 15000) return;
         _auxLogAt = now;
         var d:Dynamic = null;
@@ -6859,7 +7010,8 @@ class FCMChatWidget extends MovieClip {
         // Pass the event payload as a non-authoritative character candidate. The public relay
         // identity still comes exclusively from AccountInfoData inside refreshDisplayName().
         refreshDisplayName(d);
-        collectRoster("PlayerListData", d, true);
+        try { collectRoster("PlayerListData", d, true); }
+        catch (error:Dynamic) { rosterReadFailed("PlayerListData", "push", error); }
         // Throttle: first 3 updates, then at most every 30s.
         if (_rosterLogCount >= 3 && (now - _lastRosterLogAt) < 30000) return;
         _rosterLogCount++;
@@ -6882,11 +7034,14 @@ class FCMChatWidget extends MovieClip {
         if (mgr == null) return;
         for (key in ["PlayerListData", "TeamMarkers", "PartyMenuList", "VoiceChatAreaData", "MapMenuData", "PublicTeamsData"]) {
             try {
+                _rosterReadPhase = "provider getter";
+                FcmRoster.readPhase = "not called";
                 var provider:Dynamic = getBSUIData(mgr, key);
+                _rosterReadPhase = "payload access";
                 var data:Dynamic = uiData(provider);
                 if (data != null) collectRoster(key, data);
             } catch (e:Dynamic) {
-                zfeLog("warn", "roster", key + " snapshot phase threw: " + clip200(Std.string(e)));
+                rosterReadFailed(key, "snapshot", e);
             }
         }
     }

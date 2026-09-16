@@ -791,15 +791,22 @@ if widget_src:
           and 'function runInitSafely' in widget_src
           and 'function onInputSubmitSafely' in widget_src,
           "FCMChatWidget guards config, startup, and input callback boundaries")
-    roster_reader = open(os.path.join(os.path.dirname(WIDGET_HX), "FcmHudRosterReader.hx"), encoding="utf-8").read()
-    check('_rosterReader.payload(key, d, _displayName, now, pushed)' in widget_src
-          and 'var row:Dynamic = rows[i];' in roster_reader
-          and 'result.skipped++' in roster_reader
-          and 'result.reason = "unreadable entries"' in roster_reader
-          and 'snapshot phase threw' in widget_src,
-          "shared collector hardens native roster enumeration for HUD and bridge")
-    check('\\x00' not in roster_reader and 'String.fromCharCode(0)' not in roster_reader,
-          "shared collector never embeds a NUL literal in the SWF string pool")
+    roster_src = open(os.path.join(os.path.dirname(WIDGET_HX), "FcmRoster.hx"), encoding="utf-8").read()
+    live_roster_src = widget_src.split('function collectRoster(', 1)[1].split('function rosterReadFailed(', 1)[0]
+    check('FcmRoster.readNames(key, d, _displayName)' in live_roster_src
+          and 'FcmRoster.readNative' not in live_roster_src
+          and 'rememberRosterSnapshot(key, snapshot, now, pushed)' in live_roster_src
+          and 'if (skippedEntries > 0) return;' in live_roster_src
+          and '_rosterSourceObservations:Array' in widget_src
+          and '_rosterSourceObservations = [];' in widget_src
+          and 'FcmHudRosterReader' not in widget_src
+          and 'FcmHudRosterReader' not in roster_src
+          and 'result.skipped++' in roster_src
+          and 'if (result.skipped > 0)' in roster_src
+          and 'rosterReadFailed(key, "snapshot", e)' in widget_src,
+          "visible HUD restores native-proven traversal, rejecting damaged lists without refreshing cached evidence")
+    check('\\x00' not in roster_src and 'String.fromCharCode(0)' not in roster_src,
+          "visible HUD roster decoder never embeds a NUL literal in the SWF string pool")
     check('clearNavigationLatches();' in widget_src
           and 'clearNavigationLatches();\n        _inputOpen = true;' in widget_src,
           "FCMChatWidget resets navigation ownership at input open/close boundaries")

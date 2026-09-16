@@ -528,6 +528,15 @@ jobs:
         run: |
           npm ci --ignore-scripts --prefix game-mods/FCMBridge/hudmodloader-chat/simulator
           xvfb-run -a -s '-screen 0 1920x1080x24' node cross-platform-overlay/scripts/drag-smoke.mjs
+      - name: Test overlay fonts, navigation and reconnects through Electron
+        run: xvfb-run -a -s '-screen 0 1920x1080x24' npm --prefix cross-platform-overlay run test:interaction
+      - name: Upload overlay interaction evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: overlay-usability-evidence
+          path: cross-platform-overlay/test-results/overlay-usability
+          if-no-files-found: ignore
       # ── Packaged-launch smoke ──
       - name: Build Linux package
         working-directory: cross-platform-overlay

@@ -1,3 +1,6 @@
+import { nextConversation, type NavigationSlot } from './channelNavigation';
+import { isOlderHistoryBatch } from './historyPagination';
+import { FONT_OPTIONS, FONT_SAMPLE, normalizeFontId, resolveFontFamily, OVERLAY_SETTINGS_EVENT, type FontId } from './overlayFonts';
 import { INACTIVE_BRIDGE, readBridgeState, mergeBridgeRows, clearBridgeRows, bridgeSendPayload, type BridgeState } from './bridgeFeed';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -320,8 +323,9 @@ export function shouldForceReconnectOnVisible(opts: {
   isVisible: boolean;
   connected: boolean;
   wsGameActive: boolean;
+  connectionInFlight?: boolean;
 }): boolean {
-  return opts.isVisible && !opts.connected && opts.wsGameActive;
+  return opts.isVisible && !opts.connected && !opts.connectionInFlight && opts.wsGameActive;
 }
 
 /**
@@ -730,6 +734,7 @@ export type TimestampFormat = '12h' | '24h';
 
 interface WebOverlaySettings {
   themeId: string;
+  fontId?: FontId;
   windowOpacity: number;
   textOpacity: number;
   showHints: boolean;
@@ -792,7 +797,8 @@ export function loadSettings(): WebOverlaySettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    const stored = JSON.parse(raw);
+    return { ...DEFAULT_SETTINGS, ...stored, ...(stored.fontId === undefined ? {} : { fontId: normalizeFontId(stored.fontId) }) };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -938,6 +944,10 @@ function deriveThemeTokens(theme: WebTheme, primaryColor: string, chromeBgAlpha:
 // overlay path (the website route owns its own selection).
 let lastSelectedMainId = '';
 let lastSelectedSubId = '';
+export function resetRememberedChatSelection() {
+  lastSelectedMainId = '';
+  lastSelectedSubId = '';
+}
 
 interface BlockedUser { userId: string; displayName: string; avatarUrl: string | null }
 
@@ -1233,6 +1243,16 @@ function SettingsModal({ settings, theme, onChange, onClose, selfAvatarUrl, self
                 <option key={t.id} value={t.id}>{t.displayName}</option>
               ))}
             </select>
+          </div>
+
+          <div style={fieldRow}>
+            <label htmlFor="chat-font" style={labelStyle}>FONT</label>
+            <select id="chat-font" aria-label="Chat font" value={normalizeFontId(settings.fontId)}
+              onChange={e => onChange({ fontId: normalizeFontId(e.target.value) })}
+              style={{ ...inputStyle, cursor: 'pointer' }}>
+              {FONT_OPTIONS.map(font => <option key={font.id} value={font.id}>{font.label}</option>)}
+            </select>
+            <div aria-label="Font preview" style={{ fontFamily: theme.fontFamily, lineHeight: 1.5 }}>{FONT_SAMPLE}</div>
           </div>
 
           {/* Chrome opacity — hidden in the Electron shell (shell panel owns this) */}
@@ -2378,7 +2398,7 @@ class PartyErrorBoundary extends React.Component<
       return this.props.fallback ?? (
         <div style={{
           padding: '10px 12px', fontSize: '10px', opacity: 0.6,
-          fontFamily: '"Courier New", Courier, monospace',
+          fontFamily: 'inherit',
         }}>
           Party unavailable
         </div>
@@ -3592,7 +3612,11 @@ export default function ChatOverlay() {
 
   // ── Settings + theme ──────────────────────────────────────────────────────
   const [settings, setSettingsRaw] = useState<WebOverlaySettings>(loadSettings);
-  const theme = findTheme(settings.themeId);
+  const theme = useMemo(() => {
+    const base = findTheme(settings.themeId);
+    if (normalizeFontId(settings.fontId) === 'theme') return base;
+    return { ...base, fontFamily: resolveFontFamily(settings.fontId, base.fontFamily), fontScale: undefined, tabLetterSpacing: undefined };
+  }, [settings.themeId, settings.fontId]);
   const primaryColor = theme.primaryColor;
   const showScanlines = theme.scanlinesEnabled;
   const glowEnabled = theme.glowEnabled;
@@ -3651,6 +3675,13 @@ export default function ChatOverlay() {
   // Electron desktop-shell parity (null on the website → no visual change).
   const overlayShell = getOverlayShell();
 
+  useEffect(() => {
+    if (!overlayShell) return;
+    const update = () => setSettingsRaw(loadSettings());
+    window.addEventListener(OVERLAY_SETTINGS_EVENT, update);
+    return () => window.removeEventListener(OVERLAY_SETTINGS_EVENT, update);
+  }, [overlayShell]);
+
   function patchSettings(patch: Partial<WebOverlaySettings>) {
     setSettingsRaw(prev => {
       const next = { ...prev, ...patch };
@@ -3705,6 +3736,7 @@ export default function ChatOverlay() {
   // Mirror of `connected` for callbacks with empty deps (e.g. the onVisibility
   // subscriber) that must read the live connection state without re-subscribing.
   const connectedRef = useRef(false);
+  const connectionInFlightRef = useRef(false);
   useEffect(() => { connectedRef.current = connected; }, [connected]);
   // Set to true when ≥3 consecutive 401/403 ticket-fetch failures are seen.
   // Stops the auto-retry loop and surfaces an "authentication expired" notice.
@@ -4302,6 +4334,8 @@ export default function ChatOverlay() {
   // The channel a lazy fetch is currently in flight for (history frames for the
   // normal UUID path don't echo channelId, so we match on this + the rows).
   const pendingLazyChannelRef = useRef<string | null>(null);
+  const pendingLazyBoundaryRef = useRef<string | null>(null);
+  const lazyRequestGenerationRef = useRef(0);
   // scrollHeight captured immediately before a lazy prepend, so we can restore
   // scrollTop afterward and keep the viewport from jumping.
   const lazyScrollAnchorRef = useRef<number>(0);
@@ -4311,6 +4345,7 @@ export default function ChatOverlay() {
   // flash every time the overlay is toggled. Reset only on genuine identity changes
   // (mountKey bump / component remount) or explicit refresh (header refresh button).
   const historyLoadedChsRef = useRef<Set<string>>(new Set());
+  const historyRequestedChsRef = useRef<Set<string>>(new Set());
   // Mirror of wsGameActive for the visibility handler (reads current value without
   // re-subscribing). Used to decide whether becoming-visible must force a reconnect.
   const wsGameActiveRef = useRef(false);
@@ -4560,6 +4595,8 @@ export default function ChatOverlay() {
   const fo76SubsRef     = useRef<SubChannel[]>([]);
   const fo76MainIdRef   = useRef<string | null>(null);
   const activeMainIdRef = useRef<string>('');
+  const channelFiltersRef = useRef(settings.channelFilters);
+  channelFiltersRef.current = settings.channelFilters;
 
   // ── Overlay command handler (Electron shell only) ────────────────────────────
   // Registered once on mount; reads fresh state via refs. Handles:
@@ -4606,37 +4643,27 @@ export default function ChatOverlay() {
         const curSubId    = activeSubIdRef.current;
         const curPartyView = partyViewRef.current;
 
-        // Build the unified ordered list: [fo76sub0, fo76sub1, ..., party0, party1, ...]
-        // FO76 items: identified by sub-channel id. Party items: identified by party id.
-        type NavSlot = { kind: 'sub'; id: string; parentId: string } | { kind: 'party'; id: string };
-        const slots: NavSlot[] = [
-          ...fo76Subs.map(s => ({ kind: 'sub' as const, id: s.id, parentId: s.parentId ?? '' })),
-          ...joined.map(p => ({ kind: 'party' as const, id: p.id })),
+        const hidden = hiddenChannelIdSet(channelFiltersRef.current, fo76Subs);
+        const slots: NavigationSlot[] = [
+          ...fo76Subs.filter(sub => !hidden.has(sub.id)).map(sub => ({ kind: 'sub' as const, id: sub.id, parentId: sub.parentId ?? '' })),
+          ...joined.map(party => ({ kind: 'party' as const, id: party.id })),
         ];
-        if (slots.length === 0) return;
-
-        // Find current position.
-        let curIdx = -1;
-        if (curMainId === PARTY_MAIN_ID && curPartyView !== 'browser') {
-          curIdx = slots.findIndex(s => s.kind === 'party' && s.id === curPartyView);
-        } else {
-          curIdx = slots.findIndex(s => s.kind === 'sub' && s.id === curSubId);
-        }
-        if (curIdx < 0) curIdx = 0; // fallback: start from first slot
-
-        const nextIdx = (curIdx + dir + slots.length) % slots.length;
-        const next = slots[nextIdx];
+        const next = nextConversation(slots, { mainId: curMainId, subId: curSubId, partyId: curPartyView }, PARTY_MAIN_ID, dir);
+        if (!next) return;
+        bridge.logDiag?.(`[navigation] source=${cmd} from=${curMainId === PARTY_MAIN_ID ? curPartyView : curSubId} to=${next.id}`);
+        // Update refs synchronously too: two commands in one render turn must
+        // advance twice, not both read the previous committed selection.
         if (next.kind === 'party') {
+          activeMainIdRef.current = PARTY_MAIN_ID;
+          partyViewRef.current = next.id;
           setActiveMainId(PARTY_MAIN_ID);
           setPartyView(next.id);
         } else {
+          activeMainIdRef.current = next.parentId;
+          activeSubIdRef.current = next.id;
           setActiveMainId(next.parentId);
           setActiveSubId(next.id);
         }
-        // NOTE: shell.ts's navChannel also fires for channel:next/prev and may click a
-        // DOM sub-tab span. When navigating into a party slot the shell finds no matching
-        // SUBTAB_NAMES span and is a no-op. When navigating within FO76 subs the shell
-        // clicks the same sub we just set via setState — harmless redundancy.
         return;
       }
     });
@@ -4961,7 +4988,10 @@ export default function ChatOverlay() {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN && all.length > 0) {
       for (const ch of all) {
-        if (!ch.id.startsWith('server:')) ws.send(JSON.stringify({ type: 'chat:history', payload: { channelId: ch.id, limit: 300 } }));
+        if (!ch.id.startsWith('server:') && !historyRequestedChsRef.current.has(ch.id)) {
+          historyRequestedChsRef.current.add(ch.id);
+          ws.send(JSON.stringify({ type: 'chat:history', payload: { channelId: ch.id, limit: 300 } }));
+        }
       }
     }
   }, [channelsRaw]);
@@ -5018,8 +5048,10 @@ export default function ChatOverlay() {
         isVisible,
         connected: connectedRef.current,
         wsGameActive: wsGameActiveRef.current,
+        connectionInFlight: connectionInFlightRef.current,
       })) {
         try { bridge.logDiag?.('[ws-gate] visible — forcing reconnect (was disconnected)'); } catch { /* noop */ }
+        connectionInFlightRef.current = true;
         setWsReconnectTick(n => n + 1);
       }
     });
@@ -5078,6 +5110,9 @@ export default function ChatOverlay() {
     // Each time the effect re-runs (gate/tick change = manual retry trigger),
     // clear the terminal state so the user gets a fresh connect attempt.
     setAuthTerminalState(false);
+    connectionInFlightRef.current = false;
+    connectedRef.current = false;
+    setConnected(false);
     if (!wsGate) {
       try { (window as any).relayBridge?.logDiag?.('[ws-gate] skip connect — hidden AND game not running'); } catch { /* noop */ }
       return;
@@ -5102,6 +5137,8 @@ export default function ChatOverlay() {
 
     function connect(attempt = 0) {
       if (cancelled) return;
+      connectionInFlightRef.current = true;
+      clearTimeout(retryTimeout);
       fetchAbort?.abort();
       const ctrl = new AbortController();
       fetchAbort = ctrl;
@@ -5119,16 +5156,22 @@ export default function ChatOverlay() {
           return r.json();
         })
         .then(({ data }) => {
-          if (cancelled) return;
+          if (cancelled || ctrl !== fetchAbort) return;
           // Successful ticket fetch — reset auth-failure counter and clear any
           // terminal state that was set by a previous run of this effect.
           consecutiveAuthFailures = 0;
           setAuthTerminalState(false);
           const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-          ws = new WebSocket(`${protocol}://${window.location.host}/ws?ticket=${data.ticket}`);
-          wsRef.current = ws;
+          const socket = new WebSocket(`${protocol}://${window.location.host}/ws?ticket=${data.ticket}`);
+          ws = socket;
+          wsRef.current = socket;
+          const isCurrent = () => !cancelled && wsRef.current === socket && ws === socket;
 
-          ws.onopen = () => {
+          socket.onopen = () => {
+            if (!isCurrent()) { socket.close(); return; }
+            connectionInFlightRef.current = false;
+            connectedRef.current = true;
+            historyRequestedChsRef.current = new Set(historyLoadedChsRef.current);
             setConnected(true);
             if (overlayShell) {
               const watch = () => { if (!cancelled && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'bridge:watch' })); };
@@ -5148,10 +5191,9 @@ export default function ChatOverlay() {
               // flush threw unexpectedly — keep the remaining queue for the next reconnect
               setOutboxCount(outboxRef.current.size());
             }
-            // Reset lazy-load bookkeeping on every (re)connect — the initial
-            // history burst will re-establish per-channel baselines.
-            lazyLoadedCountRef.current = new Map();
-            lazyEndReachedRef.current = new Set();
+            // Retain pagination baselines for cached channels; only the active
+            // channel is rehydrated on recovery. Invalidate the old request.
+            lazyRequestGenerationRef.current++;
             lazyLoadingRef.current = false;
             pendingLazyChannelRef.current = null;
             // Reset per-session party-history dedup on every (re)connect.
@@ -5180,7 +5222,10 @@ export default function ChatOverlay() {
               knownChannelIds: known.map(ch => ch.id),
             });
             for (const channelId of historyChannelIds) {
-              if (!channelId.startsWith('server:')) ws!.send(JSON.stringify({ type: 'chat:history', payload: { channelId, limit: 300 } }));
+              if (!channelId.startsWith('server:')) {
+                historyRequestedChsRef.current.add(channelId);
+                socket.send(JSON.stringify({ type: 'chat:history', payload: { channelId, limit: 300 } }));
+              }
             }
             // If the user is currently viewing a specific party, also request its
             // history. The party:history effect only fires on partyView CHANGES, so
@@ -5204,7 +5249,14 @@ export default function ChatOverlay() {
             // (web users are not game clients — correct to be OFFLINE for presence).
             ws!.send(JSON.stringify({ type: 'client:status', payload: { inGame: inGameRef.current } }));
           };
-          ws.onclose = (ev?: { code?: number; reason?: string }) => {
+          socket.onclose = (ev?: { code?: number; reason?: string }) => {
+            if (!isCurrent()) return;
+            wsRef.current = null;
+            connectionInFlightRef.current = false;
+            connectedRef.current = false;
+            lazyRequestGenerationRef.current++;
+            lazyLoadingRef.current = false;
+            pendingLazyChannelRef.current = null;
             resetBridge();
             setConnected(false);
             if (editPendingRef.current) {
@@ -5228,10 +5280,10 @@ export default function ChatOverlay() {
             }
           };
 
-          ws.onmessage = (event) => {
+          socket.onmessage = (event) => {
+            if (!isCurrent()) return;
             try {
               const frame = JSON.parse(event.data);
-              if (cancelled) return;
               if (frame.type === 'bridge:state') {
                 const next = readBridgeState(frame.payload, !!overlayShell && !isPublicMode);
                 const previous = bridgeStateRef.current;
@@ -5459,8 +5511,9 @@ export default function ChatOverlay() {
                 // A top-scroll fetch is in flight: PREPEND the older batch,
                 // bump the loaded-count offset, detect end-of-history, and
                 // preserve scroll position so the viewport doesn't jump.
-                if (lazyLoadingRef.current) {
+                if (lazyLoadingRef.current && isOlderHistoryBatch(incoming, pendingLazyChannelRef.current, pendingLazyBoundaryRef.current)) {
                   const lazyCh = pendingLazyChannelRef.current;
+                  const lazyGeneration = lazyRequestGenerationRef.current;
                   // Only rows that belong to the channel we asked for. (Normal
                   // UUID history frames don't echo channelId, so we match on the
                   // rows' own channelId.)
@@ -5489,6 +5542,7 @@ export default function ChatOverlay() {
                   });
                   // Restore scroll AFTER the prepended rows have laid out.
                   requestAnimationFrame(() => {
+                    if (!isCurrent() || lazyRequestGenerationRef.current !== lazyGeneration) return;
                     const c = messagesContRef.current;
                     if (c) c.scrollTop += c.scrollHeight - oldScrollHeight;
                     lazyLoadingRef.current = false;
@@ -5511,6 +5565,7 @@ export default function ChatOverlay() {
                     byCh.set(m.channelId, (byCh.get(m.channelId) || 0) + 1);
                   }
                   for (const [ch, n] of byCh) {
+                    if (lazyLoadingRef.current && pendingLazyChannelRef.current === ch) continue;
                     const prevN = lazyLoadedCountRef.current.get(ch) || 0;
                     if (n > prevN) lazyLoadedCountRef.current.set(ch, n);
                     if (n < HISTORY_PAGE) lazyEndReachedRef.current.add(ch);
@@ -5826,7 +5881,8 @@ export default function ChatOverlay() {
         })
         .catch((err: unknown) => {
           clearTimeout(abortTimer);
-          if (!cancelled) {
+          if (!cancelled && ctrl === fetchAbort) {
+            connectionInFlightRef.current = false;
             const isAuth = !!(err && typeof err === 'object' && (err as { isAuthFailure?: boolean }).isAuthFailure);
             if (isAuth) {
               consecutiveAuthFailures++;
@@ -5850,6 +5906,9 @@ export default function ChatOverlay() {
     connect();
     return () => {
       cancelled = true; clearTimeout(retryTimeout);
+      connectionInFlightRef.current = false;
+      connectedRef.current = false;
+      if (wsRef.current === ws) wsRef.current = null;
       resetBridge();
       fetchAbort?.abort();
       try { (window as any).relayBridge?.logDiag?.('[ws-gate] teardown — closing WS'); } catch { /* noop */ }
@@ -6096,13 +6155,18 @@ export default function ChatOverlay() {
   // isn't settled on the first frame — React re-renders and layout reflows over
   // the next several frames. So we pin to bottom across multiple frames: once
   // next rAF, again the frame after, then a couple of timed retries to catch the
-  // settled layout. Each pass just sets scrollTop = scrollHeight (idempotent), so
-  // repeating is harmless and guarantees we land at the latest message.
+  // settled layout. Each pass sets scrollTop = scrollHeight. A reader scrolling
+  // up cancels outstanding passes, including passes queued
+  // by a previous tab switch. Otherwise a late retry could steal their position.
+  const scrollPinGenerationRef = useRef(0);
   const scrollToBottom = useCallback(() => {
+    const generation = ++scrollPinGenerationRef.current;
     const pin = () => {
+      if (generation !== scrollPinGenerationRef.current) return;
       const cont = messagesContRef.current;
       if (cont) {
         cont.scrollTop = cont.scrollHeight;
+        stickToBottomRef.current = true;
       } else {
         const end = messagesEndRef.current;
         if (end) end.scrollIntoView({ behavior: 'auto', block: 'end' });
@@ -6162,6 +6226,7 @@ export default function ChatOverlay() {
   // Clean up the initial-scroll debounce timer on unmount.
   useEffect(() => {
     return () => {
+      scrollPinGenerationRef.current++;
       if (initialScrollTimerRef.current !== null) {
         clearTimeout(initialScrollTimerRef.current);
       }
@@ -6181,8 +6246,16 @@ export default function ChatOverlay() {
     if (!cont) return;
     const onScroll = () => {
       stickToBottomRef.current = isNearBottom(cont.scrollHeight, cont.scrollTop, cont.clientHeight);
+      if (!stickToBottomRef.current) {
+        scrollPinGenerationRef.current++;
+        didInitialScrollRef.current = true;
+        if (initialScrollTimerRef.current !== null) {
+          clearTimeout(initialScrollTimerRef.current);
+          initialScrollTimerRef.current = null;
+        }
+      }
     };
-    onScroll(); // seed from the current position
+    stickToBottomRef.current = isNearBottom(cont.scrollHeight, cont.scrollTop, cont.clientHeight);
     cont.addEventListener('scroll', onScroll, { passive: true });
     return () => cont.removeEventListener('scroll', onScroll);
   }, []);
@@ -6219,6 +6292,9 @@ export default function ChatOverlay() {
   // a frame so the newly-filtered message nodes are painted first.
   useEffect(() => {
     if (!activeSubId) return;
+    lazyRequestGenerationRef.current++;
+    lazyLoadingRef.current = false;
+    pendingLazyChannelRef.current = null;
     scrollToBottom();
   }, [activeSubId, activeMainId, scrollToBottom]);
 
@@ -6265,15 +6341,21 @@ export default function ChatOverlay() {
       const target = channelIds.find(id => !id.startsWith('server:') && !lazyEndReachedRef.current.has(id));
       if (!target) return;
       const offset = lazyLoadedCountRef.current.get(target) || 0;
+      const boundary = messages.filter(message => message.channelId === target)
+        .reduce<string | null>((oldest, message) => message.timestamp && (oldest === null || message.timestamp < oldest) ? message.timestamp : oldest, null);
+      if (!boundary) return;
+      const generation = ++lazyRequestGenerationRef.current;
       lazyLoadingRef.current = true;
       pendingLazyChannelRef.current = target;
+      pendingLazyBoundaryRef.current = boundary;
       ws.send(JSON.stringify({
         type: 'chat:history',
         payload: { channelId: target, limit: HISTORY_PAGE, offset },
       }));
       // Safety: if no history frame comes back, release the lock after 5s.
       setTimeout(() => {
-        if (pendingLazyChannelRef.current === target) {
+        if (lazyRequestGenerationRef.current === generation && pendingLazyChannelRef.current === target) {
+          lazyRequestGenerationRef.current++;
           lazyLoadingRef.current = false;
           pendingLazyChannelRef.current = null;
         }
@@ -6281,7 +6363,7 @@ export default function ChatOverlay() {
     };
     cont.addEventListener('scroll', onScroll, { passive: true });
     return () => cont.removeEventListener('scroll', onScroll);
-  }, [activeSubId, activeMainId, mainChannels, isPublicMode]);
+  }, [activeSubId, activeMainId, mainChannels, isPublicMode, messages]);
 
   // SR-012: cancel mention debounce on unmount
   useEffect(() => () => { if (mentionDebounce.current) clearTimeout(mentionDebounce.current); }, []);
@@ -7934,7 +8016,7 @@ export default function ChatOverlay() {
               <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 height: '100%', color: hexAlpha(theme.secondaryColor, 0.4),
-                fontSize: `${fontSize}px`, fontFamily: '"Courier New", Courier, monospace',
+                fontSize: `${fontSize}px`, fontFamily: theme.fontFamily,
               }}>
                 No parties found...
               </div>
@@ -8216,7 +8298,7 @@ export default function ChatOverlay() {
             minHeight: '120px',
             color: hexAlpha(theme.secondaryColor, 0.4),
             fontSize: `${fontSize}px`,
-            fontFamily: '"Courier New", Courier, monospace',
+            fontFamily: theme.fontFamily,
           }}>
             No Private Messages Yet...
           </div>
@@ -9495,7 +9577,7 @@ export default function ChatOverlay() {
               padding: '4px 8px', fontSize: `${Math.max(10, fontSize - 2)}px`,
               color: '#FFB000', background: 'rgba(0,0,0,0.6)',
               borderBottom: '1px solid rgba(255,176,0,0.25)',
-              fontFamily: '"Courier New", Courier, monospace',
+              fontFamily: theme.fontFamily,
               flexShrink: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             }}>
@@ -9509,7 +9591,7 @@ export default function ChatOverlay() {
               padding: '3px 8px', fontSize: `${Math.max(10, fontSize - 2)}px`,
               color: hexAlpha(primaryColor, 0.8), background: 'rgba(0,0,0,0.5)',
               borderBottom: `1px solid ${hexAlpha(primaryColor, 0.2)}`,
-              fontFamily: '"Courier New", Courier, monospace',
+              fontFamily: theme.fontFamily,
               flexShrink: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             }}>
@@ -9534,7 +9616,7 @@ export default function ChatOverlay() {
               <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 height: '100%', color: hexAlpha(theme.secondaryColor, 0.4),
-                fontSize: `${fontSize}px`, fontFamily: '"Courier New", Courier, monospace',
+                fontSize: `${fontSize}px`, fontFamily: theme.fontFamily,
               }}>
                 No Server Transmissions Detected...
               </div>
@@ -9642,7 +9724,7 @@ export default function ChatOverlay() {
                 <div style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   height: '100%', color: hexAlpha(theme.secondaryColor, 0.4),
-                  fontSize: `${fontSize}px`, fontFamily: '"Courier New", Courier, monospace',
+                  fontSize: `${fontSize}px`, fontFamily: theme.fontFamily,
                 }}>
                   {isOnPmTab ? 'No Private Messages Yet...' : 'No Radio Signals Detected...'}
                 </div>
@@ -10426,7 +10508,7 @@ export default function ChatOverlay() {
                   width: 24, height: 24,
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   flexShrink: 0,
-                  fontFamily: '"Courier New", monospace',
+                  fontFamily: theme.fontFamily,
                   // Frameless-window safety: never let this button fall inside a
                   // drag region (a drag region swallows clicks before JS sees them).
                   ...(overlayShell ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}),
@@ -10438,7 +10520,7 @@ export default function ChatOverlay() {
             {imageUploading && (
               <span style={{
                 fontSize: '10px',
-                fontFamily: '"Courier New", monospace',
+                fontFamily: theme.fontFamily,
                 marginLeft: '6px',
                 lineHeight: '18px',
                 color: hexAlpha(primaryColor, 0.8),
@@ -10450,7 +10532,7 @@ export default function ChatOverlay() {
             {!imageUploading && (
               <span style={{
                 fontSize: '10px',
-                fontFamily: '"Courier New", monospace',
+                fontFamily: theme.fontFamily,
                 marginLeft: '6px',
                 // Match the emoji button's centered flex box (height 24 + inline-flex
                 // center) so the counter's visual center lines up with the ☢ glyph
@@ -11560,7 +11642,7 @@ function ModBtn({ label, color, onClick }: { label: string; color: string; onCli
     <button onClick={onClick} style={{
       padding: '0 3px', fontSize: '7px', lineHeight: '14px', fontWeight: 'bold',
       background: 'transparent', border: `1px solid ${color}40`, color,
-      cursor: 'pointer', fontFamily: '"Courier New", monospace',
+      cursor: 'pointer', fontFamily: 'inherit',
     }}>
       {label}
     </button>

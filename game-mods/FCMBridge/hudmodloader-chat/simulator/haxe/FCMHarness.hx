@@ -27,10 +27,12 @@ class FCMHarness extends Sprite {
             if (requested == "zfe") provider = "zfe";
             scenario = Std.string(parameters.scenario);
         } catch (_:Dynamic) {}
+        if (scenario == "delayed-auth") MockXscal.authReady = false;
         if (provider == "zfe") __ZFE = MockZfe.root();
         else __SFECodeObj = MockXscal.root();
         // Deterministic regressions must never load a user's hosted snapshot or send live chat.
-        if (scenario != "fast-travel" && scenario != "bridge-fast-travel") MockXscal.loadScenario("/hosted-dev-snapshot.json");
+        if (scenario != "fast-travel" && scenario != "bridge-fast-travel" && scenario != "delayed-auth" && scenario != "queue-loss")
+            MockXscal.loadScenario("/hosted-dev-snapshot.json");
         BSUIDataManager = scenario == "bridge-fast-travel" ? MockBridgeGameData.manager() : MockGameData.manager();
         // Keep the class linked so the production getDefinitionByName path resolves it.
         var sharedClass:Class<SharedHUDTools> = SharedHUDTools;
@@ -62,6 +64,8 @@ class FCMHarness extends Sprite {
             addChild(widget);
             flash.Lib.trace("HARNESS widget constructed provider=" + provider + " scenario=" + scenario);
             if (scenario == "fast-travel") RosterScenario.start(widget, provider);
+            if (scenario == "delayed-auth") DelayedAuthScenario.start(widget, provider);
+            if (scenario == "queue-loss") QueueLossScenario.start(widget, provider);
         } catch (error:Dynamic) {
             flash.Lib.trace("HARNESS widget construction failed: " + Std.string(error));
             SimLog.emit("HARNESS widget construction failed: " + Std.string(error));

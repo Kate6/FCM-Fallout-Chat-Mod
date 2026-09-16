@@ -1,5 +1,41 @@
 /** Small, Flash-free helpers for the native chat.v1 wire format. */
 class FcmWire {
+    /** A dropped marker only proves unread loss when its sequence skips past the consumed cursor. */
+    public static function droppedMarkerHasUnreadGap(raw:String, cursorBefore:Int):Bool {
+        var value:Dynamic = parseObject(raw);
+        if (value == null) return true;
+        var markerId:Int = positiveInt(Reflect.field(value, "id"));
+        if (markerId <= 0) markerId = positiveInt(Reflect.field(value, "cursor"));
+        // Unknown markers fail closed. Contiguous or stale markers describe retention of
+        // already-consumed entries; the native logs proved their dropped count is cumulative
+        // queue retirement metadata, not a count of unread events before this marker.
+        return markerId <= 0 || markerId > cursorBefore + 1;
+    }
+
+    /** Diagnostic only: fixed keys and bounded numeric queue metadata, never arbitrary payloads. */
+    public static function queueLossSummary(raw:String):String {
+        var value:Dynamic = parseObject(raw);
+        if (value == null) return "unparsed";
+        var fields:Array<String> = [];
+        for (container in ["", "data", "details", "payload"]) {
+            var source:Dynamic = container == "" ? value : Reflect.field(value, container);
+            if (source == null) continue;
+            for (key in ["id", "cursor", "nextCursor", "count", "dropped", "droppedCount",
+                    "totalDropped", "droppedTotal", "lost", "oldestId", "newestId",
+                    "firstId", "lastId", "fromId", "toId", "oldest", "newest",
+                    "capacity", "retained", "size", "max", "after", "since"]) {
+                var item:Dynamic = Reflect.field(source, key);
+                if (item == null || Std.isOfType(item, String) || Std.isOfType(item, Bool)) continue;
+                var number:Float = Std.parseFloat(Std.string(item));
+                if (!Math.isFinite(number) || number < 0 || number > 2147483647
+                        || Math.floor(number) != number) continue;
+                fields.push((container == "" ? "" : container + ".") + key + "=" + Std.int(number));
+                if (fields.length >= 16) return fields.join(" ");
+            }
+        }
+        return fields.length == 0 ? "none" : fields.join(" ");
+    }
+
     /** Return the provider-local request id only for a successful asynchronous queue result. */
     public static function queuedRequestId(raw:String):Int {
         var value:Dynamic = parseObject(raw);

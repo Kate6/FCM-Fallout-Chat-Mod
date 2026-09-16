@@ -6,11 +6,12 @@ Team Markers/Player List, eight subscriptions, world allowed and no observed ros
 `Missing class - not reported` still supplies no class identifier. See the
 [0.1.6 native evidence](../../testing/hud-xscal-acceptance-2026-09-15.md#016-native-result--payload-boundary-still-failing).
 
-0.1.6 shares a bounded native-data decoder with HUD 2.10.103, passes copied observations to
-session policy, retains original cache timestamps and backs off thrown roster reads. It keeps
-the existing outbound provider/relay/desktop path and all authorization/lease limits. The new
-[isolated package gate](../../testing/hud-automation-plan.md#isolated-packaged-bridge-gate) tests
-the exact compiled child without production helpers in its host. It does not emulate native
+0.1.6 retains its bounded native-data decoder, passes copied observations to session policy,
+retains original cache timestamps and backs off thrown roster reads. HUD 2.10.104 no longer calls
+that shared path but still failed native acceptance. HUD 2.10.105 adds phase/probe diagnostics;
+the native regression remains unresolved. This does not change the bridge's outbound path or any
+authorization/lease limit. The [isolated package gate](../../testing/hud-automation-plan.md#isolated-packaged-bridge-gate)
+tests the exact compiled child without production helpers in its host. It does not emulate native
 GFx or establish that E1014/the earlier freeze is fixed.
 
 Local gate: 33 Ruffle tests, shared-reader/state/package checks and backend/desktop suites pass.

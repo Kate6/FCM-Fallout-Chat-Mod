@@ -1,17 +1,86 @@
 # FCMChatWidget build, install, and verification
 
-**Widget version:** 2.10.103. Shared-roster candidate, 2026-09-16; native acceptance pending.
+**Widget version:** 2.10.109. Fixes the long-session xScal history-resync loop by distinguishing
+contiguous queue-retirement markers from actual unread cursor gaps.
 This is the explicit opt-in HUD-mod track. The desktop overlay never installs or modifies it.
 
 ## Status and scope
 
-2.10.103 extracts `FcmHudRosterReader`, shared with background bridge 0.1.6. The collector
-copies bounded strings before session processing, rejects damaged/invalid lists, and preserves
-the original observation time on unchanged getter reads. Pushes and changed payloads advance
-local revisions; a revision is not a world ID. Existing source selection and lease durations
-are unchanged. These source/build changes are not installed or native-accepted. The 2.10.102
-results below are historical evidence, not acceptance of the shared reader. Follow the
-[isolated packaged-bridge gate](../../../docs/testing/hud-automation-plan.md#isolated-packaged-bridge-gate).
+Fresh 2.10.108 logs from both xScal machines prove its retention marker is contiguous with the
+last consumed cursor at the 128-entry boundary. The old unconditional loss path replayed history;
+that replay generated a 77-entry retirement marker and sustained the loop. 2.10.109 acknowledges
+contiguous or stale retirement markers without resyncing. A marker that skips forward, lacks a
+usable ID, or otherwise proves an unread gap still fails closed into the existing recovery path.
+Pure tests and compiled scenarios cover both cases. The bounded numeric-only diagnostics remain;
+fresh native acceptance is required before publication.
+
+2.10.105 native probes confirmed E1014 before the first instruction of `FcmRoster.readNative`,
+including on empty/local synthetic payloads; numeric helpers passed. 2.10.106 restores the
+pre-2.10.103 reading split: player/party/marker/voice rows are traversed in the widget, and
+map/public-team rows use the earlier closure-based `FcmRoster.readNames` helper. The unified
+`readNative` method remains diagnostic-only and is absent from the live collection path.
+Invalid/damaged lists are rejected and lengths stay bounded. Copied observation timestamps,
+effective-roster selection, history retention and relay confirmation/expiry safeguards remain.
+Native 2.10.106 reads populated map/public-team/marker snapshots without the earlier errors.
+The exact bytecode construct causing GFx's rejected unified method remains unidentified.
+
+The exact 2.10.106 production-target ZFE candidate was installed on the desktop after passing the
+local Haxe/source/package/artifact checks and all 33 Ruffle cases. Only the BA2 and root version
+stamp changed; the prior files have a recoverable backup and settings are unchanged. This run
+revealed a separate startup auth race: the first ZFE auth read precedes the native handshake,
+but subsequent event polls only refreshed xScal. History/rosters arrive while Server joining
+remains auth-gated. 2.10.107 refreshes pending/missing-identity ZFE auth on normal event polls,
+retaining xScal's continuous checks and avoiding redundant reads once ZFE settles. No user
+message, forced reconnect or weakened Server gate is needed. Delayed-auth Ruffle scenarios
+exercise both providers through real timer-driven auth, roster and visible-tab recovery.
+Fresh 2.10.107 desktop ZFE logs now confirm automatic authentication, history completion and
+relay-confirmed binding, followed by a populated 23-name map roster, without a user send or
+roster error. Two Server sends reconcile their echoes without duplicate rows, and one loading/
+fast-travel cycle preserves the room despite empty auxiliary lists. Real hop/MainMenu, repeated/
+extended empty-primary fallback and laptop/xScal checks remain outstanding.
+See the [fresh evidence](../../../docs/testing/hud-xscal-acceptance-2026-09-15.md#210107-desktop-zfe-automatic-startup-binding-passes).
+
+2.10.107 passes all local Haxe/source/emoji/artifact/package checks and the complete **35-test**
+Ruffle suite, including delayed authentication through both providers and automatic teardown.
+Production-target ZFE/xScal Nexus and unified website artifacts are built under
+`/tmp/fcm-hud-2.10.107-BAc2G4/`. The tested provider-identical BA2 and version stamp were installed
+on the desktop after verifying the game closed. Exact prior files are recoverable under
+`.extender-backups/before-fcm-hud-2.10.107-dJcA9w/`. Settings and loader configuration are
+byte-identical; saved auth remains untouched. Desktop ZFE startup binding, Server send/echo
+and one same-room travel cycle pass natively; the candidate is not published.
+
+The subsequent authorized test setup installs the same 2.10.107 BA2/stamp on the MSI laptop
+through SSH Manager and switches only the desktop provider DLL from ZFE to the verified
+xScal 0.2.16 build. Both machines now have 2.10.107 with xScal configured for prod; each game
+was closed during installation. Settings, archive registration and saved credentials are
+untouched, with exact-file backups retained. Fresh native xScal acceptance is still pending
+on both machines at install time; see the [installation evidence](../../../docs/testing/hud-xscal-acceptance-2026-09-15.md#210107-laptop-install-and-desktop-xscal-test-setup).
+
+Subsequent xScal logs confirm automatic authentication and binding on both machines and a matched
+desktop Server-send echo. However, both develop repeated dropped-event/history-RESYNC cycles
+after roughly six minutes. This unresolved native issue blocks prod promotion/publication.
+The complete 35-case Ruffle rerun and local source/artifact checks pass, but do not accept the
+soak-test failure. Fresh byte-identical builds and unified prod Nexus/website packages are in
+`/tmp/fcm-hud-release-2.10.107-VbN645/`, marked as blocked candidates in the
+[release packet](../../../docs/deployment/hud-post-2.10.85-release-notes-draft.md).
+
+### Previous diagnostic candidate
+
+Native 2.10.104 loaded on desktop ZFE at 11:28:41 on 2026-09-16 and still threw E1014 on all
+six roster sources. Removing the shared decoder classes did not resolve the Server-tab regression.
+2.10.105 retains that decoder and adds fixed phase labels for acquisition, decoder entry,
+length validation, name traversal and snapshot storage. Failures log numeric error IDs, throttled
+to one per source per 30 seconds. After the first failure, one local synthetic probe checks numeric
+helpers and empty/player/map/team decoding; it cannot write snapshots, send controls or renew leases.
+The probe preserves the original failure phase. This build is diagnostic, not a confirmed fix.
+The background bridge remains unchanged. Existing source selection, room gates and leases remain
+in force. The 2.10.102 results below are historical evidence only.
+
+2.10.105 passed the local Haxe/source/package/artifact gates and full **33-test** Ruffle suite,
+including diagnostic isolation/privacy through both providers. The tested production-target ZFE
+BA2 and version stamp are installed on the desktop after a game-closed check and exact-file backup.
+Settings were unchanged. The subsequent native diagnostic result is recorded in the
+[acceptance record](../../../docs/testing/hud-xscal-acceptance-2026-09-15.md#visible-widget-210104-failed-acceptance-210105-diagnostic-candidate).
 
 The source and local SWF/BA2 include combined General, retained-message replay protection,
 stricter own-echo matching, delayed-render failure recovery, and configurable scroll bindings.
@@ -23,8 +92,9 @@ hosted Dev. Its native run confirmed startup/history/General sends but exposed a
 reset: an empty map masked populated public teams until the empty grace expired. Candidate 2.10.102
 corrects that selection in both HUD and bridge. The native 2.10.102 run confirmed history,
 General/Server echoes and room continuity through two loading transitions with a populated map.
-The exact empty-map fallback still needs native acceptance. The visible HUD is now retained
-inactive for the separate FCMServerBridge/xScal/hosted-Dev test; it must not share the native queue.
+The exact empty-map fallback still needs native acceptance. That visible HUD was then retained
+inactive for the separate FCMServerBridge/xScal/hosted-Dev test; the desktop is now testing the
+visible widget again. The two must not share the native queue.
 Prod is unchanged. The widget is not published, and hosted CI
 is still required for promotion.
 The 2.10.100 correction keeps the low-end render coalescing/six-row slices while moving ZFE's

@@ -228,8 +228,8 @@ No `#XXXX` discriminator is ever appended.
   on first connect (or when channels arrive before the WS opens).
 - On WS **reconnect** (e.g. hide→show overlay visibility flip), channels tracked
   in `historyLoadedChsRef` are skipped — their existing messages are preserved in
-  state and no visible "reload" flash occurs. Only channels with no existing data
-  request history. The reconnect path logs `[ws-gate] reconnect — silent (N channels
+  state and no visible "reload" flash occurs. Channels with no existing data and
+  the active channel request history. The reconnect path logs `[ws-gate] reconnect — silent (N channels
   already loaded, state preserved)` to distinguish it from a genuine first-load.
   The exact set of channels re-requested is computed by the pure
   `reconnectHistoryChannelIds({ activeChannelId, alreadyLoaded, knownChannelIds })`
@@ -244,7 +244,7 @@ No `#XXXX` discriminator is ever appended.
   is identical (no visible flash).
 - **Visibility reconnect kick:** when the overlay becomes visible again
   (`onVisibility(true)`, e.g. the user pressed Insert after auto-hide) and the
-  socket is not currently connected (`connectedRef`), the visibility handler bumps
+  socket is disconnected and no ticket/connection attempt is in flight, the visibility handler bumps
   `wsReconnectTick` to force an immediate fresh connect instead of waiting out a
   long backoff or the 15 s watchdog. Logged as `[ws-gate] visible — forcing
   reconnect (was disconnected)`.
@@ -252,8 +252,32 @@ No `#XXXX` discriminator is ever appended.
   notice is displayed in the message area: "Reconnected — you may have missed messages
   while offline." It auto-clears after 8 s. Only shown in auth mode (never in
   `isPublicMode`).
-- Lazy load (scroll to top) fetches older pages until the returned batch is
-  smaller than `HISTORY_PAGE`.
+- Only the current socket can apply open/close/message callbacks; superseded
+  callbacks cannot clear connection state, overwrite rows or start another retry.
+  Channel metadata refresh requests only history not already loaded/requested.
+- Lazy load (scroll to top) fetches older pages until a matching nonempty batch is
+  smaller than `HISTORY_PAGE`. Legacy history replies lack request IDs, so only
+  rows for the requested channel at/before its captured oldest timestamp consume
+  the pagination lock. Unrelated recovery/party replies use the normal merge path.
+  Ambiguous empty replies leave the lock to expire after five seconds instead of
+  falsely marking a channel complete. Disconnect/tab changes invalidate pending
+  scroll restoration; reconnect preserves cached-channel pagination baselines.
+- Scrolling up cancels deferred bottom-pin callbacks and initial pinning. Recovery
+  merges retain the reader's message anchor, draft and selected conversation.
+
+## Fonts and live settings
+
+`overlayFonts.ts` defines `fontId` choices (`theme`, `system`, `arial`, `verdana`,
+`mono`) and fallback stacks. Missing/invalid preferences retain the theme font.
+The web Settings modal and Electron Appearance panel expose the same choice and
+sample text. Explicit fonts override theme typography and derive spacing/scale
+from the selected family; Electron continues to use its single CSS zoom layer.
+
+The shell mirrors settings, then emits `fcm-overlay-settings-changed` so the
+shared component updates in place. Same-account authenticated status updates also
+apply in place: omitted fields are unchanged; explicit role revocation/unlink is
+authoritative. A different nonempty user ID clears the query cache and remembered
+selection and remounts chat. The provider-login wall clears the previous account.
 
 ## Message Timestamps (optional, off by default)
 
@@ -444,9 +468,12 @@ no-op: `markActivity()` only resets the idle timer, and `showForMention`'s
 ## Tab Selection Persistence (Electron Only)
 
 Module-level variables `lastSelectedMainId` / `lastSelectedSubId`
-(`ChatOverlay.tsx:317–318`) survive React remounts caused by the Electron shell
-bumping the component key on relay identity changes. The website route manages
-its own selection state independently.
+survive explicit refresh remounts. Settings and same-account metadata updates
+retain the component itself. `resetRememberedChatSelection()` clears the saved
+selection on account changes/login-wall transitions, alongside the query cache.
+The website route manages its own selection state independently. Next/previous
+commands have one owner in the shared component; the shell only resets idle time.
+The eligible order excludes hidden channels and wraps across joined parties.
 
 ## Wiki Lookup Panel (P3)
 

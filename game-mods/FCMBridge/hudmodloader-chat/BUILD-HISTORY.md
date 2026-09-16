@@ -1,5 +1,78 @@
 # Archived HUD build notes
 
+## Queue-retirement recovery fix, candidate 2.10.109 (2026-09-16)
+
+- Fresh 2.10.108 logs on both xScal machines show the first retention marker is the next
+  contiguous event after the consumed cursor at the 128-entry boundary.
+- The prior unconditional recovery replayed roughly 77 history events into the same bounded
+  queue, causing another retirement marker and a self-sustaining 15-second resync loop.
+- Acknowledge contiguous/stale retirement markers without recovery. Preserve fail-closed history
+  recovery for forward gaps and markers without a usable sequence ID. Pure and compiled tests
+  cover retirement and real-gap cases; fresh native acceptance remains required.
+
+## Queue-loss evidence, diagnostic candidate 2.10.108 (2026-09-16)
+
+- Both long-session 2.10.107/xScal captures report repeated dropped-event markers and RESYNC
+  completions after roughly six minutes, while auth and Server membership remain healthy.
+- Existing logs omit the marker/envelope queue metadata. Public xScal source lacks its current
+  chat implementation, so neither a native queue bug nor a cursor-contract mismatch is proven.
+- Add only the first three numeric queue summaries per connection, with fixed field allowlists
+  and no message, identity or credential values. Preserve existing loss recovery and cursor gates.
+- Pure tests and both-provider compiled scenarios verify privacy, bounded logs and no additional
+  transport. This is diagnostic instrumentation, not a root-cause fix or publication approval.
+
+## Pending ZFE authentication recovery, candidate 2.10.107 (2026-09-16)
+
+- Native 2.10.106 restores populated roster reads, but the initial ZFE auth check runs before
+  its asynchronous handshake finishes. Subsequent event polls only rechecked xScal, leaving
+  local auth/identity unset and Server joining gated until a user send forced another read.
+- Refresh pending or missing-identity ZFE auth on the existing event poll. Preserve xScal's
+  continuous checks, all identity/Server confirmation gates, and settled ZFE's bounded reads.
+- Add actual-widget delayed-auth scenarios for both adapters: history and roster arrive while
+  pending; normal timers must then recover auth, send the roster and attach the Server tab
+  without a user message or reconnect. The test fails on 2.10.106 for ZFE and passes for xScal;
+  both pass with the correction.
+- Fresh native acceptance is required before release; no publication is authorized by this fix.
+
+## Restore the native-proven reader path, candidate 2.10.106 (2026-09-16)
+
+- [Confirmed] The 11:47 native 2.10.105 run passes integer/number/finite probes but every
+  synthetic decoder input fails at `probe entry` with E1014. Real reads fail at `decoder entry`.
+  GFx rejects the method before its first statement; payload contents are not the trigger.
+- [Confirmed] Commit `9adf10b9` replaced the previous native traversal with the shared decoder.
+  2.10.104 removed the shared classes but retained the incompatible unified method structure.
+- Restore the previous split: direct widget traversal for four sources and the closure-based
+  `FcmRoster.readNames` for map/team sources. The unified method is used only by local diagnostics.
+  Preserve bounded reads, damaged-list rejection, copied freshness timestamps and current
+  effective-roster/history/session policy. Native acceptance remains necessary.
+
+## Native roster diagnostic candidate 2.10.105 (2026-09-16)
+
+- [Confirmed] Desktop ZFE loaded 2.10.104 at 11:28:41, then continued to report E1014 for all
+  six roster sources. The user confirmed no Server tab. The direct-decoder candidate failed.
+- Added fixed acquisition/decoder/storage phases and numeric error IDs for both pull and push
+  failures, throttled per source. A one-shot local probe exercises numeric helpers and synthetic
+  decoder inputs after the first real failure; it cannot write world evidence or call transport.
+- This is diagnostic instrumentation, not proof of a native fix. Ruffle tests verify probe
+  isolation, error privacy and repeated-error throttling through both provider contracts.
+
+## Direct GFx-safe roster candidate 2.10.104 (2026-09-16)
+
+- [Confirmed] The native 2.10.103 widget log threw `Error #1014` for every roster source before
+  any roster control or `SERVER-READY` confirmation; the Server tab therefore remained hidden by
+  its intended readiness gate. A prior 2.10.100 session under the same Fallout runtime completed
+  roster controls and rendered Server chat.
+- The visible child no longer invokes `FcmHudRosterReader` or its observation classes. Its direct
+  `FcmRoster.readNative` path copies bounded names, rejects damaged lists, retains no native
+  objects, and uses signature/timestamp evidence so an unchanged getter cache cannot renew a
+  Server-room observation. The independent background bridge remains unchanged.
+- Added pure direct-decoder checks and a source gate; the existing two-provider Ruffle scenario
+  continues to assert a relay-confirmed, visible Server tab plus travel/expiry behavior.
+- The exact production-target ZFE BA2 and version stamp were installed on the desktop only after
+  the local gate and a game-closed check. The previous pair has a recoverable backup; ZFE/HUD
+  settings were untouched. Native acceptance subsequently failed; publication, deployment, commit
+  and push remain pending. Passing Ruffle/package checks cannot establish Fallout GFx compatibility.
+
 ## Shared roster collector candidate 2.10.103 (2026-09-16)
 
 - The visible widget and background bridge 0.1.6 now share the native-data decoder. Game-owned
