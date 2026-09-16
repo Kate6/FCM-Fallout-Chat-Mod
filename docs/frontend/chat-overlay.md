@@ -687,7 +687,11 @@ independently selected from the catalog. Splitting the colon out broke `getByTex
 in the existing private-messaging tests.
 
 Cosmetics updates arrive on the existing `user:identity_updated` frame, so the handler
-that back-applies renames to rendered history covers colour changes too.
+that back-applies renames to rendered history covers colour changes too. A cosmetic-bearing
+`chat:message` also becomes the latest authoritative projection for that immutable `userId`.
+The overlay immediately reapplies it to retained rows for that user and to later history pages;
+this covers HUD-origin sends that resolve supporter status after older feed rows were loaded.
+Display names are never used for the match.
 
 Full design record: [docs/product/supporter-tier.md](../product/supporter-tier.md).
 

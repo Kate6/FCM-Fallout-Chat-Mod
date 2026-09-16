@@ -33,6 +33,7 @@ const mockPrisma = {
       chatName: null,
     }),
     findMany: jest.fn().mockResolvedValue([]),
+    update: jest.fn().mockResolvedValue({}),
   },
   discordMessageLink: {
     findUnique: jest.fn().mockResolvedValue(null),
@@ -119,6 +120,12 @@ beforeEach(() => {
   mockAttachCosmetics.mockClear();
   mockRedis.incr.mockClear().mockResolvedValue(123);
   mockPrisma.discordMessageLink.upsert.mockClear();
+  mockPrisma.user.update.mockClear();
+  mockPrisma.user.findFirst.mockReset().mockResolvedValue({
+    id: 'user-uuid',
+    username: 'VaultDweller',
+    chatName: null,
+  });
 });
 
 test('Discord inbound messages carry relaySeq into live broadcast and history persistence', async () => {
@@ -162,6 +169,45 @@ test('Discord inbound messages carry relaySeq into live broadcast and history pe
   expect(mockQueueAdd).toHaveBeenCalledWith(expect.objectContaining({
     source: 'discord',
     relaySeq: 123,
+  }));
+});
+
+test('Discord inbound messages never render an Overlay auto-handle for a linked account', async () => {
+  const handler = mockHandlers.get('messageCreate');
+  mockPrisma.user.findFirst.mockResolvedValue({
+    id: 'canonical-user-uuid',
+    username: 'Overlay2288',
+    chatName: null,
+  });
+
+  await handler({
+    id: 'discord-overlay-placeholder-message',
+    channelId: 'discord-channel-id',
+    content: 'test',
+    author: {
+      id: 'discord-user-id',
+      bot: false,
+      username: '.devotek',
+      globalName: 'Devotek',
+      send: jest.fn().mockResolvedValue(undefined),
+    },
+    webhookId: null,
+    attachments: new Map(),
+    embeds: [],
+    guild: null,
+    channel: { messages: { fetch: jest.fn() } },
+  });
+
+  expect(mockBroadcast).toHaveBeenCalledWith(expect.objectContaining({
+    payload: expect.objectContaining({
+      userId: 'canonical-user-uuid',
+      username: 'Devotek',
+      source: 'discord',
+    }),
+  }));
+  expect(mockQueueAdd).toHaveBeenCalledWith(expect.objectContaining({
+    userId: 'canonical-user-uuid',
+    source: 'discord',
   }));
 });
 

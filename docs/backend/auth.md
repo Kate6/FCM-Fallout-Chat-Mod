@@ -106,7 +106,9 @@ The Electron overlay opens a browser window to `GET /auth/discord/link?installTo
 On callback:
 - Validates CSRF state and retrieves the stored `installToken`.
 - Requires guild membership (403 with Pip-Boy HTML if not a member).
-- Handles account reclaim: if a prior row already owns that `discordId`, all FK tables are migrated into the canonical row via `mergeUserInto()` (Prisma transaction), the `installToken` is updated, and `refreshClientIdentity()` pushes the updated name to any open WebSocket sessions.
+- Handles account reclaim: if a prior row already owns that `discordId`, all FK tables are migrated into the canonical row via `mergeUserInto()` (Prisma transaction), including retained messages and active HUD pairing tokens. The `installToken` is updated, and `refreshClientIdentity()` pushes the updated name to any open WebSocket sessions.
+- QA-build Discord OAuth follows the same reclaim rule. A fresh QA install token never detaches Discord into a second user row; any install placeholder is merged into the existing Discord/Steam account before the QA session is issued.
+- Discord-to-FCM relay resolves linked `Overlay<digits>` install handles as synthetic. It keeps the canonical account UUID for history, cosmetics, and moderation while rendering the Discord server/global display name instead of exposing the internal install handle in the overlay or HUD feed.
 - Stores the result in Redis (`discord_link:<installToken>`, 10-min TTL).
 - Returns a Pip-Boy-styled HTML success/error page (displayed in the browser window).
 

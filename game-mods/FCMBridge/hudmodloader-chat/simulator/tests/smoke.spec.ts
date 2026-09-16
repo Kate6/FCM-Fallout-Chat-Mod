@@ -13,7 +13,7 @@ test.afterEach(async ({ page, request }) => {
 test('loads the exact production widget artifact and records browser key delivery', async ({ page }) => {
   await page.goto('/?mode=artifact');
   await expect(page.locator('#status')).toHaveAttribute('data-state', 'ready', { timeout: 20_000 });
-  await expect(page.locator('#widget-version')).toHaveText('2.10.109');
+  await expect(page.locator('#widget-version')).toHaveText('2.10.110');
   await page.locator('#focus-stage').click();
   await page.keyboard.press('Insert');
   await page.keyboard.press('ArrowUp');
@@ -113,6 +113,14 @@ test('packages independent tab ranges, file-key precedence, ZFE synchronization,
 });
 
 for (const provider of ['xscal', 'zfe']) {
+  test(`backfills retained own-message cosmetics through ${provider}`, async ({ page }) => {
+    await page.goto(`/?mode=harness&provider=${provider}&scenario=cosmetics-history`);
+    await expect(page.locator('#log')).toContainText(/COSMETICS-HISTORY (PASS|FAIL)/, { timeout: 25_000 });
+    const log = await page.locator('#log').textContent();
+    expect(log).toContain(`COSMETICS-HISTORY PASS ${provider} own=backfilled foreign=unchanged identity=id-only`);
+    expect(log).not.toContain('COSMETICS-HISTORY FAIL');
+  });
+
   test(`acknowledges contiguous ${provider} retention without weakening gap recovery`, async ({ page }) => {
     await page.goto(`/?mode=harness&provider=${provider}&scenario=queue-loss`);
     await expect(page.locator('#log')).toContainText(/QUEUE-(RETENTION PASS|DIAGNOSTIC FAIL)/, { timeout: 25_000 });

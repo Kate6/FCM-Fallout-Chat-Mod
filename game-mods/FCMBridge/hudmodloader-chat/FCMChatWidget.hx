@@ -77,7 +77,7 @@ class FCMChatWidget extends MovieClip {
     // 2.10.0 is the first build that reports clientVersion to the relay. The relay
     // treats "no version reported" as "oldest possible client" and gates any new wire
     // field on this, so the version bump IS the capability signal.
-    static inline var VERSION:String  = "2.10.109"; // Ignore contiguous queue retirement; recover real cursor gaps
+    static inline var VERSION:String  = "2.10.110"; // Backfill learned cosmetics onto retained own-message history
     static inline var SETTINGS_PATH:String = "settings.ini";
     // This is a top-level ZFE command, not a relay operation. ZFE owns the DPAPI/local auth file
     // and must clear it; the SWF is not allowed to write arbitrary files from the HUD domain.
@@ -5007,17 +5007,39 @@ class FCMChatWidget extends MovieClip {
         rec.localSendId = "";
         rec.pendingAt = 0;
         rec.sendAccepted = false;
-        rememberOwnCosmetics(rec.tag, rec.supporterStar, rec.starColor);
+        rememberOwnCosmetics(rec.tag, rec.supporterStar, rec.starColor, rec.color, rec.senderUserId);
         if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], channel)) requestRender();
         return true;
     }
 
     /** Store only server-resolved HUD cosmetics for the known local sender. */
-    function rememberOwnCosmetics(tag:String, supporterStar:Bool, starColor:String):Void {
+    function rememberOwnCosmetics(tag:String, supporterStar:Bool, starColor:String,
+            nameColor:String = "", senderUserId:String = ""):Void {
         _ownCosmeticsKnown = true;
         _ownTag = tag == null ? "" : tag;
         _ownSupporterStar = supporterStar;
         _ownStarColor = starColor == null ? "" : starColor;
+        if (FcmConfig.parseHexColor(nameColor, -1) >= 0) _ownNameColor = nameColor;
+
+        // History can arrive while authentication/cosmetic resolution is still warming.
+        // Once an authoritative ACK or self-echo supplies the current projection, update
+        // retained rows for the same authenticated identity just as a fresh backend history
+        // fetch would. Never match by display name: another player can use the same name.
+        for (rec in _records) {
+            if (!isOwnSenderId(rec.senderUserId, senderUserId)) continue;
+            rec.color = _ownNameColor;
+            rec.tag = _ownTag;
+            rec.supporterStar = _ownSupporterStar;
+            rec.starColor = _ownStarColor;
+        }
+    }
+
+    function isOwnSenderId(candidate:String, authoritative:String = ""):Bool {
+        if (candidate == null || candidate.length == 0) return false;
+        return (authoritative != null && authoritative.length > 0 && candidate == authoritative)
+            || (_linkedUserId.length > 0 && candidate == _linkedUserId)
+            || (_relayUserId.length > 0 && candidate == _relayUserId)
+            || (_userId.length > 0 && candidate == _userId);
     }
 
     /**
@@ -5050,8 +5072,8 @@ class FCMChatWidget extends MovieClip {
         }
 
         if (candidate != null) {
-            _ownNameColor = candidate.color;
-            rememberOwnCosmetics(candidate.tag, candidate.supporterStar, candidate.starColor);
+            rememberOwnCosmetics(candidate.tag, candidate.supporterStar, candidate.starColor,
+                candidate.color, candidate.senderUserId);
         }
     }
 
@@ -5099,11 +5121,10 @@ class FCMChatWidget extends MovieClip {
             // projection is also respected when the user is not a supporter.
             if (cosmeticsKnown) {
                 rec.color = FcmConfig.parseHexColor(nameColor, -1) >= 0 ? nameColor : "";
-                _ownNameColor = rec.color;
                 rec.tag = tag;
                 rec.supporterStar = supporterStar;
                 rec.starColor = starColor;
-                rememberOwnCosmetics(tag, supporterStar, starColor);
+                rememberOwnCosmetics(tag, supporterStar, starColor, rec.color, rec.senderUserId);
             }
             rec.sendAccepted = true;
             if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], rec.channel)) requestRender();

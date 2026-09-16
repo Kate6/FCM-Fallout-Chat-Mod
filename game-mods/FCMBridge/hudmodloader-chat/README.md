@@ -3,11 +3,11 @@
 FCMChatWidget is the optional HUDModLoader chat widget for Fallout 76. It uses ZFE or xScal's
 native chat bridge and FCM's `/relay`. It is independent of the desktop overlay.
 
-**Local candidate: 2.10.109 (2026-09-16); native fix acceptance pending.** Fresh 2.10.108 logs
-from both xScal machines prove the 128-entry marker describes already-consumed queue retirement:
-its ID is the next contiguous cursor. 2.10.109 acknowledges that marker without history replay,
-while forward gaps and unidentified loss markers retain fail-closed recovery. The bounded,
-private-data-free diagnostics remain. Do not publish until the new build passes native soak.
+**Local candidate: 2.10.110 (2026-09-16); native fix acceptance pending.** Once an authoritative
+self-echo or acknowledgement supplies the local sender's cosmetics, retained rows for the same
+authenticated sender IDs are repainted with the current star, color and tag. Same-name rows from
+another account remain untouched. This builds on 2.10.109's queue-retirement correction. Do not
+publish until the new build passes native acceptance.
 
 **Previous 2.10.107 evidence: desktop ZFE startup, Server sends and one travel cycle pass.**
 2.10.105 proved that the replacement decoder fails before method entry even on synthetic data.

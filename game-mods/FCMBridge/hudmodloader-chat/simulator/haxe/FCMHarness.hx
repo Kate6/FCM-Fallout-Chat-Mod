@@ -66,6 +66,7 @@ class FCMHarness extends Sprite {
             if (scenario == "fast-travel") RosterScenario.start(widget, provider);
             if (scenario == "delayed-auth") DelayedAuthScenario.start(widget, provider);
             if (scenario == "queue-loss") QueueLossScenario.start(widget, provider);
+            if (scenario == "cosmetics-history") CosmeticsHistoryScenario.start(widget, provider);
         } catch (error:Dynamic) {
             flash.Lib.trace("HARNESS widget construction failed: " + Std.string(error));
             SimLog.emit("HARNESS widget construction failed: " + Std.string(error));

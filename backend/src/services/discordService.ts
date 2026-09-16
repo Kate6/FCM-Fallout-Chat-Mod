@@ -1034,10 +1034,7 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
         select: { id: true, username: true, chatName: true },
       });
       const hasFo76Name =
-        !!linked?.username
-        && linked.username !== 'Wanderer'
-        && !linked.username.startsWith('pending-')
-        && !linked.username.startsWith('discord:');
+        !!linked?.username && !isSyntheticRelayUsername(linked.username);
 
       if (linked && (hasFo76Name || linked.chatName)) {
         relayUserId = linked.id;

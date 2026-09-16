@@ -1141,3 +1141,13 @@ the configured textColor. Star Shape fill continues to use the validated starCol
 The same string offsets anchor the star, so range styling preserves full-width
 wrapping. Tests cover prefixes, literal markup, line breaks and exact name/body
 boundaries (`haxe test-feed-text.hxml`). This was the earlier implementation milestone; styling is now user-confirmed in 2.10.72 on desktop xScal. Current emoji limitations are recorded above.
+## Retained supporter-history correction, candidate 2.10.110 (2026-09-16)
+
+- [Confirmed] Hosted DEV showed multiple retained messages for the authenticated HUD sender
+  without supporter presentation, followed by a newly resolved row with the expected star.
+- When an authoritative ACK or self-echo supplies cosmetics, the widget now reapplies that
+  projection to retained rows whose sender ID matches one of the authenticated account aliases.
+  Display names are never used for this backfill, so a different user with the same visible name
+  remains unchanged.
+- The Ruffle harness covers both ZFE and xScal with old linked/relay-identity rows and a same-name
+  foreign row.
