@@ -14,6 +14,7 @@ release package.
 BEFORE YOU START
 - Install HUDModLoader and exactly one supported script extender, following
   their authors' instructions: ZFE with chat.v1, OR xScal with chatInterface.
+  ZFE must advertise zfe-chat-async-control-v1 for safe background room controls.
   These dependencies and the desktop overlay are separate downloads.
 - Have your FCM account ready. The bridge and desktop overlay must use the same
   linked account and environment. DEV builds require access to the DEV service.
@@ -122,6 +123,10 @@ INSTALL
    message, including when messages are delivered again after reconnecting.
 
    World changes replace the Server room and clear the previous room's messages.
+   Brief same-server fast travel preserves the room when the roster returns unchanged
+   or overlapping. Nearby/team-list changes alone no longer reset Server chat.
+   A prolonged loading screen or missing roster can still expire the binding;
+   the mod never keeps an uncertain room alive indefinitely.
    Leaving the world removes the tab; if you were viewing it, selection returns
    to General. Allow for confirmation and the overlay's ten-second refresh.
    An unexpected disconnect can take about 55 seconds to remove the tab.
@@ -137,6 +142,20 @@ TROUBLESHOOTING
   this bridge, and check that both use the same account and environment. The
   matching service update must also be available. Native linking alone does not
   confirm a Server room.
+- Waiting for a fresh world roster: inspect the version/provider and Menu,
+  Roster and per-provider diagnostic rows in F11 -> FCM Server Bridge. These
+  cached fixed labels distinguish unavailable data, readiness, loading and
+  rejected lists without showing player data or making native calls. Capture
+  those rows without any link code; do not repeatedly press Reconnect. Version
+  0.1.5 distinguishes getter/processing phases and numeric error IDs, and shows
+  successful subscriptions out of eight. No error message or stack is shown.
+  The Missing class row extracts only a class identifier from the standard
+  E1014 message; other/absent formats show not reported. This is not proof that
+  a class is absent from the package or that the failure is fixed.
+  Version 0.1.6 shares a bounded roster reader with the visible HUD and separates
+  native decoding from session state. Repeated read exceptions back off up to
+  30 seconds; unchanged cache reads do not renew observation freshness. It is a
+  native-unverified candidate, not a confirmed fix for E1014 or the earlier freeze.
 - Multiple devices: use only one active background bridge per FCM account.
   Close other game sessions using that account and allow their connection to
   expire. The overlay disables Server access while multiple bridges are active.

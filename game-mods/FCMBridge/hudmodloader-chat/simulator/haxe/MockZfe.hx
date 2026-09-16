@@ -1,9 +1,15 @@
 class MockZfe {
+    public static var queuedSendCount(default, null):Int = 0;
     static var inputActive:Bool = false;
     static var inputBuffer:String = "";
     static var inputSubmitted:Bool = false;
     static var hotkey:String = "INSERT";
     static var hotkeyDown:Bool = false;
+    static var nextRequestId:Int = 1;
+
+    public static function traceCompletion(kind:String):Void {
+        trace("ZFE completion delivered kind=" + kind);
+    }
 
     public static function handleKey(keyCode:Int, charCode:Int, down:Bool):Void {
         if (keyCode == FcmCommand.virtualKeyCode(hotkey)) hotkeyDown = down;
@@ -27,7 +33,8 @@ class MockZfe {
             }
             if (verb == "chat.v1.getRuntimeInfo") {
                 return haxe.Json.stringify({success:true, runtime:"ZFE Chat", version:"0.15.0",
-                    protocol:1, capabilities:["zfe-chat-online-v1","zfe-chat-async-send-v1"]});
+                    protocol:1, capabilities:["zfe-chat-online-v1","zfe-chat-async-send-v1",
+                        "zfe-chat-async-control-v1"]});
             }
             if (verb == "chat.v1.log" || verb == "log") {
                 MockXscal.SimLog.emit(Std.string(payload));
@@ -60,6 +67,21 @@ class MockZfe {
                 try args = haxe.Json.parse(Std.string(payload)) catch (_:Dynamic) {
                     return haxe.Json.stringify({success:false, error:{code:"invalid_json"}});
                 }
+            }
+            if (method == "sendMessage") {
+                var requestId:Int = nextRequestId++;
+                queuedSendCount++;
+                trace("ZFE queued requestId=" + requestId);
+                MockXscal.SimLog.emit("ZFE queued requestId=" + requestId);
+                var relayRaw:String = Std.string(Reflect.callMethod(chat, fn, [args]));
+                var relayResult:Dynamic = null;
+                try relayResult = haxe.Json.parse(relayRaw) catch (_:Dynamic) {}
+                var accepted:Bool = relayResult != null && Reflect.field(relayResult, "success") == true;
+                MockXscal.enqueueEvent(accepted
+                    ? {kind:"chat.send.accepted", requestId:requestId, result:relayResult}
+                    : {kind:"chat.send.failed", requestId:requestId,
+                        error:relayResult == null ? {code:"invalid_response"} : Reflect.field(relayResult, "error")});
+                return haxe.Json.stringify({success:true, status:"queued", requestId:requestId});
             }
             return Reflect.callMethod(chat, fn, [args]);
         });

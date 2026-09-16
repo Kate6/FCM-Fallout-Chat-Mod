@@ -29,38 +29,14 @@ class FcmRoster {
         return false;
     }
 
+    /** Compatibility facade; all decoding belongs to the shared collector. */
     public static function readNames(key:String, data:Dynamic, localName:String):Array<String> {
-        var result:Array<String> = [];
-        var add = function(value:Dynamic):Void {
-            if (value == null) return;
-            var name = Std.string(value);
-            var title = name.indexOf("<");
-            if (title >= 0) name = name.substr(0, title);
-            name = StringTools.trim(StringTools.replace(name, "|", ""));
-            if (name.length > 0 && name.toLowerCase() != localName.toLowerCase()
-                    && result.indexOf(name) < 0 && result.length < 24) result.push(name);
-        };
-        var rows:Dynamic = key == "MapMenuData" ? field(data, "MarkerData") : field(data, "publicTeams");
-        var length:Dynamic = field(rows, "length");
-        if (length == null) return result;
-        // Bound native collection reads even if a provider supplies a malformed length.
-        var n:Int = Std.int(Math.min(2048, Std.int(length)));
-        for (i in 0...n) try {
-            var row:Dynamic = rows[i];
-            if (key == "MapMenuData") {
-                if (field(row, "markerType") == "PlayerRemote") add(field(row, "text"));
-            } else {
-                var members:Dynamic = field(row, "members");
-                var count:Dynamic = field(members, "length");
-                if (count != null) for (j in 0...Std.int(Math.min(24, Std.int(count))))
-                    add(field(members[j], "playerName"));
-            }
-        } catch (e:Dynamic) {}
-        result.sort(function(a,b) return a < b ? -1 : a > b ? 1 : 0);
-        return result;
+        var result = new FcmHudRosterReader().payload(key, data, localName, 0);
+        return result.reason == "" ? result.names : [];
     }
 
     var entries:Array<{key:String, names:Array<String>, at:Float}> = [];
+    var emptySince:Float = -1;
     public function new() {}
 
     public function replace(key:String, names:Array<String>, now:Float):Array<String> {
@@ -84,5 +60,48 @@ class FcmRoster {
         entries = kept;
         names.sort(function(a, b) return a < b ? -1 : (a > b ? 1 : 0));
         return names.slice(0, 24);
+    }
+
+    /** Choose among world-roster surfaces after pruning. An empty map can persist after
+     * fast travel while public teams remain populated. A lower-priority nonempty list may
+     * bridge that gap only with overlap in an established session, never stale disjoint names.
+     * Nearby markers/voice are not evidence for overriding an empty primary. */
+    function primarySource(previous:String):String {
+        var emptyPrimary = "";
+        for (key in ["MapMenuData", "PlayerListData", "PublicTeamsData"]) for (entry in entries) if (entry.key == key) {
+            if (entry.names.length > 0 && (emptyPrimary.length == 0
+                    || !FcmCommand.shouldRebindRosterSession(previous, entry.names.join("|")))) return key;
+            if (emptyPrimary.length == 0) emptyPrimary = key;
+        }
+        return emptyPrimary;
+    }
+
+    /** The selected provider is shared with bridge boundary retention and diagnostics. */
+    public function sessionSource(now:Float, ttl:Float, previous:String = ""):String {
+        fresh(now, ttl);
+        return primarySource(previous);
+    }
+
+    public function sessionNames(now:Float, ttl:Float, previous:String = ""):Array<String> {
+        var fallback = fresh(now, ttl);
+        var source = primarySource(previous);
+        for (entry in entries) if (entry.key == source) {
+            var names = entry.names.copy();
+            names.sort(function(a, b) return a < b ? -1 : (a > b ? 1 : 0));
+            return names.slice(0, 24);
+        }
+        return fallback;
+    }
+
+    /** An empty loading snapshot is not immediately a world boundary. Never extend the
+     * grace on repeated empty polls, delay a nonempty roster, or delay initial solo binding.
+     * The widget's independent relay-confirmation lease remains authoritative. */
+    public function waitForRoster(previous:String, current:Array<String>, now:Float, grace:Float):Bool {
+        if (previous.length == 0 || current.length > 0) {
+            emptySince = -1;
+            return false;
+        }
+        if (emptySince == -1) emptySince = now;
+        return now - emptySince < grace;
     }
 }

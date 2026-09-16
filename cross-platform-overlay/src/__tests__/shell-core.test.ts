@@ -724,6 +724,25 @@ describe('isDragTarget', () => {
     const btn = makeEl({ tag: 'BUTTON', parent: row });
     expect(isDragTarget(btn, root)).toBe(false);
   });
+
+  it('honors explicit no-drag on div/span controls and their SVG descendants', () => {
+    const row = makeEl({ appRegion: 'drag', parent: root });
+    for (const tag of ['DIV', 'SPAN']) {
+      const control = makeEl({ tag, appRegion: 'no-drag', parent: row });
+      expect(isDragTarget(control, root)).toBe(false);
+      expect(isDragTarget(makeEl({ tag: 'svg', parent: control }), root)).toBe(false);
+    }
+  });
+
+  it('allows designated modal headers but never modal controls or backdrops', () => {
+    for (const [id, headerClass] of [['shell-onboarding-backdrop', 'ob-head'], ['shell-settings-backdrop', 'ss-head']]) {
+      const backdrop = makeEl({ id, parent: root });
+      const head = makeEl({ classes: [headerClass], parent: backdrop });
+      expect(isDragTarget(makeEl({ tag: 'SPAN', parent: head }), root)).toBe(true);
+      expect(isDragTarget(makeEl({ tag: 'BUTTON', parent: head }), root)).toBe(false);
+      expect(isDragTarget(backdrop, root)).toBe(false);
+    }
+  });
 });
 
 // ── shouldExitTextEntryOnEscape ──────────────────────────────────────────────

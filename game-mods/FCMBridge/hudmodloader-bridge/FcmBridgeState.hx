@@ -1,87 +1,127 @@
+import FcmHudRosterReader.FcmRosterObservation;
+import FcmHudRosterReader.FcmMenuObservation;
+
 /** Pure, bounded UI observation and room-confirmation policy for the background mod. */
 class FcmBridgeState {
     public var session(default, null):FcmServerSession = new FcmServerSession();
     public var inWorld(default, null):Bool = false;
     public var observedAt(default, null):Float = -60000;
     var roster:FcmRoster = new FcmRoster();
-    var snapshots:Array<{key:String, data:Dynamic, names:Array<String>, blocked:Bool}> = [];
+    var snapshots:Array<{key:String, revision:Int, names:Array<String>, at:Float, blocked:Bool}> = [];
+    var loading:Bool = false;
+    var waiting:Bool = false;
+    var lastNames:String = "";
     var makeId:Void->String;
+    var menuReason:String = "not observed";
+    public var missingClass(default, null):String = "not reported";
+    var readReasons:Array<{key:String, label:String, reason:String}> = [
+        {key:"MapMenuData", label:"Map", reason:"not observed"},
+        {key:"PublicTeamsData", label:"Public teams", reason:"not observed"},
+        {key:"PlayerListData", label:"Player list", reason:"not observed"},
+        {key:"TeamMarkers", label:"Team markers", reason:"not observed"},
+        {key:"PartyMenuList", label:"Party list", reason:"not observed"},
+        {key:"VoiceChatAreaData", label:"Voice area", reason:"not observed"}
+    ];
     public function new(makeId:Void->String) { this.makeId = makeId; reset(); }
     public function reset():Void {
         session.begin(makeId());
         observedAt = -60000;
         roster = new FcmRoster();
+        waiting = false;
+        lastNames = "";
+        missingClass = "not reported";
+        for (entry in readReasons) entry.reason = "not observed";
         for (entry in snapshots) entry.blocked = true;
     }
     /** A transport reconnect within the same observed world need not wait for a
      * roster mutation. World/menu boundaries still block cached providers. */
     public function reconnect():Void { session.begin(makeId()); }
     public static function field(value:Dynamic, key:String):Dynamic { return FcmRoster.field(value, key); }
-    public static function ready(provider:Dynamic):Bool {
-        return provider != null && field(provider, "isTest") != true && field(provider, "dataReady") == true;
+    /** Cached fixed labels only. Opening the loader menu performs no provider/native calls. */
+    public function diagnostics(now:Float):Array<String> {
+        var lines = ["Menu - " + menuReason,
+            "Roster - " + (observedAt < 0 ? "not observed" : fresh(now) ? "fresh" : "expired")];
+        for (entry in readReasons) lines.push(entry.label + " - " + entry.reason);
+        return lines;
     }
-    /** A placeholder provider or an absent menu list is never world evidence. */
-    public function menu(provider:Dynamic):Void {
-        if (!ready(provider)) { if (inWorld) reset(); inWorld = false; return; }
-        var menus = field(field(provider, "data"), "menuStackA");
-        var count = field(menus, "length");
-        var active = count != null && count >= 0 && count <= 128;
-        if (active) for (i in 0...Std.int(count)) {
-            var name = field(menus[i], "menuName");
-            if (name == "MainMenu" || name == "LoadingMenu") active = false;
-        }
-        if (!active && inWorld) reset();
-        inWorld = active;
+    public function readProblem(key:String, expiredPush:Bool = false):Void {
+        var reason = expiredPush ? "expired push" : "read failed";
+        if (key == "MenuStackData") menuReason = reason;
+        noteRead(key, reason);
     }
-    public function observe(key:String, provider:Dynamic, localName:String, now:Float, pushed:Bool = false):Void {
-        if (!inWorld || !ready(provider)) return;
-        var data = field(provider, "data");
-        var rows:Dynamic = switch key {
-            case "MapMenuData": field(data, "MarkerData");
-            case "PublicTeamsData": field(data, "publicTeams");
-            case "TeamMarkers": field(data, "Markers");
-            case "VoiceChatAreaData": field(data, "participants");
-            default: data;
-        };
-        var length = field(rows, "length");
-        if (length == null || length < 0 || length > 2048) return;
+    public function readException(key:String, attempt:FcmBridgeRead, error:Dynamic):Void {
+        var reason = attempt.step + " " + FcmBridgeRead.errorCode(error);
+        var missing = FcmBridgeRead.missingClass(error);
+        if (missing != "") missingClass = missing;
+        if (key == "MenuStackData") menuReason = reason;
+        noteRead(key, reason);
+    }
+    function noteRead(key:String, reason:String):Void {
+        for (entry in readReasons) if (entry.key == key) { entry.reason = reason; return; }
+    }
+    /** Native access is complete before session policy is entered. */
+    public function menu(observation:FcmMenuObservation):Void {
+        loading = observation.loading;
+        menuReason = observation.reason;
+        if (observation.allowed && loading) return;
+        if (!observation.allowed && inWorld) reset();
+        inWorld = observation.allowed;
+    }
+    public function observe(observation:FcmRosterObservation):Void {
+        var key = observation.key;
+        if (!inWorld) { noteRead(key, "world gate"); return; }
+        if (loading) { noteRead(key, "loading"); return; }
+        if (observation.reason != "") { noteRead(key, observation.reason); return; }
         var previous = null;
         for (entry in snapshots) if (entry.key == key) previous = entry;
-        if (previous != null && previous.blocked && previous.data == data && !pushed) return;
-        var names:Array<String> = [];
-        if (key == "MapMenuData" || key == "PublicTeamsData") names = FcmRoster.readNames(key, data, localName);
-        else for (i in 0...Std.int(length)) {
-            var row = rows[i];
-            if (field(row, "isLocal") == true || field(row, "isLocalPlayer") == true || field(row, "isSelf") == true) continue;
-            for (nameKey in ["displayName", "playerName", "name", "characterName"]) {
-                var value = field(row, nameKey);
-                if (value == null) continue;
-                var name = cleanName(Std.string(value));
-                if (name.length == 0) continue;
-                if (name.toLowerCase() != localName.toLowerCase() && names.indexOf(name) < 0 && names.length < 24) names.push(name);
-                break;
+        if (previous != null && previous.blocked && previous.revision == observation.revision) {
+            noteRead(key, "old world cache"); return;
+        }
+        var names = observation.names.copy();
+        if (previous == null) {
+            previous = {key:key, revision:observation.revision, names:names, at:observation.at, blocked:false};
+            snapshots.push(previous);
+        } else {
+            previous.revision = observation.revision; previous.names = names;
+            previous.at = observation.at; previous.blocked = false;
+        }
+        roster.replace(key, names, observation.at);
+        observedAt = Math.max(observedAt, observation.at);
+        noteRead(key, "accepted");
+    }
+    public function rosterGate():String return !inWorld ? "world gate" : loading ? "loading" : "";
+    public static function cleanName(name:String):String return FcmHudRosterReader.cleanName(name);
+    public function fresh(now:Float):Bool { return inWorld && now - observedAt < 30000; }
+    public function names(now:Float):Array<String> { return roster.sessionNames(now, 30000, lastNames); }
+    /** Settle a complete observation batch before sending controls. No timers or lease renewal. */
+    public function settle(now:Float):Void {
+        waiting = false;
+        if (!fresh(now)) {
+            if (lastNames.length > 0 || session.room.length > 0) reset();
+            return;
+        }
+        if (loading) return;
+        var current = names(now);
+        waiting = roster.waitForRoster(lastNames, current, now, 30000);
+        if (waiting) return;
+        var namesField = current.join("|");
+        if (FcmCommand.shouldRebindRosterSession(lastNames, namesField)) {
+            // Preserve only the evidence chosen by FcmRoster.sessionNames. Other cached
+            // providers stay blocked until changed/pushed, so old-world names cannot return.
+            var retained = [for (entry in snapshots) if (!entry.blocked && now - entry.at <= 30000) entry];
+            var source = roster.sessionSource(now, 30000, lastNames);
+            if (source.length > 0) retained = [for (entry in retained) if (entry.key == source) entry];
+            reset();
+            for (entry in retained) {
+                entry.blocked = false;
+                roster.replace(entry.key, entry.names, entry.at);
+                observedAt = Math.max(observedAt, entry.at);
             }
         }
-        names = [for (name in names) if (cleanName(name).length > 0) cleanName(name)];
-        names.sort(function(a,b) return a < b ? -1 : a > b ? 1 : 0);
-        if (previous != null && !previous.blocked && previous.names.length > 0 && names.length > 0) {
-            var overlap = false;
-            for (name in names) if (previous.names.indexOf(name) >= 0) overlap = true;
-            if (!overlap) reset(); // do not union old-provider names into a new candidate world
-        }
-        if (previous == null) { previous = {key:key, data:data, names:names, blocked:false}; snapshots.push(previous); }
-        else { previous.data = data; previous.names = names; previous.blocked = false; }
-        roster.replace(key, names, now);
-        observedAt = now;
+        lastNames = namesField;
     }
-    public static function cleanName(name:String):String {
-        var title = name.indexOf("<");
-        if (title >= 0) name = name.substr(0, title);
-        name = StringTools.trim(StringTools.replace(StringTools.replace(name, "|", ""), "\x00", ""));
-        return name.length > 64 ? name.substr(0, 64) : name;
-    }
-    public function fresh(now:Float):Bool { return inWorld && now - observedAt < 30000; }
-    public function names(now:Float):Array<String> { return roster.fresh(now, 30000); }
+    /** Suppress both ROSTER and LEAVE while a bounded transition is unresolved. */
+    public function holding(now:Float):Bool { return fresh(now) && (loading || waiting); }
     public function target():String { return "FCMBRIDGE/1;" + session.requestId; }
     public static function linkCode(body:String):String {
         if (body == null || !StringTools.startsWith(body, "LINK REQUIRED - ")) return "";

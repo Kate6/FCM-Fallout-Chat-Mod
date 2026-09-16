@@ -28,6 +28,19 @@ The renderer's shell strip uses CSS `-webkit-app-region: drag`. Edge resize zone
 
 On **Linux**, where Chromium's CSS drag region can be unreliable for frameless windows, move events are routed through `overlay:move-start` / `overlay:move-tick` / `overlay:move-end`. The renderer sends `PointerEvent.movementX/movementY` deltas, and the main process accumulates them from the drag-start bounds. Deltas remain valid while the window moves and avoid both client-coordinate feedback and native Wayland's `(0, 0)` cursor reports.
 
+The empty chat-header area, pre-auth strip, and designated Settings/onboarding title headers
+are move targets. Inline `no-drag` controls opt out, including div/span buttons and SVG descendants;
+sliders, inputs and modal backdrops never initiate window moves. An open modal pins native
+interactivity and permits its title to move the window even when manual click-through was enabled.
+Previously Linux disabled every modal drag and only recognized inline regions, despite onboarding's
+stylesheet declaring a draggable title. `shell-core.test.ts` covers target selection;
+`cross-platform-overlay/scripts/drag-smoke.mjs` verifies real renderer/preload/main IPC and native
+window movement for the pre-auth strip, header fixture, Settings and onboarding. It also asserts
+header controls stay stationary, uses only a local mock relay and temporary profile, and tears
+down its Electron process and relay. It runs under Xvfb in the required Linux launch-smoke CI job
+(install the simulator's pinned Playwright dependencies first). It does not automate Fallout input,
+prove exclusive-fullscreen pointer delivery, or certify mixed-DPI movement accuracy.
+
 A `isDragging` flag suppresses the z-order heartbeat during drags. `setAlwaysOnTop` on a transparent window triggers a DWM recomposition on Windows that causes a visible flash; skipping it during the drag eliminates the flicker (`main.js:613`).
 
 **Known limitation.** On Linux, `isDragging` never becomes `true` during a drag. The JS-driven `move-start`/`move-tick`/`move-end` path doesn't trigger Electron's `will-move`/`moved` events, which are what set it. Pre-existing, unrelated to focus-gated visibility, noted here for reference rather than fixed.

@@ -77,7 +77,7 @@ class FCMChatWidget extends MovieClip {
     // 2.10.0 is the first build that reports clientVersion to the relay. The relay
     // treats "no version reported" as "oldest possible client" and gates any new wire
     // field on this, so the version bump IS the capability signal.
-    static inline var VERSION:String  = "2.10.97"; // Canonical Fallout body-font alias after 1.7.26.10
+    static inline var VERSION:String  = "2.10.103"; // Shared bounded roster decoder; native acceptance pending
     static inline var SETTINGS_PATH:String = "settings.ini";
     // This is a top-level ZFE command, not a relay operation. ZFE owns the DPAPI/local auth file
     // and must clear it; the SWF is not allowed to write arbitrary files from the HUD domain.
@@ -117,9 +117,10 @@ class FCMChatWidget extends MovieClip {
     // Event-poll interval moved to FcmConfig.pollMs (tunable via FCMChat.ini `pollMs`,
     // default 5000) — each poll is a fresh wss/TLS handshake under Wine, so the rate is the
     // game-lag knob. See FcmConfig.pollMs.
-    // A successful send schedules one additional next-tick poll so the sender does not wait for
-    // the next background interval to receive the authoritative cosmetics-bearing echo.
-    static inline var SEND_ECHO_POLL_DELAY_MS:Int = 1;
+    // ZFE's async WSS worker normally publishes chat.send.accepted/failed several hundred
+    // milliseconds after queueing. Poll after that window instead of the old next-tick probe,
+    // which consistently ran before the completion existed.
+    static inline var SEND_ECHO_POLL_DELAY_MS:Int = 750;
     static inline var CONNECT_RETRY_MS:Int = 3000;
     static inline var CONNECT_MAX_MS:Int   = 30000;
     // worldId re-read interval (ms)
@@ -452,12 +453,18 @@ class FCMChatWidget extends MovieClip {
     var _sendTimers:Array<Timer> = [];
     var _outbox:FcmOutbox = new FcmOutbox();
     var _outboxIdentity:String = "";
+    // ZFE queue acceptance is not relay acceptance. Correlate its provider-local request id
+    // with the durable HUD transaction/control until pollEvents publishes the completion.
+    var _zfePendingSends:Map<Int, String> = new Map();
+    var _zfePendingControls:Map<Int, String> = new Map();
     var _canRetryHudSend:Bool = false;
     var _connectStartedAt:Float = 0;
     var _sendNonce:String = Std.string(Date.now().getTime()) + "-" + Std.string(Std.random(1000000000));
 
     function clearOutbox():Void {
         for (id in _outbox.clear()) removeOptimisticRecord(id);
+        _zfePendingSends = new Map();
+        _zfePendingControls = new Map();
         _outboxIdentity = "";
         _records = [];
     }
@@ -3350,6 +3357,14 @@ class FCMChatWidget extends MovieClip {
             if (nativeSubmit) {
                 zfeLog("info", "nativein", "send-in-session code=" + extractJsonString(rs, "code") + " status=" + extractJsonString(rs, "status"));
             }
+            var queuedRequestId:Int = _api.provider == FcmNativeApi.ZFE
+                ? FcmWire.queuedRequestId(rs) : 0;
+            if (queuedRequestId > 0) {
+                _zfePendingSends.set(queuedRequestId, localSendId);
+                zfeLog("info", "send", "queued ch=" + slug + " requestId=" + queuedRequestId);
+                scheduleEchoPoll();
+                return;
+            }
             var success:Bool = (rs.indexOf('"success":true') >= 0 || rs.indexOf('success:true') >= 0);
             if (success) {
                 zfeLog("info", "send", "sent ch=" + slug + " len=" + raw.length);
@@ -3550,6 +3565,10 @@ class FCMChatWidget extends MovieClip {
         zfeLog("info", "startup", _api.provider == FcmNativeApi.ZFE
             ? "zfe-chat-online-v1 OK"
             : "xscal-chat-interface OK");
+        zfeLog(_api.supportsNonBlockingControl() ? "info" : "warn", "startup",
+            _api.supportsNonBlockingControl()
+                ? "automatic Server-room controls enabled through non-blocking provider path"
+                : "automatic Server-room controls disabled; provider lacks a non-blocking control path");
         zfeLog("info", "startup", "found after " + _zfeSearchTries + " attempt(s)");
         zfeLog(_hudEventListenerAttached ? "info" : "warn", "input",
             _hudEventListenerAttached
@@ -4353,6 +4372,12 @@ class FCMChatWidget extends MovieClip {
         try {
             var raw:String = Std.string(_api.call("chat.v1.sendMessage", payload));
             if (raw.indexOf('"success":true') >= 0 || raw.indexOf('success:true') >= 0) {
+                var queuedRequestId:Int = _api.provider == FcmNativeApi.ZFE
+                    ? FcmWire.queuedRequestId(raw) : 0;
+                if (queuedRequestId > 0) {
+                    _zfePendingControls.set(queuedRequestId, "history");
+                    scheduleEchoPoll();
+                }
                 // Queued/accepted is not completion; await HISTORY-DONE from the subscriber.
                 // RESYNC defers SERVER until a fresh bind, including an unchanged roster.
                 _lastRosterSentAt = -ROSTER_SEND_MS;
@@ -4553,6 +4578,14 @@ class FCMChatWidget extends MovieClip {
                 continue;
             }
 
+            var asyncCompletion:Int = FcmWire.asyncSendCompletion(obj);
+            if (asyncCompletion != 0) {
+                updateCursorFromEvent(obj);
+                parsedCount++;
+                applyZfeAsyncCompletion(obj, asyncCompletion > 0);
+                continue;
+            }
+
             var isChatEditEvent:Bool = extractJsonString(obj, "kind") == "chat.edit";
             if (obj.indexOf('"chat.message"') < 0 && obj.indexOf('chat.message') < 0 && !isChatEditEvent) {
                 updateCursorFromEvent(obj);
@@ -4750,6 +4783,77 @@ class FCMChatWidget extends MovieClip {
             bumpAutoHide();                        // any new message counts as activity
         }
         return parsedCount;
+    }
+
+    /** Apply ZFE's terminal queue event. The initial sendMessage result only means queued. */
+    function applyZfeAsyncCompletion(obj:String, accepted:Bool):Void {
+        var requestId:Int = FcmWire.asyncRequestId(obj);
+        if (requestId <= 0) return;
+
+        if (_zfePendingSends.exists(requestId)) {
+            var localSendId:String = _zfePendingSends.get(requestId);
+            _zfePendingSends.remove(requestId);
+            var entry = _outbox.get(localSendId);
+            if (entry == null) return;
+            if (accepted) {
+                if (_needsLink) clearLinkGate("ZFE relay accepted send");
+                zfeLog("info", "send", "relay accepted ch=" + entry.channel
+                    + " requestId=" + requestId + "; awaiting durable echo");
+                scheduleEchoPoll();
+                return;
+            }
+
+            var code:String = FcmWire.asyncErrorCode(obj);
+            zfeLog("warn", "send", "relay rejected requestId=" + requestId + " code=" + code);
+            if (_canRetryHudSend && FcmOutbox.retryable(code)) {
+                outboxStatus("Message queued - waiting to retry.");
+                return;
+            }
+            _outbox.remove(localSendId);
+            removeOptimisticRecord(localSendId);
+            requestRender();
+            switch (code) {
+                case "permission_denied":
+                    _needsLink = true;
+                    setLogText(linkHint());
+                case "message_blocked": setLogText("Message blocked by the chat filter.");
+                case "slash_ignored": setLogText("Slash commands work in the dashboard, not in-game.");
+                case "user_muted": setLogText("You are muted and cannot send right now.");
+                case "rate_limited": setLogText("Sending too fast - slow down.");
+                case "invalid_channel":
+                    if (entry.channel == "server") setServerSessionReady(false, "invalid_channel");
+                    setLogText(entry.channel == "server"
+                        ? "Server chat is unavailable: invalid_channel"
+                        : "That channel is not available.");
+                case "message_too_long": setLogText("Message too long (max " + _cfg.maxSendLen + ").");
+                case "auth_token_invalid", "auth_token_revoked", "user_banned":
+                    setLogText("Chat session ended - reconnecting...");
+                    if (_nativeInput) closeInputNative();
+                    setServerSessionReady(false, "");
+                    _connected = false;
+                    stopPollTimer();
+                    scheduleConnectRetry();
+                default: setLogText(code.length > 0 ? ("Send failed: " + code) : "Send failed.");
+            }
+            return;
+        }
+
+        if (_zfePendingControls.exists(requestId)) {
+            var source:String = _zfePendingControls.get(requestId);
+            _zfePendingControls.remove(requestId);
+            if (accepted) {
+                zfeLog("info", "world", source + " relay accepted requestId=" + requestId
+                    + "; awaiting terminal marker");
+                return;
+            }
+            var code:String = FcmWire.asyncErrorCode(obj);
+            zfeLog("warn", "world", source + " relay rejected requestId=" + requestId
+                + " code=" + code);
+            if (source == "roster" || source == "worldId") {
+                setServerSessionReady(false, code.length > 0 ? code : "server session rejected");
+                _lastRosterSentAt = 0;
+            }
+        }
     }
 
     /** Keep replay identity scoped to the feed whose records are retained. Backscroll fix: scan live _records so LRU-evicted messageIds don't re-append randomly. */
@@ -5017,7 +5121,17 @@ class FCMChatWidget extends MovieClip {
         var ok:Bool = FcmWire.controlAccepted(raw);
         if (ok) {
             if (!readyOnSuccess) setServerSessionReady(false, "");
-            zfeLog("info", "world", source + " control accepted by native transport; awaiting relay confirmation");
+            var queuedRequestId:Int = _api != null && _api.provider == FcmNativeApi.ZFE
+                ? FcmWire.queuedRequestId(raw) : 0;
+            if (queuedRequestId > 0) {
+                _zfePendingControls.set(queuedRequestId, source);
+                scheduleEchoPoll();
+                zfeLog("info", "world", source + " control queued requestId=" + queuedRequestId
+                    + "; awaiting relay completion");
+            } else {
+                zfeLog("info", "world", source
+                    + " control accepted by native transport; awaiting relay confirmation");
+            }
             return true;
         }
         var message:String = extractJsonString(raw, "message");
@@ -5128,9 +5242,9 @@ class FCMChatWidget extends MovieClip {
         return (now - _lastRosterObservationAt) <= ROSTER_FRESH_MS;
     }
 
-    /** Fresh observed names (within ROSTER_FRESH_MS), unioned from current provider snapshots. */
+    /** Prefer fresh world-wide player snapshots over auxiliary nearby/team lists. */
     function freshRosterNames():Array<String> {
-        return _rosterSnapshots.fresh(flash.Lib.getTimer(), ROSTER_FRESH_MS);
+        return _rosterSnapshots.sessionNames(flash.Lib.getTimer(), ROSTER_FRESH_MS, _lastRosterSent);
     }
 
     /** Drop only ephemeral SERVER rows before a new roster-derived room is bound. */
@@ -5153,12 +5267,11 @@ class FCMChatWidget extends MovieClip {
      *  driven by the relay acknowledgement, not by this local observation. */
     function tickRoster():Void {
         if (_api == null || !_connected || _relayUserId.length == 0) return;
-        // ZFE executes chat.v1.sendMessage synchronously on Fallout's Scaleform thread.
-        // When TLS/relay connectivity is degraded, each automatic roster or leave control
-        // can block that thread for the native timeout (observed at roughly 15 seconds).
-        // Keep ordinary ZFE chat available, but fail closed on automatic Server-room traffic
-        // until ZFE exposes a non-blocking request primitive.
-        if (_api.provider == FcmNativeApi.ZFE) return;
+        // Older ZFE builds execute roster/leave controls synchronously on Fallout's
+        // Scaleform thread and can freeze it for the native timeout. Current ZFE advertises
+        // a dedicated async-control contract; xScal's chatInterface is non-blocking by
+        // contract. Gate the behavior, not the provider name.
+        if (!_api.supportsNonBlockingControl()) return;
         // An unlinked account cannot be admitted to the server room. In particular, do not
         // keep issuing synchronous roster calls while the one-shot link notice is being shown.
         if (_needsLink || _authState != "authenticated") return;
@@ -5177,21 +5290,23 @@ class FCMChatWidget extends MovieClip {
         var rosterObserved:Bool = hasFreshRosterObservation(now);
         _inWorld = (names.length > 0 || rosterObserved);
         if (_inWorld) {
+            // Loading can briefly blank even the primary roster. Preserve the current room
+            // while it recovers, without sending an empty roster or extending the relay lease.
+            if (_rosterSnapshots.waitForRoster(_lastRosterSent, names, now, ROSTER_FRESH_MS)) return;
             var namesField:String = names.join("|");
             // A roster replacement with no shared name is the only reliable world-hop signal
             // available from the approved HUD data surfaces. The relay may otherwise compute
             // the same room key and keep this subscriber on the previous server feed. Leave
             // first, clear local ephemeral rows, then let the next tick submit the new roster;
             // the fresh bind triggers the existing server-history backfill.
-            if ((_serverSessionReady || _lastRosterSentAt > 0)
-                    && (_rosterBoundaryPending
-                        || FcmCommand.shouldRebindRosterSession(_lastRosterSent, namesField))) {
+            // Keep the prior roster comparison even if the relay lease just expired and
+            // reset the send timestamp; a permanent empty must still leave the old room.
+            if (FcmCommand.shouldRebindRosterSession(_lastRosterSent, namesField)) {
                 zfeLog("info", "world", "roster session changed; clearing feed and rebinding");
                 clearServerRecords("roster session changed");
                 setServerSessionReady(false, "");
                 _lastRosterSentAt = 0;
                 _lastRosterSent = "";
-                _rosterBoundaryPending = false;
                 sendWorldLeaveControl();
                 resetRosterObservation("roster boundary");
                 return;
@@ -5206,7 +5321,8 @@ class FCMChatWidget extends MovieClip {
                 try {
                     var raw:String = Std.string(_api.call("chat.v1.sendMessage", payload));
                     applyServerControlResult(raw, "roster");
-                    zfeLog("info", "world", "roster control sent names=" + names.length);
+                    zfeLog("info", "world", "roster control sent names=" + names.length
+                        + " source=" + _rosterSnapshots.sessionSource(now, ROSTER_FRESH_MS, namesField));
                 } catch (e:Dynamic) {
                     setServerSessionReady(false, "relay unavailable");
                     zfeLog("warn", "world", "roster send threw: " + Std.string(e));
@@ -5293,7 +5409,7 @@ class FCMChatWidget extends MovieClip {
     }
 
     function sendWorldIdControl(worldId:String):Void {
-        if (_api == null || !_connected) return;
+        if (_api == null || !_connected || !_api.supportsNonBlockingControl()) return;
         var body:String = WORLD_CTRL_PREFIX + worldId;
         var payload:String = '{"channel":"server","targetUserId":"' + _serverSession.target() + '","body":"' + jsonEscape(body) + '"}';
         try {
@@ -5305,7 +5421,7 @@ class FCMChatWidget extends MovieClip {
     }
 
     function sendWorldLeaveControl():Void {
-        if (_api == null || !_connected) return;
+        if (_api == null || !_connected || !_api.supportsNonBlockingControl()) return;
         var body:String = WORLD_LEAVE_PREFIX;
         var payload:String = '{"channel":"server","targetUserId":"","body":"' + jsonEscape(body) + '"}';
         try {
@@ -6546,12 +6662,10 @@ class FCMChatWidget extends MovieClip {
     // Keep a replaceable snapshot per UI provider. The old global _seenNames map merged names
     // forever, so names from the previous world remained in the next ROSTER control until TTL.
     var _rosterSnapshots:FcmRoster = new FcmRoster();
+    var _rosterReader:FcmHudRosterReader = new FcmHudRosterReader();
     var _rosterCallbackKeys:Array<String> = [];
     var _rosterCallbacks:Map<String, Dynamic> = new Map();
     var _rosterManager:Dynamic = null;
-    // A single provider can publish the new-world roster before another provider refreshes. Keep
-    // that boundary instead of letting a stale union member make the old room look current.
-    var _rosterBoundaryPending:Bool = false;
     var _lastRosterObservationAt:Float = -ROSTER_FRESH_MS;
     var _lastRosterSentAt:Float = 0;
     var _lastRosterSent:String = "";
@@ -6582,11 +6696,10 @@ class FCMChatWidget extends MovieClip {
 
     /** Clear provider snapshots at a session boundary; stale names must never seed a new world. */
     function resetRosterObservation(reason:String, detach:Bool = false):Void {
-        if (detach) unsubscribeRoster();
+        if (detach) { unsubscribeRoster(); _rosterReader.clear(); }
         setServerSessionReady(false, "");
         _rosterSnapshots = new FcmRoster();
         _serverSession.begin(Std.string(flash.Lib.getTimer()) + "-" + Std.string(Std.random(1000000000)));
-        _rosterBoundaryPending = false;
         _lastRosterObservationAt = -ROSTER_FRESH_MS;
         _rosterLogCount = 0;
         _lastRosterLogAt = 0;
@@ -6663,87 +6776,28 @@ class FCMChatWidget extends MovieClip {
         s = StringTools.replace(s, "|", "");
         return StringTools.trim(s);
     }
-
-    /** Record a replaceable nearby-player snapshot (TeamMarkers / VoiceChat / PlayerList). */
-    function collectRoster(key:String, d:Dynamic):Void {
+    /** Both FCM entry points use the same bounded game-object decoder. */
+    function collectRoster(key:String, d:Dynamic, pushed:Bool = false):Void {
         if (_serverAtMainMenu) return;
-        var now:Float = flash.Lib.getTimer();
-        if (key == "MapMenuData" || key == "PublicTeamsData") {
-            var rawRows:Dynamic = uiField(d, key == "MapMenuData" ? "MarkerData" : "publicTeams");
-            if (rawRows == null || uiField(rawRows, "length") == null) return;
-            var names = FcmRoster.readNames(key, d, _displayName);
-            var clean:Array<String> = [];
-            for (name in names) {
-                var value = bareName(name);
-                if (value.length > 0 && value.toLowerCase() != _displayName.toLowerCase()) clean.push(value);
-            }
-            storeRosterSnapshot(key, clean, now);
-            return;
-        }
-        var arr:Dynamic = null;
-        if (key == "TeamMarkers") { try { arr = d.Markers; } catch (e:Dynamic) {} }
-        else if (key == "VoiceChatAreaData") { try { arr = d.participants; } catch (e:Dynamic) {} }
-        else arr = d; // PlayerListData is the array itself
-        if (arr == null) return;
-        var n:Int = 0;
-        try {
-            var rawLength:Dynamic = uiField(arr, "length");
-            if (rawLength == null) return;
-            n = Std.int(rawLength);
-        } catch (e:Dynamic) { return; }
-        if (n < 0) return;
-
-        var snapshot:Array<String> = [];
-        var localName:String = bareName(_displayName).toLowerCase();
-        var skippedEntries:Int = 0;
-        for (i in 0...n) {
-            // GFx native arrays can be replaced between reading length and reading an index
-            // during a world hop. Never let one invalid slot escape the timer boundary.
-            try {
-                var e0:Dynamic = arr[i];
-                if (e0 == null) continue;
-                if (uiBool(uiField(e0, "isLocalPlayer"))
-                        || uiBool(uiField(e0, "isLocal"))
-                        || uiBool(uiField(e0, "isSelf"))) continue;
-                var nm:String = "";
-                for (cand in ["displayName", "characterName", "name", "playerName"]) {
-                    var v:Dynamic = uiField(e0, cand);
-                    if (v != null && Std.string(v).length > 0) { nm = Std.string(v); break; }
-                }
-                nm = bareName(nm);
-                if (nm.length > 0 && nm.toLowerCase() != localName && snapshot.indexOf(nm) < 0) {
-                    snapshot.push(nm);
-                }
-            } catch (e:Dynamic) {
-                skippedEntries++;
-            }
-        }
-        if (skippedEntries > 0 && now - _lastRosterReadWarningAt >= 30000) {
+        var now = flash.Lib.getTimer();
+        var observation = _rosterReader.payload(key, d, _displayName, now, pushed);
+        if (observation.skipped > 0 && now - _lastRosterReadWarningAt >= 30000) {
             _lastRosterReadWarningAt = now;
-            zfeLog("warn", "roster", key + " skipped native entries=" + skippedEntries);
+            zfeLog("warn", "roster", key + " unreadable entries=" + observation.skipped);
         }
-        snapshot.sort(function(a, b) return (a < b) ? -1 : (a > b ? 1 : 0));
-        storeRosterSnapshot(key, snapshot, now);
+        if (observation.reason != "") return;
+        storeRosterSnapshot(key, observation.names, observation.at);
     }
+
 
     function storeRosterSnapshot(key:String, snapshot:Array<String>, now:Float):Void {
         var previousSnapshot:Array<String> = _rosterSnapshots.replace(key, snapshot, now);
         if (previousSnapshot == null || previousSnapshot.join("|") != snapshot.join("|"))
             zfeLog("info", "roster", key + " snapshot names=" + snapshot.length);
-        // Compare this provider with its own previous value, not the cross-provider union.
-        // An unchanged empty auxiliary list is normal and must not clear the feed repeatedly.
-        // During a world hop the primary roster surface can already be completely replaced while an auxiliary provider still contains
-        // one old name. Remember the disjoint/empty provider snapshot and let tickRoster perform
-        // a real LEAVE before the next ROSTER bind.
-        var snapshotField:String = snapshot.join("|");
-        if ((_serverSessionReady || _lastRosterSentAt > 0) && previousSnapshot != null
-                && FcmCommand.shouldRebindRosterSession(previousSnapshot.join("|"), snapshotField)) {
-            _rosterBoundaryPending = true;
-            zfeLog("info", "roster", key + " marks a new session boundary names=" + snapshot.length);
-        }
-        // An empty update is meaningful: it represents a valid solo world roster and also
-        // provides the boundary needed to stop using names from the previous world.
-        _lastRosterObservationAt = now;
+        // Snapshot callbacks do not decide session boundaries. tickRoster compares the
+        // effective full roster once all cached surfaces have been refreshed. An auxiliary
+        // list becoming empty/disjoint is normal during same-world fast travel.
+        _lastRosterObservationAt = Math.max(_lastRosterObservationAt, now);
     }
 
     function onAuxDataChange(key:String, evt:Dynamic):Void {
@@ -6751,7 +6805,7 @@ class FCMChatWidget extends MovieClip {
         var dc:Dynamic = null;
         try { dc = evt.data; } catch (e:Dynamic) {}
         if (dc == null) { try { dc = evt.target.data; } catch (e:Dynamic) {} }
-        if (dc != null) collectRoster(key, dc);
+        if (dc != null) collectRoster(key, dc, true);
         if ((now - _auxLogAt) < 15000) return;
         _auxLogAt = now;
         var d:Dynamic = null;
@@ -6805,7 +6859,7 @@ class FCMChatWidget extends MovieClip {
         // Pass the event payload as a non-authoritative character candidate. The public relay
         // identity still comes exclusively from AccountInfoData inside refreshDisplayName().
         refreshDisplayName(d);
-        collectRoster("PlayerListData", d);
+        collectRoster("PlayerListData", d, true);
         // Throttle: first 3 updates, then at most every 30s.
         if (_rosterLogCount >= 3 && (now - _lastRosterLogAt) < 30000) return;
         _rosterLogCount++;

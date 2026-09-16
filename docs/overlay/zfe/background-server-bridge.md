@@ -1,10 +1,54 @@
 # Background Server bridge for the desktop overlay
 
-**Local candidate: FCMServerBridge 0.1.0, 2026-09-12.** The user revised the loader requirement:
+**Current candidate: FCMServerBridge 0.1.6 DEV, installed locally 2026-09-16; native roster acceptance failed.**
+The fresh screenshot shows `payload E1014` on Voice/Party/Public Teams/Map, `test provider` on
+Team Markers/Player List, eight subscriptions, world allowed and no observed roster.
+`Missing class - not reported` still supplies no class identifier. See the
+[0.1.6 native evidence](../../testing/hud-xscal-acceptance-2026-09-15.md#016-native-result--payload-boundary-still-failing).
+
+0.1.6 shares a bounded native-data decoder with HUD 2.10.103, passes copied observations to
+session policy, retains original cache timestamps and backs off thrown roster reads. It keeps
+the existing outbound provider/relay/desktop path and all authorization/lease limits. The new
+[isolated package gate](../../testing/hud-automation-plan.md#isolated-packaged-bridge-gate) tests
+the exact compiled child without production helpers in its host. It does not emulate native
+GFx or establish that E1014/the earlier freeze is fixed.
+
+Local gate: 33 Ruffle tests, shared-reader/state/package checks and backend/desktop suites pass.
+The installed failing 0.1.5 artifact also passes the new isolated lifecycle tests, so native
+acceptance remains essential. Exact candidate hashes and test limits are in the
+[verification record](../../testing/hud-xscal-acceptance-2026-09-15.md#final-local-verification-and-native-failure-control).
+
+**Previous diagnostic candidate: FCMServerBridge 0.1.5, 2026-09-16; native acceptance failed.** The user revised the loader requirement:
 this separate, invisible mod **uses HUDModLoader**. It has no chat widget or chat editor.
-The matching backend and shared desktop renderer are implemented in this checkout. The DEV
-ZIP is a local test build; hosted deployment, hosted CI and two-client in-game validation under
-ZFE and xScal have not been performed.
+The matching backend and shared desktop renderer are implemented in this checkout. A fresh DEV
+0.1.5 ZIP was installed locally with xScal 0.2.16, paired with a rebuilt isolated Dev overlay 1.4.0.
+**First native acceptance (0.1.1) failed:** the user saw “Waiting for a fresh world roster,” pressed
+Reconnect, and reported a freeze. The exact new Dev overlay was stopped for isolation; the
+game and Prod were left untouched. The stalled operation is unproven. See the
+[dated failure/evidence record](../../testing/hud-xscal-acceptance-2026-09-15.md#first-native-bridge-run--failed-acceptance-investigation-open).
+Do not distribute this candidate. Hosted bridge-protocol acceptance, hosted CI and two-client
+in-game validation under ZFE and xScal remain pending.
+
+**Follow-up: the 0.1.3 run failed native roster acceptance; 0.1.4 diagnostics are now installed.** The 0.1.2 run reached
+“Waiting for a fresh world roster” and stayed there after opening/closing the map. A read-only
+Dev check found no active roster/world keys or background leases. The exact rejected native
+data gate is unproven. The user's 0.1.3 screenshot shows `Menu - world allowed`, `Roster - not
+observed` and all six roster sources reporting `read failed`. That catch surrounds both getter
+and processing, so the failed operation is still unknown. Installed 0.1.4 separates their phases,
+retains only numeric exception IDs and reports subscription count/errors in the cached F11 menu.
+It does not relax readiness, extend leases or claim to resolve the native failure. See the
+[exception diagnostics guide](../../../game-mods/FCMBridge/hudmodloader-bridge/README.md#native-exception-diagnostics-014).
+
+**Previous native result:** 0.1.4 registered eight subscriptions but every roster path reports
+`processor entry E1014`, while the world menu is allowed. The runtime's missing-class identifier
+is unknown. Installed 0.1.5 adds a narrowly parsed `Missing class` row; the user's fresh screenshot
+reports `not reported`, not an identifier. See the [class diagnostic contract](../../../game-mods/FCMBridge/hudmodloader-bridge/README.md#e1014-class-identifier-015).
+
+0.1.2 consumes validated subscription envelopes even when getters lag, retains the push timestamp
+instead of renewing stale evidence, queues/coalesces menu refreshes without disconnecting a healthy
+transport, guards timer reentry and capability-gates ZFE controls. It adds bounded native phase/status
+diagnostics. Both accessor-backed Ruffle provider scenarios pass; this does not prove the native
+freeze resolved. See the [source/readiness/reconnect contract](../../../game-mods/FCMBridge/hudmodloader-bridge/README.md#provider-events-and-reconnect-safety-012).
 
 ## Install and build
 
@@ -67,9 +111,25 @@ Both providers may connect asynchronously. The background poller drains a bounde
 Account identity comes from `AccountInfoData`, never a character-name fallback. Known HUD
 roster arrays are bounded to 2,048 examined rows and 24 distinct peer names of at most 64 characters.
 
-MainMenu/LoadingMenu, manager replacement and a disjoint roster invalidate the room nonce and
-clear prior snapshots. Cached old-world providers cannot seed the replacement session until
-they change or emit a fresh update. Observations expire after 30 seconds without a valid refresh.
+MainMenu, manager replacement and a disjoint effective roster invalidate the room nonce and
+clear prior snapshots. A brief `LoadingMenu` preserves an already-observed world's nonce, but
+cannot establish a world on startup. Roster reads/pushes during loading do not refresh evidence
+or renew the backend lease. If observations reach their existing 30-second limit, the bridge
+retires the room instead of extending the loading hold indefinitely.
+
+The complete provider batch is evaluated before any roster-boundary control. Fresh `MapMenuData`
+takes precedence, then `PlayerListData` and `PublicTeamsData`, with an auxiliary union only if
+none is available. An empty higher-priority list permits a populated fallback only when it
+overlaps the previous established roster. This fixes the native xScal same-world sequence where
+the map remains empty after loading but public teams remain populated. Disjoint cached fallback
+names cannot bypass the empty-primary hold, and a populated map still wins on a genuine hop.
+An empty/disjoint nearby or team list cannot override a stable primary roster. A temporarily
+empty primary after a nonempty roster gets a bounded 30-second recovery window; repeated empty
+updates do not restart it. During the hold, neither LEAVE nor roster heartbeat is sent. Returning
+same/overlapping names preserve the binding. Disjoint names or an expired empty window retire
+the old nonce before rebinding, retaining only the selected new-world evidence.
+Cached old-world providers cannot seed the replacement session until they change or emit a fresh
+update. Observations expire after 30 seconds without a valid refresh.
 A transport-only reconnect retains current-world observations and starts a new nonce. All
 callbacks/timers are disposed on unload; LEAVE is best effort, backed by server expiry.
 
@@ -151,9 +211,45 @@ shared overlay's public-mode and canonical-ID guards. The existing `gamemod-anch
 compiles and validates both background variants; the backend Jest and dashboard Vitest jobs
 include the new suites automatically. Local tests do not constitute a hosted CI run.
 
+The shared `hud-ruffle` gate also runs `bridge-fast-travel` with both ZFE and xScal. It creates
+the actual invisible bridge with ready UI-provider envelopes, asserts the actual native adapter,
+and checks same-world nonce/room preservation without extra controls, three repeated
+map-recovery/loading/empty-map cycles with explicit overlapping PublicTeamsData selection,
+a disjoint primary despite
+stale auxiliary data, prolonged-loading expiry, MainMenu leave, and owned timer/subscription
+teardown. It does not create the visible widget or send live messages. Pure state tests cover
+exact 30-second boundaries, primary-empty recovery, overlapping/reordered lists, startup loading,
+and rejection of test/unready/stale providers. The package gate excludes harness driver symbols
+and validates both target variants against the exact decoded BA2 payload.
+
+Local 0.1.1 verification (2026-09-15): 33 pure bridge-state checks, both target package tests,
+empty Haxe compiler diagnostics, shared native/HUD/source/archive checks, and all 28 Ruffle
+tests passed (39.5 seconds). The harness port was released after teardown. The Dev archive has
+one 39,495-byte FWS v32 child; decoded payload equality passed. BA2 SHA-256:
+`e336ab759260b5840c67cf697a5bcd5e5d73ffb66d4b97166ff01aec77e46e53`.
+Nothing was installed, deployed, committed, or published by this verification.
+
+The subsequent empty-map/public-team correction passed 34 pure bridge checks and all 28 shared
+Ruffle tests (40.4 seconds). The original package hash above predates this correction and is
+**superseded**. After adding repeated-cycle regression assertions, all 28 Ruffle tests passed
+again (36.2 seconds); 34 pure bridge checks, both package targets, native/HUD/emoji/source checks,
+empty compiler diagnostics, 1,148 overlay tests, 41 backend bridge tests and six dashboard
+bridge-feed tests also passed locally. The harness released port 41739.
+
+A fresh 0.1.1 DEV package was then built and installed with the game closed. Its sole decoded
+SWF is 39,856 bytes, FWS v32, and matches `BUILD.json`; the installed BA2 hash is
+`f8f76272c0a18e4b6631fbce29ec61fb5981579d58d6c1b5c1b37ba2569c8515`, and the SWF hash is
+`ae6ba54c1c6d0d1d6f032dfac68a032b8665b86b3ca4aa1a06f642b07a40fba4`.
+Only the FCMChatWidget entries in the loader/archive lists were replaced with FCMServerBridge.
+The visible widget remains intact but inactive; prior registry/archive configuration and widget
+are recoverable under `.extender-backups/before-bridge-0.1.1-VNj1Bt/` in the game directory.
+xScal settings/native authentication were not changed. See the
+[dated acceptance record](../../testing/hud-xscal-acceptance-2026-09-15.md#background-bridge-phase--installed-awaiting-manual-game-test)
+for the isolated Dev overlay install, same-account login and the next manual checks.
+
 Before distribution: deploy the matching backend/renderer to the selected environment, then
 validate clean linking, two accounts on the same world, different-world isolation, intentional
 repeated text, live/history overlap, map-driven roster changes, world hops, MainMenu/loading,
 mod reload, network loss, expired codes, revoked linking, blocked senders, multiple devices and
-coexistence with other HUDModLoader children under **both ZFE and xScal**. No game install or
-live runtime test has been performed for this candidate.
+coexistence with other HUDModLoader children under **both ZFE and xScal**. Local installation is
+complete, but it is not native acceptance or evidence of a hosted bridge lease.

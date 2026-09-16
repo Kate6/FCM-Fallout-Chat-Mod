@@ -2109,13 +2109,13 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
     document.head.appendChild(noDragStyle);
 
     let moveActive = false;
-    let moveCaptureEl: HTMLElement | null = null;
+    let moveCaptureEl: Element | null = null;
     let clickThroughOn = false;
 
     window.relayBridge.onClickThrough?.((on: boolean) => { clickThroughOn = on; });
 
     const isDragTarget = (target: EventTarget | null): boolean => {
-      if (!(target instanceof HTMLElement)) return false;
+      if (!(target instanceof Element)) return false;
       return isDragTargetCore(
         target as unknown as Parameters<typeof isDragTargetCore>[0],
         document.documentElement as unknown as Parameters<typeof isDragTargetCore>[0],
@@ -2128,9 +2128,10 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
 
     const onMovePointerDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
-      if (clickThroughOn) return;
       const modalOpen = !!document.querySelector('#shell-settings-backdrop.open, #shell-onboarding-backdrop.open');
-      if (modalOpen) return;
+      // Native modal pinning deliberately overrides click-through. Only the
+      // designated header passes isDragTarget; modal controls/backdrops do not.
+      if (clickThroughOn && !modalOpen) return;
       // Diagnostic: record the drag decision for every left-click so a user log
       // tells us whether the top bar is recognised as a drag target (the move IPC
       // is otherwise silent). Drop once the Linux drag issue is confirmed fixed.
@@ -2140,7 +2141,7 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
       } catch { /* noop */ }
       if (!dragOk) return;
       moveActive = true;
-      moveCaptureEl = e.target as HTMLElement;
+      moveCaptureEl = e.target as Element;
       try { moveCaptureEl.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       try { window.relayBridge.moveStart?.(); } catch { /* ignore */ }
       e.preventDefault();

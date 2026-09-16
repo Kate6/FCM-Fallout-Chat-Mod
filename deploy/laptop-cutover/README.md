@@ -123,6 +123,13 @@ fail-closed checkpoint in future rehearsals and in Production:
   production had moved to Hostinger. Stop the specifically identified obsolete
   project with `docker compose down` (without `-v`) and prove it is gone before
   starting a replacement environment.
+- Treat the `releases_downloads` volume as user-visible production state. The
+  release table can retain a valid version and URL while a restored downloads
+  volume contains only install scripts, leaving the advertised Windows ZIP or
+  installer at HTTP 404. Before declaring a target authoritative, compare each
+  currently published release URL with the restored volume, restore the exact
+  release artifacts, then verify public HTTP 200, `Content-Length`, and SHA-256
+  against the source artifact.
 - A remotely managed tunnel resolves its configured origin on the connector's
   Docker network. The backend therefore needs a network alias matching the saved
   origin (`backend-dev` for the current Dev tunnel). Host-local health alone is

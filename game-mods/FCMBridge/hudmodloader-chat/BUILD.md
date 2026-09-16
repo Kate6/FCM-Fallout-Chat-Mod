@@ -1,15 +1,54 @@
 # FCMChatWidget build, install, and verification
 
-**Widget version:** 2.10.97. Local review candidate, audited 2026-09-15.
+**Widget version:** 2.10.103. Shared-roster candidate, 2026-09-16; native acceptance pending.
 This is the explicit opt-in HUD-mod track. The desktop overlay never installs or modifies it.
 
 ## Status and scope
 
+2.10.103 extracts `FcmHudRosterReader`, shared with background bridge 0.1.6. The collector
+copies bounded strings before session processing, rejects damaged/invalid lists, and preserves
+the original observation time on unchanged getter reads. Pushes and changed payloads advance
+local revisions; a revision is not a world ID. Existing source selection and lease durations
+are unchanged. These source/build changes are not installed or native-accepted. The 2.10.102
+results below are historical evidence, not acceptance of the shared reader. Follow the
+[isolated packaged-bridge gate](../../../docs/testing/hud-automation-plan.md#isolated-packaged-bridge-gate).
+
 The source and local SWF/BA2 include combined General, retained-message replay protection,
 stricter own-echo matching, delayed-render failure recovery, and configurable scroll bindings.
-Local Haxe, backend relay, Python packaging/anchor, SWF, and decoded BA2 checks passed during
-review. The production-target candidate is installed locally with ZFE for acceptance testing; it
-has not yet been tested in-game or published, and hosted CI is still required for promotion.
+The previous locally installed 2.10.100 targeted hosted Dev with ZFE. After relay/auth corrections,
+the user confirmed linking works, and the reviewed log shows history completion and matched
+self-echoes. Same-server fast travel then exposed an empty `TeamMarkers` snapshot incorrectly
+clearing Server history. The previous 2.10.101 build was installed locally with official xScal 0.2.16 against
+hosted Dev. Its native run confirmed startup/history/General sends but exposed a second same-world
+reset: an empty map masked populated public teams until the empty grace expired. Candidate 2.10.102
+corrects that selection in both HUD and bridge. The native 2.10.102 run confirmed history,
+General/Server echoes and room continuity through two loading transitions with a populated map.
+The exact empty-map fallback still needs native acceptance. The visible HUD is now retained
+inactive for the separate FCMServerBridge/xScal/hosted-Dev test; it must not share the native queue.
+Prod is unchanged. The widget is not published, and hosted CI
+is still required for promotion.
+The 2.10.100 correction keeps the low-end render coalescing/six-row slices while moving ZFE's
+two-stage send/control receipt decoding onto the bundled GFx-safe JSON reader.
+The 2.10.101 correction prefers fresh map/player rosters over nearby/team lists, waits through
+bounded transient empties without extending relay leases, and preserves real hop/MainMenu
+leave behavior. Its Ruffle scenario asserts real widget history/tab/nonce/control state through
+both providers. Restoring the faulty auxiliary-boundary rule makes both regression cases fail.
+The 2.10.102 selector uses an overlapping populated player/public-team fallback when a higher
+priority map is empty. Disjoint cached fallback names cannot bypass that empty primary, while a
+populated primary still detects a real hop. Nearby-only lists never override an empty primary.
+Freshness, empty-grace and backend lease limits are unchanged; no new timer or network call is added.
+The regression first failed on HUD and bridge under both adapters, then passed in the complete
+28-test Ruffle suite (40.4 seconds). Repeated map/public-team source-switch cycles were subsequently
+added for both consumers/providers; the complete suite passed again in 36.2 seconds. Native
+empty-map fallback and real-hop acceptance remain required.
+The game-closed 2.10.102 install changed only the widget BA2 and its two version stamps. Its
+decoded SWF matches the tested normalized artifact byte-for-byte; xScal, settings, credentials,
+loader registration and archive order were preserved. The prior HUD has a recoverable backup.
+All local pure Haxe/native/source/package/SWF/BA2/emoji checks and the complete 28-test Ruffle
+suite passed before the xScal installation (36.9 seconds). The extracted installed BA2 SWF matches the tested normalized artifact;
+automatic teardown released the harness port. These results do not claim hosted CI or GFx
+acceptance. The 2.10.101 game-closed install preserved the existing configuration and kept a recoverable
+ZFE/HUD backup. See the [xScal acceptance record](../../../docs/testing/hud-xscal-acceptance-2026-09-15.md).
 Earlier desktop ZFE colors/emoji confirmation is
 recorded separately in [styling history](../../../docs/testing/hud-emoji-status.md).
 
@@ -29,6 +68,9 @@ investigations and superseded runbooks; it is not a source for current install s
   alone is not sufficient. Use the [provider guide](../../../docs/overlay/zfe/modder-guide.md).
 - ZFE must advertise `zfe-chat-async-send-v1` for user messages. The widget refuses synchronous
   ZFE sends because native network stalls block Fallout's Scaleform/UI thread.
+- ZFE must advertise `zfe-chat-async-control-v1` for automatic Server-room roster and leave
+  controls. xScal uses its asynchronous `chatInterface` path. Older ZFE builds retain static
+  community chat but cannot bind Server chat.
 
 Modern widget builds do not require Bethesda's HUDMenu or FFDec recompilation. If FFDec or an
 archive skill/tool is unavailable, identify that limit and use the repository's tested format
@@ -208,7 +250,8 @@ operation and must not claim success on a rejected reset. Credentials remain ext
    public account handle, invalid-token recovery, and relink failure/success.
 3. Send on all six allowed channels. General shows each once with its original tag; other tabs
    filter correctly; General sends only to `global`. Private/system/wrong-room SERVER content
-   must not enter the view. Hop worlds and check old SERVER history clears.
+   must not enter the view. Fast-travel within the same world: selected SERVER tab, history,
+   and room must persist with no LEAVE. Then hop worlds and check old SERVER history clears.
 4. Send identical messages intentionally, replay old history while a new send awaits ACK, and
    reconnect after retained-ID cache eviction. Distinct messages survive; old replays cannot
    consume a newer pending row. Exercise negotiated retry and ambiguous failure behavior.

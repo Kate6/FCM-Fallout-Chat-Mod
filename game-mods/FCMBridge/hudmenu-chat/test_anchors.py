@@ -23,6 +23,7 @@ INJECT_AS = os.path.join(HERE, 'fcm-inject.as')
 WIDGET_HX = os.path.join(HERE, '..', 'hudmodloader-chat', 'FCMChatWidget.hx')
 USER_EVENT_HX = os.path.join(HERE, '..', 'hudmodloader-chat', 'FcmUserEvent.hx')
 WIDGET_CONFIG_HX = os.path.join(HERE, '..', 'hudmodloader-chat', 'FcmConfig.hx')
+WIDGET_WIRE_HX = os.path.join(HERE, '..', 'hudmodloader-chat', 'FcmWire.hx')
 WIDGET_INI = os.path.join(HERE, '..', 'hudmodloader-chat', 'FCMChatWidget.ini')
 
 errors = []
@@ -44,6 +45,15 @@ native_src = open(os.path.join(HERE, '..', 'FcmNativeApi.hx'), encoding='utf-8')
 key_decoder = native_src.split('static function inputResultIsTrue', 1)[1].split('static function findXscal', 1)[0]
 check('FcmJson.parse(text)' in key_decoder, 'ZFE navigation uses the bounded GFx JSON reader')
 check('haxe.Json' not in native_src, 'ZFE navigation decoder has no general JSON parser/printer dependency')
+
+# ZFE 0.15 acknowledges sends and controls in two stages. These receipts run in
+# Fallout's GFx VM, where Flash's native JSON global is absent even though Ruffle
+# implements it. Keep the receipt decoder on the bounded FcmJson reader.
+wire_src = open(WIDGET_WIRE_HX, encoding='utf-8').read()
+check('FcmJson.parse(raw)' in wire_src,
+      'ZFE async receipt decoder uses the bounded GFx JSON reader')
+check('haxe.Json' not in wire_src,
+      'ZFE async receipt decoder has no native Flash JSON dependency')
 
 # ---------------------------------------------------------------------------
 # 1. Verify fcm-inject.as — chat.v1 API presence + FCMHUD/1 removal
@@ -781,10 +791,15 @@ if widget_src:
           and 'function runInitSafely' in widget_src
           and 'function onInputSubmitSafely' in widget_src,
           "FCMChatWidget guards config, startup, and input callback boundaries")
-    check('var e0:Dynamic = arr[i];' in widget_src
-          and 'skippedEntries++' in widget_src
+    roster_reader = open(os.path.join(os.path.dirname(WIDGET_HX), "FcmHudRosterReader.hx"), encoding="utf-8").read()
+    check('_rosterReader.payload(key, d, _displayName, now, pushed)' in widget_src
+          and 'var row:Dynamic = rows[i];' in roster_reader
+          and 'result.skipped++' in roster_reader
+          and 'result.reason = "unreadable entries"' in roster_reader
           and 'snapshot phase threw' in widget_src,
-          "FCMChatWidget hardens native roster enumeration")
+          "shared collector hardens native roster enumeration for HUD and bridge")
+    check('\\x00' not in roster_reader and 'String.fromCharCode(0)' not in roster_reader,
+          "shared collector never embeds a NUL literal in the SWF string pool")
     check('clearNavigationLatches();' in widget_src
           and 'clearNavigationLatches();\n        _inputOpen = true;' in widget_src,
           "FCMChatWidget resets navigation ownership at input open/close boundaries")
@@ -822,12 +837,13 @@ if widget_src:
           "FCMChatWidget sends printable roster controls")
     check('function refreshRosterSnapshots' in widget_src
           and 'refreshRosterSnapshots(_rosterManager);' in widget_src
-          and '_rosterBoundaryPending' in widget_src,
-          "FCMChatWidget refreshes cached rosters and detects provider session boundaries")
+          and '_rosterSnapshots.sessionNames(' in widget_src
+          and '_rosterSnapshots.waitForRoster(' in widget_src,
+          "FCMChatWidget refreshes effective world rosters and waits through transient empties")
     check('if (_needsLink || _authState != "authenticated") return;' in widget_src
-          and 'if (_api.provider == FcmNativeApi.ZFE) return;' in widget_src
+          and 'if (!_api.supportsNonBlockingControl()) return;' in widget_src
           and 'FcmCommand.shouldSendRoster(true, _inputOpen' in widget_src,
-          "FCMChatWidget suppresses unsafe ZFE and editor-owned roster sends")
+          "FCMChatWidget suppresses blocking providers and editor-owned roster sends")
     check('NUL:String      = ctrlChar(0)' in widget_src
           and 'UNIT_SEP:String = ctrlChar(31)' in widget_src,
           "FCMChatWidget builds compatibility control bytes at runtime, not in the SWF string pool")
@@ -878,8 +894,9 @@ if widget_src:
           and '_history.clearServer();' in widget_src
           and '_history.startConnection();' in widget_src,
           "FCMChatWidget resets replay identity with the feed and native connection")
-    check('FcmCommand.shouldRebindRosterSession(previousSnapshot.join("|"), snapshotField)' in widget_src,
-          "FCMChatWidget compares each roster provider with its own previous snapshot")
+    check('FcmCommand.shouldRebindRosterSession(_lastRosterSent, namesField)' in widget_src
+          and '_rosterBoundaryPending' not in widget_src,
+          "FCMChatWidget uses the effective roster, not an auxiliary snapshot, for boundaries")
     check('return FcmConfig.extractJsonString(json, key);' in widget_src
           and 'extractJsonString' in widget_src,
           "FCMChatWidget accepts whitespace-formatted JSON string members")

@@ -50,5 +50,14 @@ class BridgePackageTests(unittest.TestCase):
         self.assertIn('mouseEnabled = false', source)
         self.assertIn('mouseChildren = false', source)
 
+    def test_session_policy_does_not_decode_or_retain_native_payloads(self):
+        state = (package.ROOT / 'FcmBridgeState.hx').read_text()
+        self.assertIn('observe(observation:FcmRosterObservation)', state)
+        self.assertIn('menu(observation:FcmMenuObservation)', state)
+        self.assertNotIn('data:Dynamic', state)
+        self.assertNotIn('provider:Dynamic', state)
+        self.assertNotIn('GetDataFromClient', state)
+        self.assertNotIn('rows[i]', state)
+
 
 if __name__ == '__main__': unittest.main()

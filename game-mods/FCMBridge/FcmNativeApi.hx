@@ -124,6 +124,15 @@ class FcmNativeApi {
     }
 
     /**
+     * Automatic world-roster traffic must never enter a synchronous ZFE request.
+     * xScal schedules chatInterface transport off the Scaleform frame; ZFE is safe
+     * only when its runtime explicitly advertises the dedicated async-control path.
+     */
+    public function supportsNonBlockingControl():Bool {
+        return provider == XSCAL || _runtimeInfo.indexOf("zfe-chat-async-control-v1") >= 0;
+    }
+
+    /**
      * Return whether the selected extender exposes the physical-key bridge.
      * Registration is bookkeeping only; it does not consume the key or alter
      * Fallout's ControlMap. FCM still applies its own Insert/input-open gate

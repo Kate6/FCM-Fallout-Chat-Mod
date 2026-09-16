@@ -85,6 +85,21 @@ redeploys the stack. (It does **not** use a manual deploy-token webhook; the
 per-app deploy token `…/api/deploy/compose/<token>` belongs to whichever compose
 owns that token — do not point a GitHub repo webhook at the prod compose's token.)
 
+### Manual deployment while auto-deploy is paused
+
+At the 2026-09-16 UTC auth-recovery deployment, hosted Dev was authoritative on the mothership,
+with Dokploy `autoDeploy=false` and `LAPTOP_DEV_AUTODEPLOY=false`. Verify current authority
+before every deployment; these are dated observations, not permission to change either flag.
+Dokploy's **redeploy** action rebuilt its existing checkout without fetching the new `dev`
+commit. A healthy container alone therefore did not prove that the fix was installed.
+
+For a maintainer-authorized manual deploy, inspect the Dev checkout and its local changes,
+fetch the approved commit, and fast-forward without resetting unrelated files. Preserve
+the environment's customized `deploy/dev/docker-compose.yml` (compare its checksum before
+and after), then redeploy only `fcm-dev-stack` with fresh volumes disabled. Confirm the
+checkout SHA, running image/source, external health, and the specific public-route regression.
+Never run this operation against the Prod compose or discard local volume/network settings.
+
 ---
 
 ## Secure remote access (the critical part)

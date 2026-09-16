@@ -13,7 +13,7 @@ test.afterEach(async ({ page, request }) => {
 test('loads the exact production widget artifact and records browser key delivery', async ({ page }) => {
   await page.goto('/?mode=artifact');
   await expect(page.locator('#status')).toHaveAttribute('data-state', 'ready', { timeout: 20_000 });
-  await expect(page.locator('#widget-version')).toHaveText('2.10.97');
+  await expect(page.locator('#widget-version')).toHaveText('2.10.103');
   await page.locator('#focus-stage').click();
   await page.keyboard.press('Insert');
   await page.keyboard.press('ArrowUp');
@@ -113,6 +113,33 @@ test('packages independent tab ranges, file-key precedence, ZFE synchronization,
 });
 
 for (const provider of ['xscal', 'zfe']) {
+  test(`preserves background bridge membership through ${provider} fast travel`, async ({ page }) => {
+    await page.goto(`/?mode=harness&provider=${provider}&scenario=bridge-fast-travel`);
+    await expect(page.locator('#log')).toContainText(`HARNESS bridge constructed provider=${provider}`);
+    await expect(page.locator('#log')).toContainText(/BRIDGE-ROSTER (PASS|FAIL)/, { timeout: 25_000 });
+    const log = await page.locator('#log').textContent();
+    expect(log).toContain(`BRIDGE-ROSTER PASS ${provider}`);
+    expect(log).not.toContain('BRIDGE-ROSTER FAIL');
+    expect(log).toContain('BRIDGE-EVENTS PASS fresh-push=preferred retry=deferred test-provider=rejected');
+    expect(log).toContain('BRIDGE-DIAGNOSTICS PASS cached=read-only labels=private-data-free');
+    expect(log).toContain('BRIDGE-ERRORS PASS getter=E1014 nested-names=rejected subscribe=E1006');
+    for (let cycle = 0; cycle < 3; cycle++) {
+      expect(log).toContain(`BRIDGE-CYCLE PASS ${cycle} source=PublicTeamsData nonce=preserved controls=unchanged`);
+    }
+  });
+
+  test(`preserves same-server fast-travel history through ${provider}`, async ({ page }) => {
+    await page.goto(`/?mode=harness&provider=${provider}&scenario=fast-travel`);
+    await expect(page.locator('#log')).toContainText(`HARNESS widget constructed provider=${provider} scenario=fast-travel`);
+    await expect(page.locator('#log')).toContainText(/ROSTER-SCENARIO (PASS|FAIL)/, { timeout: 25_000 });
+    const log = await page.locator('#log').textContent();
+    expect(log).toContain(`ROSTER-SCENARIO PASS ${provider}`);
+    expect(log).not.toContain('ROSTER-SCENARIO FAIL');
+    for (let cycle = 0; cycle < 3; cycle++) {
+      expect(log).toContain(`ROSTER-CYCLE PASS ${cycle} source=PublicTeamsData history=preserved controls=unchanged`);
+    }
+  });
+
   test(`boots and accepts compose controls through the ${provider} provider contract`, async ({ page }) => {
     await page.goto(`/?mode=harness&provider=${provider}`);
     await expect(page.locator('#status')).toHaveAttribute('data-state', 'ready', { timeout: 20_000 });
@@ -166,15 +193,37 @@ for (const provider of ['xscal', 'zfe']) {
 test('keeps xScal object calls and ZFE JSON dispatch as separate contracts', async () => {
   const zfeSource = await readFile(new URL('../haxe/MockZfe.hx', import.meta.url), 'utf8');
   const widgetSource = await readFile(new URL('../../FCMChatWidget.hx', import.meta.url), 'utf8');
+  const wireSource = await readFile(new URL('../../FcmWire.hx', import.meta.url), 'utf8');
   expect(zfeSource).toContain('Reflect.setField(out, "call"');
   expect(zfeSource).toContain('haxe.Json.parse(Std.string(payload))');
   expect(zfeSource).toContain('zfe-chat-online-v1');
   expect(zfeSource).toContain('zfe-chat-async-send-v1');
+  expect(zfeSource).toContain('zfe-chat-async-control-v1');
   expect(zfeSource).toContain('version:"0.15.0"');
   expect(zfeSource).toContain('verb == "consumeChatInputSubmitted"');
   expect(zfeSource).toContain('handleKey(keyCode:Int, charCode:Int, down:Bool)');
   expect(widgetSource).toContain('FONT_BODY:String = "$MAIN_Font"');
   expect(widgetSource).not.toContain('FONT_BODY:String = "$MAIN_Font_Light"');
+  expect(wireSource).toContain('FcmJson.parse(raw)');
+  expect(wireSource).not.toContain('haxe.Json');
+});
+
+test('packages capability-gated Server-room controls for ZFE and xScal', async () => {
+  const [widgetSource, apiSource, zfeSource, xscalSource] = await Promise.all([
+    readFile(new URL('../../FCMChatWidget.hx', import.meta.url), 'utf8'),
+    readFile(new URL('../../../FcmNativeApi.hx', import.meta.url), 'utf8'),
+    readFile(new URL('../haxe/MockZfe.hx', import.meta.url), 'utf8'),
+    readFile(new URL('../haxe/MockXscal.hx', import.meta.url), 'utf8'),
+  ]);
+  expect(apiSource).toContain('supportsNonBlockingControl');
+  expect(apiSource).toContain('zfe-chat-async-control-v1');
+  expect(widgetSource).toContain('if (!_api.supportsNonBlockingControl()) return;');
+  expect(widgetSource).not.toContain('if (_api.provider == FcmNativeApi.ZFE) return;');
+  expect(zfeSource).toContain('zfe-chat-async-control-v1');
+  expect(zfeSource).toContain('status:"queued", requestId:requestId');
+  expect(widgetSource).toContain('FcmWire.asyncSendCompletion(obj)');
+  expect(widgetSource).toContain('_zfePendingSends.set(queuedRequestId, localSendId)');
+  expect(xscalSource).toContain('FCMCTL/1/SERVER-READY:');
 });
 
 test('fits the complete HUD stage inside its responsive viewport', async ({ page }) => {

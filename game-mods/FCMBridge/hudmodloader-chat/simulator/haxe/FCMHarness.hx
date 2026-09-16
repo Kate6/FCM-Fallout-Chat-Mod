@@ -10,6 +10,7 @@ class FCMHarness extends Sprite {
     public var BSUIDataManager:Dynamic;
     var widget:FCMChatWidget;
     var provider:String = "xscal";
+    var scenario:String = "";
 
     static function main():Void {
         flash.Lib.current.addChild(new FCMHarness());
@@ -19,21 +20,20 @@ class FCMHarness extends Sprite {
         super();
         addEventListener(Event.ADDED_TO_STAGE, onAddedToStage);
         try {
-            var requested = Std.string(loaderInfo.parameters.provider).toLowerCase();
+            // This Sprite is not attached yet; its loaderInfo is null in AVM2. Read the
+            // loaded movie's parameters so ZFE/scenario tests cannot silently run xScal.
+            var parameters = flash.Lib.current.loaderInfo.parameters;
+            var requested = Std.string(parameters.provider).toLowerCase();
             if (requested == "zfe") provider = "zfe";
+            scenario = Std.string(parameters.scenario);
         } catch (_:Dynamic) {}
         if (provider == "zfe") __ZFE = MockZfe.root();
         else __SFECodeObj = MockXscal.root();
-        MockXscal.loadScenario("/hosted-dev-snapshot.json");
-        BSUIDataManager = MockGameData.manager();
+        // Deterministic regressions must never load a user's hosted snapshot or send live chat.
+        if (scenario != "fast-travel" && scenario != "bridge-fast-travel") MockXscal.loadScenario("/hosted-dev-snapshot.json");
+        BSUIDataManager = scenario == "bridge-fast-travel" ? MockBridgeGameData.manager() : MockGameData.manager();
         // Keep the class linked so the production getDefinitionByName path resolves it.
         var sharedClass:Class<SharedHUDTools> = SharedHUDTools;
-        try {
-            widget = new FCMChatWidget();
-            addChild(widget);
-        } catch (error:Dynamic) {
-            SimLog.emit("HARNESS widget construction failed: " + Std.string(error));
-        }
         if (ExternalInterface.available) {
             ExternalInterface.addCallback("simDispatch", simDispatch);
             ExternalInterface.addCallback("simSubmit", simSubmit);
@@ -47,6 +47,25 @@ class FCMHarness extends Sprite {
         removeEventListener(Event.ADDED_TO_STAGE, onAddedToStage);
         stage.addEventListener(KeyboardEvent.KEY_DOWN, onStageKeyDown, false, 1000);
         stage.addEventListener(KeyboardEvent.KEY_UP, onStageKeyUp, false, 1000);
+        // FCMChatWidget reads stage/root provider surfaces during construction. Creating it
+        // in this harness's constructor leaves stage null under Ruffle and silently produces
+        // a blank preview, while browser-side key probes continue to pass.
+        try {
+            if (scenario == "bridge-fast-travel") {
+                var bridge = new FCMServerBridge();
+                addChild(bridge); // Never coinstall the visible widget in a background-bridge scenario.
+                flash.Lib.trace("HARNESS bridge constructed provider=" + provider);
+                BridgeRosterScenario.start(bridge, provider);
+                return;
+            }
+            widget = new FCMChatWidget();
+            addChild(widget);
+            flash.Lib.trace("HARNESS widget constructed provider=" + provider + " scenario=" + scenario);
+            if (scenario == "fast-travel") RosterScenario.start(widget, provider);
+        } catch (error:Dynamic) {
+            flash.Lib.trace("HARNESS widget construction failed: " + Std.string(error));
+            SimLog.emit("HARNESS widget construction failed: " + Std.string(error));
+        }
     }
 
     function onStageKeyDown(event:KeyboardEvent):Void {
@@ -105,6 +124,9 @@ class FCMHarness extends Sprite {
             callCount: MockXscal.callCount,
             pollCount: MockXscal.pollCount,
             historyDoneDeliveries: MockXscal.historyDoneDeliveries,
+            serverControlCount: MockXscal.serverControlCount,
+            zfeQueuedSendCount: MockZfe.queuedSendCount,
+            asyncCompletionDeliveries: MockXscal.asyncCompletionDeliveries,
             logCount: SimLog.count
         });
     }

@@ -69,6 +69,39 @@ separate `~/.fcm/hosted-dev` profile so it cannot reuse or modify the installed
 Prod overlay's session. Never copy this key into the repository or use it with a
 packaged production build.
 
+#### Packaged Dev overlay for bridge acceptance
+
+Use `dist:dev`, not ordinary `dist:linux`/`npm start` (which default to Prod). Build an unpacked
+Linux candidate without overwriting an installed application:
+
+```bash
+cd cross-platform-overlay
+npm run test:unit
+npm run dist:dev -- --linux --dir
+node -e 'const a=require("@electron/asar"); const p=JSON.parse(a.extractFile("dist-electron/linux-unpacked/resources/app.asar","package.json")); console.log(p.productName,p.version,p.fcmChannel)'
+env -u ELECTRON_RUN_AS_NODE -u APPIMAGE -u APPDIR -u RENDERER_URL -u RELAY_HTTP -u RELAY_WS \
+  dist-electron/linux-unpacked/fallout-chat-mod \
+  --user-data-dir=/absolute/path/to/isolated-hosted-dev-profile
+```
+
+Replace the profile placeholder with your own explicit non-Prod path (this workstation uses
+`/home/devotek/.fcm/hosted-dev`). `fcmChannel` must be `qa`, with
+the intended package version; verify the startup log says `relayHost=dev.falloutchatmod.com`
+and the selected isolated `userData`. The product name is deliberately unchanged, so launching
+without `--user-data-dir` can reuse the **Prod** profile. Never copy Prod/native credentials.
+For a durable local install, copy the entire unpacked directory to a new versioned user-owned
+location and point a distinct **Hosted Dev** launcher at that executable **with the profile flag**.
+Keep the existing Prod launcher and process untouched. Stop only exact owned Dev processes when
+replacing them; Electron relaunches itself to XWayland on KDE, so verify the resulting executable
+path/PID rather than assuming the initial launcher PID is still the application.
+
+Non-portable `dist:dev` uses the existing QA Discord sign-in flow. Complete it in the browser;
+the backend's QA-role/build gate still applies. Do not consume `/api/auth/qa-status` in a parallel
+diagnostic script: it hands the login grant back exactly once and would strand the overlay.
+For FCMServerBridge acceptance, use the **same real linked account** on the Dev overlay and native
+bridge, not a synthetic persona. The Server tab is expected to be absent until an authenticated
+in-world bridge lease is confirmed. See the [bridge flow and acceptance matrix](../overlay/zfe/background-server-bridge.md).
+
 ---
 
 ## Per-Platform Setup
