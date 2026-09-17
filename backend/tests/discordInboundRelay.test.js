@@ -12,7 +12,7 @@ const mockClient = {
   once: mockOnce,
   login: jest.fn().mockResolvedValue('logged-in'),
   destroy: jest.fn(),
-  user: { tag: 'FCM#0001' },
+  user: { tag: 'FCM#0001', setPresence: jest.fn() },
   channels: { fetch: jest.fn() },
   guilds: { cache: { first: jest.fn() } },
 };
@@ -55,6 +55,7 @@ const mockAttachCosmetics = jest.fn(async (payload) => {
 });
 
 jest.mock('discord.js', () => ({
+  ActivityType: { Custom: 4 },
   Client: jest.fn(() => mockClient),
   GatewayIntentBits: {
     Guilds: 1,
@@ -79,6 +80,15 @@ jest.mock('../src/config/environment', () => ({
 }));
 
 jest.mock('../src/config/prisma', () => ({ __esModule: true, default: mockPrisma }));
+const mockActivity = jest.fn(async () => {});
+const mockGlobalCount = jest.fn(async () => 17);
+jest.mock('../src/services/onlinePresenceService', () => ({
+  registerLocalPresenceSource: jest.fn(), getLocalOnlineUserIds: () => [],
+  noteUserConnected: jest.fn(), noteUserDisconnected: jest.fn(),
+  noteUserPendingDisconnect: jest.fn(), notePendingDisconnectSuppressed: jest.fn(),
+  noteDiscordMessageActivity: (...args) => mockActivity(...args),
+  getGlobalOnlineCount: (...args) => mockGlobalCount(...args),
+}));
 jest.mock('../src/config/redis', () => ({
   getRedisClient: jest.fn().mockResolvedValue(mockRedis),
 }));
@@ -107,7 +117,9 @@ jest.mock('../src/services/wikiCatalogService', () => ({
   bestMatch: jest.fn(),
 }));
 
+jest.useFakeTimers();
 const service = require('../src/services/discordService');
+afterAll(() => { jest.clearAllTimers(); jest.useRealTimers(); });
 
 beforeAll(async () => {
   service.setBroadcast(mockBroadcast);
@@ -115,6 +127,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  mockActivity.mockClear();
   mockBroadcast.mockClear();
   mockQueueAdd.mockClear();
   mockAttachCosmetics.mockClear();
@@ -126,6 +139,31 @@ beforeEach(() => {
     username: 'VaultDweller',
     chatName: null,
   });
+});
+
+test('bot presence uses the shared count and reports unavailable instead of false zero', async () => {
+  jest.useFakeTimers();
+  try {
+    mockGlobalCount.mockResolvedValueOnce(17).mockRejectedValueOnce(new Error('redis offline'));
+    mockHandlers.get('once:ready')();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(mockClient.user.setPresence).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'online', activities: [expect.objectContaining({ name: 'Watching 17 dwellers' })] }));
+    await jest.advanceTimersByTimeAsync(60_000);
+    expect(mockClient.user.setPresence).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'online', activities: [expect.objectContaining({ name: 'Active user count unavailable' })] }));
+  } finally { jest.clearAllTimers(); jest.useRealTimers(); }
+});
+
+test('only human posts in linked channels refresh activity, including media-only posts', async () => {
+  const handler = mockHandlers.get('messageCreate');
+  const message = { id: 'presence-fixture', channelId: 'discord-channel-id', content: '',
+    author: { id: '123456789012345678', bot: false }, webhookId: null, embeds: [], attachments: new Map() };
+  await handler(message);
+  expect(mockActivity).toHaveBeenCalledWith(message.author.id);
+  await handler(message); expect(mockActivity).toHaveBeenCalledTimes(2);
+  await handler({ ...message, channelId: 'unlinked' });
+  await handler({ ...message, author: { ...message.author, bot: true } });
+  await handler({ ...message, webhookId: 'webhook' });
+  expect(mockActivity).toHaveBeenCalledTimes(2);
 });
 
 test('Discord inbound messages carry relaySeq into live broadcast and history persistence', async () => {

@@ -2,6 +2,7 @@ import { bridgeBindingId, resolveOverlayBridge, type BridgeBinding, type BridgeR
 import { getServerHistory, type ServerRoomEvent, type ServerEventEnvelope } from '../services/relay/serverChat';
 import { sendServerMessage, ServerMessageError } from '../services/relay/serverMessageService';
 import type { LocalExportBridge } from '../services/relay/localExportBridge';
+import { readRoster } from '../services/relay/worldRosterService';
 
 type Frame = { type: string; payload: Record<string, unknown> };
 interface Dependencies {
@@ -92,6 +93,20 @@ export class BridgeConnection {
         tag: e.tag, nameColor: e.nameColor, starColor: e.starColor, badges: e.supporterStar ? ['supporter'] : [] });
     }
     return rows;
+  }
+
+  /** Count only this authenticated socket's fresh observation. Never expose names
+   * or accept a client-supplied room; revalidate after the asynchronous read. */
+  async observedPlayerStats(read = readRoster): Promise<{ bindingId: string | null; observedPlayers: number | null }> {
+    const empty = { bindingId: null, observedPlayers: null };
+    if (this.disposed || !this.watched) return empty;
+    const epoch = this.epoch;
+    const binding = await this.refresh();
+    if (!binding) return empty;
+    const roster = await read(binding.relayUserId);
+    if (!roster || roster.requestId !== binding.requestId || !(await this.matches(binding, epoch))) return empty;
+    const names = new Set([roster.name, ...roster.seen].filter(Boolean));
+    return { bindingId: bridgeBindingId(binding), observedPlayers: names.size ? Math.min(24, names.size) : null };
   }
   watch(mode?: unknown): Promise<void> {
     // Once opted in, a missing/invalid export NEVER falls back to account leases.

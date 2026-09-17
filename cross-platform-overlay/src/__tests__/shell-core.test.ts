@@ -463,6 +463,12 @@ describe('shouldResetIdleOnVisibility', () => {
 });
 
 describe('shellToWebSettings (mirror)', () => {
+  it('defaults stats to hover and mirrors independent always-visible choices', () => {
+    expect(shellToWebSettings(input)).toMatchObject({ alwaysShowOnlineStats: false, alwaysShowServerStats: false });
+    expect(shellToWebSettings({ ...input, alwaysShowOnlineStats: true, alwaysShowServerStats: false }))
+      .toMatchObject({ alwaysShowOnlineStats: true, alwaysShowServerStats: false });
+    expect(shellToWebSettings({ ...input, alwaysShowServerStats: true }).alwaysShowServerStats).toBe(true);
+  });
   it('persists independent font choice and normalizes unknown saved fonts', () => {
     expect(shellToWebSettings({ ...input, fontId: 'verdana' }).fontId).toBe('verdana');
     expect(shellToWebSettings({ ...input, fontId: 'removed-font' as never }).fontId).toBe('theme');

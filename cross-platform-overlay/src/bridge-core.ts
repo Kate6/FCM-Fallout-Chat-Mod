@@ -219,7 +219,7 @@ export function createWebSocketShim(bridge: BridgeWs) {
   let wsSeq = 0;
   const liveSockets = new Map<string, ProxiedWebSocket>();
 
-  class ProxiedWebSocket {
+  class ProxiedWebSocket extends EventTarget {
     static readonly CONNECTING = 0;
     static readonly OPEN = 1;
     static readonly CLOSING = 2;
@@ -238,6 +238,7 @@ export function createWebSocketShim(bridge: BridgeWs) {
     onerror: ((ev: any) => void) | null = null;
 
     constructor(url: string) {
+      super();
       this.url = url;
       this._id = `ws${++wsSeq}`;
       liveSockets.set(this._id, this);
@@ -246,17 +247,15 @@ export function createWebSocketShim(bridge: BridgeWs) {
     get id(): string { return this._id; }
     send(data: string) { bridge.wsSend(this._id, data); }
     close() { this.readyState = this.CLOSING; bridge.wsClose(this._id); }
-    addEventListener() { /* not used by ChatOverlay */ }
-    removeEventListener() { /* not used by ChatOverlay */ }
-
-    _fireOpen() { this.readyState = this.OPEN; this.onopen?.({ type: 'open' }); }
-    _fireMessage(data: string) { this.onmessage?.({ data }); }
+    _fireOpen() { this.readyState = this.OPEN; this.onopen?.({ type: 'open' }); this.dispatchEvent(new Event('open')); }
+    _fireMessage(data: string) { this.onmessage?.({ data }); this.dispatchEvent(new MessageEvent('message', { data })); }
     _fireClose(code: number, reason: string) {
       this.readyState = this.CLOSED;
       liveSockets.delete(this._id);
       this.onclose?.({ code, reason });
+      this.dispatchEvent(new CloseEvent('close', { code, reason }));
     }
-    _fireError(message: string) { this.onerror?.({ message }); }
+    _fireError(message: string) { this.onerror?.({ message }); this.dispatchEvent(new Event('error')); }
   }
 
   bridge.onWsOpen((m) => liveSockets.get(m.id)?._fireOpen());

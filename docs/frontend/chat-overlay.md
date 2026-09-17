@@ -1,5 +1,9 @@
 # ChatOverlay — One Component, Three Surfaces
 
+Desktop-only channel ordering, visibility and startup defaults are documented in
+[overlay channel customization](../overlay/subtab-customization-and-bridge-review.md).
+These controls are gated by the overlay shell; they do not change website or HUD UI.
+
 **File:** `admin-dashboard/src/features/chat/ChatOverlay.tsx`
 
 This is the single source of truth for the chat UI. It is rendered by all three
@@ -665,10 +669,15 @@ users, who render byte-identically to before the feature existed.
   copies (`content: attr(...)`).
 
 Effects live in `nameEffects.css` as **pure CSS**. No JS animation library may enter
-this component's import graph — the feed is virtualized and memoized, and the Electron
+this component's import graph — the feed retains a bounded message DOM, and the Electron
 overlay draws on top of a running game. `noMotionInOverlay.test.ts` walks the import
 graph transitively and fails CI if Motion ever becomes reachable from ChatOverlay.
 Motion IS used in `CosmeticsPanel`, which the overlay never loads.
+
+Shimmer uses one stepped whole-name color highlight per eight-second cycle (0.48 seconds
+highlighted), with a stable phase and a fixed outline. Character spans are inert; there
+are no per-letter animations or animated shadows. Retained names outside the viewport
+pause, as do names when the document/native overlay reports hidden.
 
 Animated effects compose with the opacity-aware halo; static names keep the existing
 multi-layer `textOutline`. The effect halo becomes lighter with transparent overlay chrome,

@@ -22,6 +22,10 @@ its successful runs do not accept this new storage path.
 
 ## Install and authentication
 
+See the [overlay channel customization and bridge safety review](../subtab-customization-and-bridge-review.md)
+for the current local review, residual roster trust limitation, and pending native
+performance acceptance. Channel visibility/default controls affect only the overlay.
+
 Install the bridge BA2 through normal HUDModLoader archive/registry configuration,
 then sign into the matching desktop overlay only. No bridge login, linking code,
 pairing operation, helper process or extra service. Follow the package

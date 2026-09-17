@@ -73,6 +73,8 @@ export interface ShellSettings {
   textOpacity: number;      // 0.3..1.0
   fontSize: number;         // px
   showHints: boolean;
+  alwaysShowOnlineStats: boolean;
+  alwaysShowServerStats: boolean;
   // Shell-managed (no native component support → applied as CSS layers):
   backgroundOpacity: number; // 0..1 extra background dim
   scanlineIntensity: number; // 0..1 (default 0.08)
@@ -158,6 +160,8 @@ export const DEFAULT_SHELL_SETTINGS: ShellSettings = {
   textOpacity: 1.0,
   fontSize: 14,
   showHints: true,
+  alwaysShowOnlineStats: false,
+  alwaysShowServerStats: false,
   backgroundOpacity: 0,
   // Low default: scanline divs are dark (see index.html), so 0.08 gives a faint
   // CRT texture rather than heavy bars.
@@ -1524,6 +1528,10 @@ function buildSettingsPanel() {
     });
     hint(s, 'Click a binding then press your desired key combo. Press Esc to clear it entirely. Unbound keys are hidden from the hint bar.');
 
+    heading(s, 'LIVE STATUS');
+    toggle(s, 'Always show FCM online count', () => currentSettings.alwaysShowOnlineStats, v => commit({ alwaysShowOnlineStats: v }));
+    toggle(s, 'Always show observed server players', () => currentSettings.alwaysShowServerStats, v => commit({ alwaysShowServerStats: v }));
+    hint(s, 'Otherwise hover or focus Live to see counts. Server counts require a confirmed bridge and reflect observed players, not a guaranteed full world roster.');
     heading(s, 'FILTERS');
     s.append(accountBlockField({
       label: 'Blocked users',
@@ -1531,15 +1539,10 @@ function buildSettingsPanel() {
     }));
     hint(s, 'Start typing to find an existing user, then pick them to block. Blocks sync to your account and hide them from chat + member lists everywhere. Click ✕ on a chip to unblock.');
 
-    s.append(chipField({
-      label: 'Hidden channels',
-      placeholder: 'Type a channel to hide…',
-      get: () => currentSettings.channelFilters,
-      set: (v) => commit({ channelFilters: v }),
-      candidates: collectChannels,
-      allowCustom: false,
-    }));
-    hint(s, 'Pick channels to hide from the feed. Click ✕ on a chip to show it again.');
+    const channelLayout = el('button', {}, 'Channel layout and hidden channels');
+    channelLayout.addEventListener('click', () => window.dispatchEvent(new Event('fcm-subtab-settings')));
+    s.append(channelLayout);
+    hint(s, 'Right-click a channel to hide it or make it the default. Restore hidden channels or reset the layout here.');
 
     s.append(chipField({
       label: 'Notify keywords',

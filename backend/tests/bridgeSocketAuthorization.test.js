@@ -1,4 +1,5 @@
 const { EventEmitter } = require('events');
+const { readFileSync } = require('node:fs');
 const { WebSocket } = require('ws');
 const store = new Map();
 const redis = {
@@ -13,14 +14,62 @@ jest.mock('../src/config/prisma', () => ({ __esModule: true, default: {
   user: { findUnique: jest.fn(async () => ({ id: 'account-a', username: 'Alice', isBanned: false, isMuted: false })) },
 } }));
 jest.mock('../src/services/blockService', () => ({ getBlockedIds: jest.fn(async () => new Set()) }));
+jest.mock('../src/services/commandService', () => ({ tryHandleCommand: jest.fn(async () => null) }));
+jest.mock('../src/controllers/healthController', () => ({ incrementMessageCount: jest.fn(), setFullscreenStatus: jest.fn(), removeFullscreenClient: jest.fn() }));
+jest.mock('../src/services/onlinePresenceService', () => ({
+  getGlobalOnlineCount: jest.fn(async () => 17), getLocalOnlineUserIds: () => [],
+  registerLocalPresenceSource: jest.fn(), noteUserConnected: jest.fn(), noteUserDisconnected: jest.fn(),
+  noteUserPendingDisconnect: jest.fn(), notePendingDisconnectSuppressed: jest.fn(),
+}));
 jest.mock('../src/services/userRoleService', () => ({ getEffectiveRole: jest.fn(async () => 'user'), isPrivilegedRole: jest.fn(() => false) }));
 const instances = [];
 jest.mock('../src/websocket/bridgeConnection', () => ({ BridgeConnection: class {
-  constructor(...args) { this.args = args; this.watch = jest.fn(); this.observe = jest.fn(); this.leave = jest.fn(); this.dispose = jest.fn(); instances.push(this); }
+  constructor(...args) { this.args = args; this.watch = jest.fn(); this.observe = jest.fn(); this.leave = jest.fn(); this.dispose = jest.fn(); this.observedPlayerStats = jest.fn(async () => ({ bindingId: null, observedPlayers: null })); instances.push(this); }
 } }));
 jest.mock('../src/services/relay/localExportBridge', () => ({ LocalExportBridge: class { constructor(...args) { this.args = args; } } }));
+// Imported services own maintenance intervals; keep them test-owned from import.
+jest.useFakeTimers();
 const { handleConnection } = require('../src/websocket/handlers');
 const sockets = [];
+test('presence counts require live desktop session and ignore client room authority', async () => {
+  const ws = await connect('/', { 'x-auth-token': 'desktop-token' });
+  const bridge = instances.at(-1);
+  await control(ws, 'presence:stats', { requestId: 'one', room: 'forged' });
+  expect(bridge.observedPlayerStats).toHaveBeenCalledWith();
+  expect(ws.send.mock.calls.map(([raw]) => JSON.parse(raw)).find(f => f.type === 'presence:stats').payload)
+    .toMatchObject({ requestId: 'one', bindingId: null, observedPlayers: null });
+  store.delete('session:desktop-token'); await control(ws, 'presence:stats', { requestId: 'two' });
+  expect(bridge.observedPlayerStats).toHaveBeenCalledTimes(1);
+});
+test('presence counts reject browser tickets, invalid request IDs and superseded sockets', async () => {
+  const old = await connect('/', { 'x-auth-token': 'desktop-token' }); const oldBridge = instances.at(-1);
+  const next = await connect('/', { 'x-auth-token': 'desktop-token' }); const nextBridge = instances.at(-1);
+  await control(old, 'presence:stats', { requestId: 'valid' });
+  await control(next, 'presence:stats', { requestId: 'x'.repeat(65) });
+  expect(oldBridge.observedPlayerStats).not.toHaveBeenCalled(); expect(nextBridge.observedPlayerStats).not.toHaveBeenCalled();
+  store.set('ws_ticket:browser', JSON.stringify({ type: 'web', userId: '10000000-0000-4000-8000-000000000001' }));
+  const browser = await connect('/?ticket=browser'); const browserBridge = instances.at(-1);
+  await control(browser, 'presence:stats', { requestId: 'valid' }); expect(browserBridge.observedPlayerStats).not.toHaveBeenCalled();
+});
+test('presence requests are rate bounded and expire before reply', async () => {
+  const ws = await connect('/', { 'x-auth-token': 'desktop-token' }); const bridge = instances.at(-1);
+  let count = 0;
+  redis.incr.mockImplementation(async key => key.startsWith('rl_ws:presence-stats:') ? ++count : 1);
+  try {
+    for (let i = 0; i < 9; i++) await control(ws, 'presence:stats', { requestId: String(i) });
+    expect(bridge.observedPlayerStats).toHaveBeenCalledTimes(4);
+  } finally { redis.incr.mockImplementation(async () => 1); }
+  bridge.observedPlayerStats.mockImplementation(async () => { store.delete('session:desktop-token'); return { bindingId: null, observedPlayers: null }; });
+  const before = ws.send.mock.calls.length;
+  await control(ws, 'presence:stats', { requestId: 'expired-during-read' });
+  expect(ws.send.mock.calls.length).toBe(before);
+});
+test('chat receipt diagnostics never include raw message text, account or room identifiers', () => {
+  const source = readFileSync(require.resolve('../src/websocket/handlers'), 'utf8');
+  const diagnostic = source.slice(source.lastIndexOf('logger.info({', source.indexOf("}, '[chat:send] received')")), source.indexOf("}, '[chat:send] received')"));
+  expect(diagnostic).toContain('contentLength:');
+  expect(diagnostic).not.toMatch(/\b(userId|username|channelId|content)\s*:/);
+});
 async function connect(url, headers = {}) {
   const ws = new EventEmitter(); ws.readyState = WebSocket.OPEN;
   ws.send = jest.fn(); ws.close = jest.fn(); ws.ping = jest.fn(); ws.terminate = jest.fn();
@@ -29,8 +78,8 @@ async function connect(url, headers = {}) {
 async function control(ws, type, payload) {
   for (const listener of ws.listeners('message')) await listener(Buffer.from(JSON.stringify({ type, payload })));
 }
-beforeEach(() => { store.clear(); instances.length = 0; store.set('session:desktop-token', 'account-a'); });
-afterEach(() => { for (const ws of sockets.splice(0)) { ws.readyState = WebSocket.CLOSED; ws.emit('close'); } });
+beforeEach(() => { jest.useFakeTimers(); store.clear(); instances.length = 0; store.set('session:desktop-token', 'account-a'); });
+afterEach(() => { for (const ws of sockets.splice(0)) { ws.readyState = WebSocket.CLOSED; ws.emit('close'); } jest.clearAllTimers(); jest.useRealTimers(); });
 
 test('only header-authenticated desktop gets local authority and accepts new controls', async () => {
   const ws = await connect('/', { 'x-auth-token': 'desktop-token' });
@@ -75,4 +124,15 @@ test('superseded socket cannot mutate newer socket membership', async () => {
   expect(first.observe).not.toHaveBeenCalled(); expect(first.leave).not.toHaveBeenCalled();
   await control(fresh, 'client:status', { inGame: true });
   await control(fresh, 'bridge:observe', {}); expect(second.observe).toHaveBeenCalledTimes(1);
+});
+
+test('observation flood is bounded before dispatch to the room coordinator', async () => {
+  const ws = await connect('/', { 'x-auth-token': 'desktop-token' });
+  await control(ws, 'client:status', { inGame: true });
+  let count = 0;
+  redis.incr.mockImplementation(async key => key.startsWith('rl_ws:bridge-observe:') ? ++count : 1);
+  try {
+    for (let index = 0; index < 25; index++) await control(ws, 'bridge:observe', { sequence: index + 1 });
+    expect(instances.at(-1).observe).toHaveBeenCalledTimes(12);
+  } finally { redis.incr.mockImplementation(async () => 1); }
 });

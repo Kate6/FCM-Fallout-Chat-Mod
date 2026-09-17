@@ -1,5 +1,14 @@
 # Electron Overlay — Overview
 
+Header actions and online counts: [header controls](header-controls.md).
+
+Channel controls and review status: [sub-tab customization and bridge safety](subtab-customization-and-bridge-review.md).
+
+Performance work: [idle renderer performance spec](idle-renderer-performance-spec.md)
+defines the desktop CPU investigation, draft budgets and regression gates.
+The [implementation and profiling results](idle-renderer-performance-results.md) distinguish
+verified local regressions from pending native performance acceptance.
+
 Fallout Chat Mod ships a transparent, frameless Electron application (`cross-platform-overlay/`) that renders the community chat overlay above Fallout 76 on Windows and Linux. It is built and maintained as a standalone package that mounts the **same** React component the website uses.
 
 ---

@@ -2,6 +2,7 @@ jest.mock('../src/services/relay/overlayServerBridge', () => ({
   bridgeBindingId: b => `${b.relayUserId}/${b.requestId}/${b.room}`, resolveOverlayBridge: jest.fn(),
 }));
 jest.mock('../src/services/relay/serverChat', () => ({ getServerHistory: jest.fn() }));
+jest.mock('../src/services/relay/worldRosterService', () => ({ readRoster: jest.fn() }));
 jest.mock('../src/services/relay/serverMessageService', () => ({ sendServerMessage: jest.fn(), ServerMessageError: class extends Error {} }));
 const { BridgeConnection } = require('../src/websocket/bridgeConnection');
 const { bridgeBindingId } = require('../src/services/relay/overlayServerBridge');
@@ -19,6 +20,21 @@ function setup() {
 test('does not subscribe without an authenticated socket watch', async () => {
   const s = setup(); await s.bridge.receive(envelope(event()));
   expect(s.frames).toEqual([]); expect(s.deps.resolve).not.toHaveBeenCalled();
+});
+test('stats require watched fresh binding and expose counts only', async () => {
+  const s = setup();
+  const read = jest.fn(async () => ({ name: 'alice', seen: ['alice', 'bob'], requestId: binding.requestId }));
+  expect(await s.bridge.observedPlayerStats(read)).toEqual({ bindingId: null, observedPlayers: null });
+  expect(read).not.toHaveBeenCalled(); await s.bridge.watch();
+  expect(await s.bridge.observedPlayerStats(read)).toEqual({ bindingId: bridgeBindingId(binding), observedPlayers: 2 });
+  read.mockResolvedValue({ name: 'alice', seen: ['bob'], requestId: 'stale' });
+  expect(await s.bridge.observedPlayerStats(read)).toEqual({ bindingId: null, observedPlayers: null });
+});
+test('stats discard reads after room change or teardown', async () => {
+  const s = setup(); await s.bridge.watch(); const gate = deferred();
+  const pending = s.bridge.observedPlayerStats(() => gate.promise); await new Promise(setImmediate);
+  s.bridge.dispose(); gate.resolve({ name: 'alice', seen: ['bob'], requestId: binding.requestId });
+  expect(await pending).toEqual({ bindingId: null, observedPlayers: null });
 });
 test('initial state precedes history and duplicate history/live frames render once', async () => {
   const s = setup(); s.deps.history.mockResolvedValue([event(), event()]);

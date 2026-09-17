@@ -1,7 +1,7 @@
 /* ============================================================================
  * Supporter name effects.
  *
- * Pure CSS on purpose. The chat feed is virtualized and memoized, and the Electron
+ * Pure CSS on purpose. The chat feed retains bounded message history, and the Electron
  * overlay renders transparently ON TOP of Fallout 76 — every frame of JS animation
  * work is taken from the game. Driving these from a JS animation library would cost
  * a per-name animation loop and break the feed's memoization for no visual gain.
@@ -221,46 +221,37 @@
   animation-delay: var(--fcm-effect-delay, 0s);
 }
 
-/* Shimmer: a slow, overlapping highlight wave across the real glyphs. The name is
-   rendered as one span per character by ChatOverlay so adjacent letters interpolate
-   through the selected colour toward white. This avoids background-clipped text:
-   Electron's Linux/X11 renderer can paint transparent text-fill as a black glyph. */
-@keyframes fcm-shimmer-letter {
-  0%, 20%, 100% {
+/* Shimmer: one brief, whole-name highlight per eight-second cycle. Only two
+   discrete color changes; no per-frame shadow interpolation or per-letter clocks.
+   Keep opaque glyphs: transparent text-fill can render black on Linux/X11. */
+@keyframes fcm-shimmer-highlight {
+  0%, 94%, 100% {
     color: var(--fcm-fx-color);
-    text-shadow: var(--fcm-fx-outline);
   }
-  35% {
-    color: color-mix(in srgb, var(--fcm-fx-color) 72%, #fff);
-    text-shadow:
-      0 0 3px color-mix(in srgb, var(--fcm-fx-color) 58%, transparent),
-      var(--fcm-fx-outline);
+  88% {
+    color: color-mix(in srgb, var(--fcm-fx-color) 35%, #fff);
   }
-  50% {
-    color: #fff;
-    text-shadow:
-      0 0 4px color-mix(in srgb, var(--fcm-fx-color) 70%, transparent),
-      var(--fcm-fx-outline);
-  }
-  65% {
-    color: color-mix(in srgb, var(--fcm-fx-color) 72%, #fff);
-    text-shadow:
-      0 0 3px color-mix(in srgb, var(--fcm-fx-color) 58%, transparent),
-      var(--fcm-fx-outline);
-  }
+}
+
+/* Pause invisible cosmetics, not the feed or its live transport. Preserve phase
+   and resume the original effect when the name re-enters the viewport. */
+[data-fcm-motion-paused],
+[data-fcm-motion-paused]::before,
+[data-fcm-motion-paused]::after,
+[data-fcm-motion-paused] .fcm-shimmer-letter {
+  animation-play-state: paused !important;
 }
 
 .fcm-name-fx--shimmer {
   color: var(--fcm-fx-color);
-  /* Each letter owns the shimmer shadow; keeping a second parent shadow doubles the
-     dark halo and is especially visible while the overlay background is transparent. */
-  text-shadow: none;
+  text-shadow: var(--fcm-fx-outline);
+  animation: fcm-shimmer-highlight 8s steps(1, end) infinite;
+  animation-delay: var(--fcm-effect-delay, 0s);
 }
 
 .fcm-name-fx--shimmer .fcm-shimmer-letter {
-  color: var(--fcm-fx-color);
-  animation: fcm-shimmer-letter 8s linear infinite;
-  animation-delay: calc(var(--fcm-effect-delay, 0s) - (var(--fcm-shimmer-index) * 0.22s));
+  /* Existing glyph spans remain inert; the name owns color and its static outline. */
+  color: inherit;
 }
 
 /* ── Reduced motion / viewer opt-out ─────────────────────────────────────── */
@@ -273,6 +264,7 @@
   .fcm-name-fx--glow-pulse,
   .fcm-name-fx--crt-phosphor,
   .fcm-name-fx--glitch,
+  .fcm-name-fx--shimmer,
   .fcm-name-fx--chroma-split {
     animation: none !important;
   }
@@ -291,9 +283,8 @@
   }
 
   .fcm-name-fx--shimmer {
-    /* The static fallback is painted by the letter spans; do not add a second
-       parent halo after the overlay has already adapted each letter's outline. */
-    text-shadow: none;
+    color: var(--fcm-fx-color);
+    text-shadow: var(--fcm-fx-outline);
   }
 
   .fcm-name-fx--crt-phosphor,
@@ -319,6 +310,7 @@
 .fcm-name-fx--glow-pulse.fcm-no-name-motion,
 .fcm-name-fx--crt-phosphor.fcm-no-name-motion,
 .fcm-name-fx--glitch.fcm-no-name-motion,
+.fcm-name-fx--shimmer.fcm-no-name-motion,
 .fcm-name-fx--chroma-split.fcm-no-name-motion {
   animation: none !important;
 }
@@ -338,7 +330,8 @@
 
 .fcm-name-fx--shimmer.fcm-no-name-motion {
   /* Keep viewer opt-out consistent with the reduced-motion fallback. */
-  text-shadow: none;
+  color: var(--fcm-fx-color);
+  text-shadow: var(--fcm-fx-outline);
 }
 
 .fcm-name-fx--crt-phosphor.fcm-no-name-motion,

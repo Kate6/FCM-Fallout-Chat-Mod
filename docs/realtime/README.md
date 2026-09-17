@@ -187,6 +187,33 @@ subscription removes that account unless an overlay connection remains; overlay
 reconnect grace is unchanged.
 
 Each backend publishes the union of its live transport registries to Redis every
-15 seconds with a 45-second expiry. `/online` unions those instance snapshots;
-website and bot activity counts use the local union, as before. This does not
-change overlay WebSocket routing, party in-game status, or private message delivery.
+15 seconds with a 45-second expiry. Bot activity, website `onlineNow`, online
+history snapshots, overlay `presence:stats`, and `/online` consume the same global
+union. Both scalar and batched Redis SCAN replies are supported.
+
+Human posts in configured Discord relay channels add **15 minutes of activity**,
+reset by each new message. Bots, webhooks, typing events, unlinked channels and
+FCM relay echoes do not refresh it. Media-only or filtered posts still indicate
+human activity; this grants no room membership or messaging authorization.
+Redis `fcm:online:discord-active` stores Discord IDs with expiry scores (not content
+or names), prunes expired entries, and expires after inactivity. Counts resolve
+Discord IDs to current FCM accounts in bounded batches, so connected overlay/HUD
+users and accounts merged during linking count once.
+
+Simultaneous aggregate reads share one in-flight request. Read failures retain the
+last successful count for at most 90 seconds; after that the count is unavailable,
+not a fabricated local/zero count. Successful empty snapshots are legitimate zero.
+The bot remains `online` with “Active user count unavailable” if counting fails;
+actual Discord gateway disconnects remain a separate operational condition.
+Bot updates run every 60 seconds, website caches for 30 seconds, and overlay
+stats refresh every 30 seconds while requested/visible, so displays may briefly
+lag one another. Discord activity expires 15 minutes after last message receipt.
+
+No overlay routing, party in-game presence or private message delivery changes.
+
+September 17 verification: regression first reproduced a false zero from batched
+SCAN. The fix and rolling expiry passed mocked-time tests and an isolated real
+Redis 7.4/node-redis 6.2 check (Discord-only identities, linking deduplication,
+cross-instance users and expiry refresh). The container was removed afterward.
+Eight affected backend suites passed (92 tests); hosted deployment and actual
+Discord gateway-disconnect diagnosis remain pending. No production changes made.

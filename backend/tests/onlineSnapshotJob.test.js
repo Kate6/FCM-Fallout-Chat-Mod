@@ -13,9 +13,9 @@ jest.mock('../dist/config/database', () => ({
   __esModule: true,
   query: jest.fn(),
 }));
-jest.mock('../dist/websocket/handlers', () => ({
+jest.mock('../dist/services/onlinePresenceService', () => ({
   __esModule: true,
-  getClientCount: jest.fn(() => 0),
+  getGlobalOnlineCount: jest.fn(async () => 0),
 }));
 
 const logger = require('../dist/config/logger').default;

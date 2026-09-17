@@ -31,6 +31,11 @@ import ImageLightbox from './components/ImageLightbox';
 import { OutboxQueue } from './outboxQueue';
 import { supporterBadge, supporterStarColor, SUPPORTER_STAR_GLYPH } from './supporterBadge';
 import { nameEffectMotion } from './nameEffectMotion';
+import { observeTabLayout } from './observeTabLayout';
+import { observeNameMotion } from './observeNameMotion';
+import { defaultTabTransition, emptyTabPreferences, fallbackTab, hideTab, moveTab, orderedTabs, replacementTab, tabKey, tabPreferenceScope } from './subtabPreferences';
+import { useSubtabPreferences } from './useSubtabPreferences';
+import { OverlayHeaderControls } from './OverlayHeaderControls';
 
 /**
  * Web-based chat overlay — identical to the desktop SkiaSharp overlay.
@@ -761,6 +766,8 @@ function Avatar({
 export type TimestampFormat = '12h' | '24h';
 
 interface WebOverlaySettings {
+  alwaysShowOnlineStats?: boolean;
+  alwaysShowServerStats?: boolean;
   themeId: string;
   fontId?: FontId;
   windowOpacity: number;
@@ -3799,6 +3806,11 @@ export default function ChatOverlay() {
   const [editPending, setEditPending] = useState(false);
   // Right-click menu for a joined-party sub-tab (Open / Invite / Leave|Delete).
   const [partyTabCtx, setPartyTabCtx] = useState<{ x: number; y: number; partyId: string } | null>(null);
+  const [subtabMenu, setSubtabMenu] = useState<{ id: string; scope: string; x: number; y: number } | null>(null);
+  const [subtabSettings, setSubtabSettings] = useState(false);
+  const [tabDrag, setTabDrag] = useState<{ source: string; target: string; parent: string; scope: string } | null>(null);
+  const suppressTabClick = useRef(false);
+  const pointerTabDrag = useRef<{ source: string; target: string; parent: string; scope: string; x: number; y: number; active: boolean } | null>(null);
   // Invite modal (in-overlay, opened from the member panel "+ INVITE"). Holds
   // the partyId being invited to.
   const [inviteModalFor, setInviteModalFor] = useState<{ partyId: string } | null>(null);
@@ -4099,12 +4111,13 @@ export default function ChatOverlay() {
 
   // Desktop-shell parity: measure the active main tab vs its row so the divider
   // can be drawn full-width EXCEPT under the active tab (the "cutout" so the tab
-  // sits ON the line). Re-measure each frame so it tracks resize. Runs on BOTH
+  // sits ON the line). Re-measure on geometry changes. Runs on BOTH
   // the Electron shell and the website (parity) — the website now draws the same
   // bordered active main tab + cutout divider, so it needs the measurement too.
   useEffect(() => {
-    let raf = 0;
-    const tick = () => {
+    const row = tabRowRef.current;
+    if (!row) return;
+    return observeTabLayout(row, () => {
       const tab = activeMainTabRef.current;
       const row = tabRowRef.current;
       if (tab && row) {
@@ -4121,11 +4134,8 @@ export default function ChatOverlay() {
           prev && Math.abs(prev.left - left) < 0.5 && Math.abs(prev.right - right) < 0.5
             ? prev : { left, right });
       }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, []);
+    });
+  }, [activeMainId]);
 
   const partyMeasureRowRef = useRef<HTMLDivElement>(null);
 
@@ -4141,7 +4151,7 @@ export default function ChatOverlay() {
   // components must NOT also poke the flag, or they'd clobber this on unmount.)
   // Declared after all modal-state hooks so none hit the const TDZ.
   const anyOverlayUiOpen = !!(
-    ctxMenu || partyTabCtx || memberCtx || partyOverflowCtx || partyDescriptionEditor ||
+    ctxMenu || partyTabCtx || subtabMenu || subtabSettings || tabDrag || memberCtx || partyOverflowCtx || partyDescriptionEditor ||
     inviteModalFor || muteModalFor || kickModalFor || profileModalFor ||
     modModal || leaveConfirmFor || partyLimitEditor ||
     createPartyOpen || settingsOpen || blockManagerOpen ||
@@ -4644,7 +4654,7 @@ export default function ChatOverlay() {
       // the game. The user presses Insert (focus-to-chat) when they want to type.
       if (cmd === 'tab:fo76') {
         const fo76 = fo76SubsRef.current;
-        const general = fo76.find(s => s.name?.toLowerCase() === 'general') ?? fo76[0];
+        const general = tabLayoutRef.current.ready ? fallbackTab(fo76, tabLayoutRef.current.prefs.hidden) : fo76.find(s => s.name?.toLowerCase() === 'general') ?? fo76[0];
         const mainId = general?.parentId ?? fo76MainIdRef.current;
         if (mainId) setActiveMainId(mainId);
         if (general) setActiveSubId(general.id);
@@ -4671,7 +4681,9 @@ export default function ChatOverlay() {
         const curSubId    = activeSubIdRef.current;
         const curPartyView = partyViewRef.current;
 
-        const hidden = hiddenChannelIdSet(channelFiltersRef.current, fo76Subs);
+        const hidden = tabLayoutRef.current.ready
+          ? new Set(fo76Subs.filter(sub => tabLayoutRef.current.prefs.hidden.includes(tabKey(sub.id))).map(sub => sub.id))
+          : hiddenChannelIdSet(channelFiltersRef.current, fo76Subs);
         const slots: NavigationSlot[] = [
           ...fo76Subs.filter(sub => !hidden.has(sub.id)).map(sub => ({ kind: 'sub' as const, id: sub.id, parentId: sub.parentId ?? '' })),
           ...joined.map(party => ({ kind: 'party' as const, id: party.id })),
@@ -4972,13 +4984,49 @@ export default function ChatOverlay() {
     return allCommands.filter(c => c.trigger.toLowerCase().startsWith(lower));
   }, [inputText, allCommands]);
 
-  const mainChannels = (channelsRaw || [])
+  const preferenceScope = overlayShell ? tabPreferenceScope(overlayShell.relayBase, user?.id) : null;
+  const preferenceTabs = useMemo(() => (channelsRaw ?? []).flatMap(c => c.children ?? []), [channelsRaw]);
+  const tabLayout = useSubtabPreferences(preferenceScope, preferenceTabs, settings.channelFilters);
+  const tabLayoutRef = useRef(tabLayout);
+  tabLayoutRef.current = tabLayout;
+  const defaultSelection = useRef<{ scope: string | null; started: boolean; serverAvailable: boolean }>({ scope: null, started: false, serverAvailable: false });
+  useEffect(() => {
+    pointerTabDrag.current = null;
+    setSubtabMenu(null); setTabDrag(null); setSubtabSettings(false);
+  }, [preferenceScope]);
+  useEffect(() => {
+    if (!overlayShell) return;
+    const open = () => { if (preferenceScope) setSubtabSettings(true); };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { pointerTabDrag.current = null; setTabDrag(null); setSubtabMenu(null); setSubtabSettings(false); }
+    };
+    window.addEventListener('fcm-subtab-settings', open);
+    window.addEventListener('keydown', escape);
+    return () => { window.removeEventListener('fcm-subtab-settings', open); window.removeEventListener('keydown', escape); };
+  }, [preferenceScope, overlayShell]);
+
+  const mainChannels = useMemo(() => (channelsRaw || [])
     .filter(c => c.parentId === null)
     .map(c => isPublicMode
       // In public mode strip server: virtual sub-channels from each main channel.
       ? { ...c, children: (c.children || []).filter((s: SubChannel) => !s.id.startsWith('server:')) }
-      : c
-    );
+      : overlayShell ? { ...c, children: orderedTabs(c.children ?? [], c.id, tabLayout.prefs) } : c
+    ), [channelsRaw, isPublicMode, overlayShell, tabLayout.prefs]);
+
+  useEffect(() => {
+    if (!preferenceScope || !tabLayout.ready || mainChannels.length === 0) return;
+    if (defaultSelection.current.scope !== preferenceScope) defaultSelection.current = { scope: preferenceScope, started: false, serverAvailable: false };
+    const state = defaultSelection.current;
+    const available = mainChannels.flatMap(c => c.children ?? []);
+    const transition = defaultTabTransition(available, tabLayout.prefs, state.started, state.serverAvailable);
+    if (transition.select) {
+      const next = transition.target;
+      const parent = mainChannels.find(c => c.children?.some(s => s.id === next?.id)) ?? mainChannels[0];
+      setActiveMainId(parent.id); setActiveSubId(next?.id ?? parent.id);
+      state.started = true;
+    }
+    state.serverAvailable = transition.serverAvailable;
+  }, [preferenceScope, tabLayout.ready, tabLayout.prefs, channelsRaw]); // mainChannels is derived from these inputs
 
   // ── Document title sync (Electron overlay window ONLY) ──────────────────────
   // On the website (overlayShell === null) the page/route owns document.title via
@@ -5070,6 +5118,14 @@ export default function ChatOverlay() {
       }
     });
   }, []);
+
+  // Cosmetic visibility is independent of transport liveness. Hidden/offscreen
+  // retained rows keep their messages and animation phase, but stop painting.
+  useEffect(() => {
+    const container = messagesContRef.current;
+    if (!container) return;
+    return observeNameMotion(container, overlayVisible);
+  }, [activeMainId, activeSubId, partyView, overlayVisible]);
 
   // Hybrid WS gate as ONE combined boolean. CRITICAL: the WS effect depends on
   // THIS, not on [overlayVisible, wsGameActive] separately — otherwise a flap in
@@ -6093,7 +6149,7 @@ export default function ChatOverlay() {
   useEffect(() => {
     fo76SubsRef.current   = fo76Main?.children ?? [];
     fo76MainIdRef.current = fo76Main?.id ?? null;
-  }, [fo76Main?.id, channelsRaw]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fo76Main?.id, channelsRaw, tabLayout.prefs]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!isPublicMode || activeMainId !== PM_MAIN_ID) return;
     setPmView('inbox');
@@ -6525,10 +6581,10 @@ export default function ChatOverlay() {
     // main channel. Default to its General sub-channel (or the first sub if
     // General is absent). This replaces the old combined-feed-on-main behavior.
     const main = (channelsRaw || []).find(c => c.id === mainId);
-    const subs = main?.children || [];
-    const general = subs.find(s => s.name?.toLowerCase() === 'general') ?? subs[0];
+    const subs = overlayShell ? orderedTabs(main?.children ?? [], mainId, tabLayout.prefs) : main?.children || [];
+    const general = overlayShell ? fallbackTab(subs, tabLayout.prefs.hidden) : subs.find(s => s.name?.toLowerCase() === 'general') ?? subs[0];
     setActiveSubId(general ? general.id : mainId);
-  }, [channelsRaw]);
+  }, [channelsRaw, overlayShell, tabLayout.prefs]);
 
   // Sync autocomplete visibility with input changes
   useEffect(() => {
@@ -7153,21 +7209,23 @@ export default function ChatOverlay() {
   // Channel IDs the viewer has hidden (resolved from the "Hidden channels" name
   // filter). Used to drop their messages from the feed and to hide their sub-tabs.
   const hiddenChannelIds = useMemo(
-    () => hiddenChannelIdSet(settings.channelFilters, flattenedChannels),
-    [settings.channelFilters, flattenedChannels],
+    () => overlayShell && tabLayout.ready
+      ? new Set(flattenedChannels.filter(c => tabLayout.prefs.hidden.includes(tabKey(c.id))).map(c => c.id))
+      : hiddenChannelIdSet(settings.channelFilters, flattenedChannels),
+    [settings.channelFilters, flattenedChannels, overlayShell, tabLayout.ready, tabLayout.prefs],
   );
 
-  // If the user hides the channel they're currently viewing directly, its sub-tab
-  // vanishes — redirect them to the aggregated feed so the hidden channel doesn't
-  // linger in view. (No-op in the common case: hiding from the feed, where
-  // activeSubId isn't the hidden channel.)
+  // Hidden/removed selections must not leave an empty or hidden conversation open.
+  // Overlay uses a visible fallback (following a confirmed Server replacement);
+  // the website retains its existing aggregate-feed fallback.
   useEffect(() => {
     // The `!== activeMainId` guard prevents an effect loop if the redirect target
     // (the main feed) were itself somehow in the hidden set.
-    if (activeSubId && activeSubId !== activeMainId && hiddenChannelIds.has(activeSubId)) {
-      setActiveSubId(activeMainId);
+    const unavailable = !!overlayShell && !!activeMain && activeSubId !== activeMainId && !subChannels.some(c => c.id === activeSubId);
+    if (activeSubId && activeSubId !== activeMainId && (hiddenChannelIds.has(activeSubId) || unavailable)) {
+      setActiveSubId(overlayShell ? replacementTab(subChannels, tabLayout.prefs, activeSubId)?.id ?? activeMainId : activeMainId);
     }
-  }, [hiddenChannelIds, activeSubId, activeMainId]);
+  }, [hiddenChannelIds, activeSubId, activeMainId, overlayShell, subChannels, tabLayout.prefs]);
 
   const activeSub = flattenedChannels.find(c => c.id === activeSubId);
   // GIFs default OFF (shown only when explicitly enabled); emojis default ON
@@ -9225,21 +9283,25 @@ export default function ChatOverlay() {
             }}>{outboxCount} queued</span>
           )}
 
-          {/* Live status dot */}
-          <span style={{
+          {overlayShell && <OverlayHeaderControls key={`${user?.id ?? ''}/${bridgeState.status === 'ready' ? bridgeState.bindingId : ''}`}
+            connected={connected} socket={wsRef.current} scope={user?.id ?? ''}
+            bindingId={bridgeState.status === 'ready' ? bridgeState.bindingId : null}
+            alwaysOnline={settings.alwaysShowOnlineStats === true} alwaysServer={settings.alwaysShowServerStats === true}
+            color={primaryColor} background={hexToRgba(theme.backgroundColor, 1)} onRefresh={overlayShell.onRefresh}
+            onSettings={() => overlayShell.onSettings?.()} onMinimize={overlayShell.onMinimize} />}
+          {/* Website retains its existing status dot and settings controls. */}
+          {!overlayShell && <span style={{
             width: '5px', height: '5px', borderRadius: '50%', marginRight: '4px',
             background: connected ? primaryColor : '#FFB000',
             boxShadow: connected ? `0 0 4px ${primaryColor}` : '0 0 4px #FFB000',
             flexShrink: 0,
-          }} />
+          }} />}
 
           {/* Settings / minimize / close. The refresh/minimize/close icons only
               appear in the Electron desktop shell (overlayShell); the website
               shows just the settings cog as before. */}
           {([
-            ...(overlayShell?.onRefresh ? [{ key: 'refresh' as const, title: 'Refresh', onClick: () => overlayShell.onRefresh!() }] : []),
-            { key: 'cog' as const, title: 'Settings', onClick: () => (overlayShell?.onSettings ? overlayShell.onSettings() : setSettingsOpen(s => !s)) },
-            ...(overlayShell?.onMinimize ? [{ key: 'min' as const, title: 'Minimize', onClick: () => overlayShell.onMinimize!() }] : []),
+            ...(!overlayShell ? [{ key: 'cog' as const, title: 'Settings', onClick: () => setSettingsOpen(s => !s) }] : []),
             // Party member-panel toggle sits between minimize and close, only in a party.
             ...((!isPublicMode && isOnPartyTab && partyView !== 'browser') ? [{ key: 'members' as const, title: memberPanelOpen ? 'Hide members' : 'Show members', onClick: () => setMemberPanelOpen(o => !o) }] : []),
             ...(overlayShell?.onClose ? [{ key: 'close' as const, title: 'Close', onClick: () => overlayShell.onClose!() }] : []),
@@ -9287,17 +9349,6 @@ export default function ChatOverlay() {
                   })}
                 </svg>
               )}
-              {b.key === 'refresh' && (
-                <svg width="12" height="12" viewBox="-8 -8 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
-                  <path d="M5.5 -2.5 A5 5 0 1 0 6 2" />
-                  <path d="M5.5 -5 L5.5 -2.5 L3 -2.5" />
-                </svg>
-              )}
-              {b.key === 'min' && (
-                <svg width="12" height="12" viewBox="-8 -8 16 16" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-                  <line x1="-5" y1="0" x2="5" y2="0" />
-                </svg>
-              )}
               {b.key === 'close' && (
                 <svg width="12" height="12" viewBox="-8 -8 16 16" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
                   <line x1="-4.5" y1="-4.5" x2="4.5" y2="4.5" />
@@ -9319,14 +9370,14 @@ export default function ChatOverlay() {
               full width EXCEPT under the active main tab — drawn as two segments:
               [0 → activeTab.left] and [activeTab.right → full width]. The active
               tab's open bottom then "sits" on this line. Both shell + website. */}
-          {tabCutout && (subChannels.length > 0 || isOnPartyTab) && (
+          {tabCutout && (subChannels.length > 0 || isOnPartyTab || (!!overlayShell && activeMainId === PM_MAIN_ID)) && (
             <>
-              <div style={{
+              <div data-fcm-main-divider="left" style={{
                 position: 'absolute', left: 0, bottom: 0, height: '1px',
                 width: `${Math.max(0, tabCutout.left)}px`,
                 background: hexAlpha(primaryColor, 0.45), pointerEvents: 'none',
               }} />
-              <div style={{
+              <div data-fcm-main-divider="right" style={{
                 position: 'absolute', right: 0, bottom: 0, height: '1px',
                 left: `${tabCutout.right}px`,
                 background: hexAlpha(primaryColor, 0.45), pointerEvents: 'none',
@@ -9466,6 +9517,7 @@ export default function ChatOverlay() {
         ) : subChannels.length > 0 && (
           <div data-fcm-subtab-row="channels" style={{
             display: 'flex', alignItems: 'center', flexWrap: 'nowrap', overflow: 'hidden',
+            ...(overlayShell ? { overflowX: 'auto' as const, scrollbarWidth: 'none' as const } : {}),
             // Sub-row inset mirrors the main-row's left inset + the 1px border,
             // so "G" (General) aligns with "F" (Fallout 76) above.
             // Shell: main-row=15px + border=1px → F at 16 → sub-row=16px.
@@ -9510,7 +9562,50 @@ export default function ChatOverlay() {
               const unread = unreadMentions[sub.id] || 0;
               const label = sub.name; // ALL-CAPS applied via textTransform below
               return (
-                <span key={sub.id} onClick={() => setActiveSubId(sub.id)} style={{
+                <span key={sub.id}
+                  role={overlayShell ? 'button' : undefined} tabIndex={overlayShell ? 0 : undefined}
+                  aria-label={overlayShell ? `${sub.name} channel` : undefined}
+                  data-fcm-tab-key={overlayShell ? tabKey(sub.id) : undefined}
+                  draggable={false}
+                  onPointerDown={e => {
+                    suppressTabClick.current = false;
+                    if (e.button !== 0 || !preferenceScope || !tabLayout.ready) return;
+                    e.preventDefault(); // Preserve composer focus/selection; never start a browser text drag.
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    pointerTabDrag.current = { source: tabKey(sub.id), target: tabKey(sub.id), parent: activeMainId, scope: preferenceScope, x: e.clientX, y: e.clientY, active: false };
+                  }}
+                  onPointerMove={e => {
+                    const drag = pointerTabDrag.current;
+                    if (!drag || drag.scope !== preferenceScope || drag.parent !== activeMainId) return;
+                    if (!drag.active && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 5) return;
+                    drag.active = true; suppressTabClick.current = true;
+                    const target = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-fcm-tab-key]');
+                    const key = target?.dataset.fcmTabKey;
+                    drag.target = key && subChannels.some(t => tabKey(t.id) === key) ? key : drag.source;
+                    if (!tabDrag || tabDrag.target !== drag.target) setTabDrag({ ...drag });
+                  }}
+                  onPointerUp={e => {
+                    const drag = pointerTabDrag.current;
+                    pointerTabDrag.current = null; setTabDrag(null);
+                    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+                    if (drag?.active && drag.scope === preferenceScope && drag.parent === activeMainId) tabLayout.update(moveTab(tabLayout.prefs, activeMainId, subChannels, drag.source, drag.target));
+                  }}
+                  onPointerCancel={() => { pointerTabDrag.current = null; setTabDrag(null); }}
+                  onLostPointerCapture={() => { pointerTabDrag.current = null; setTabDrag(null); }}
+                  onContextMenu={e => {
+                    if (!preferenceScope || !tabLayout.ready) return;
+                    e.preventDefault(); e.stopPropagation();
+                    setSubtabMenu({ id: sub.id, scope: preferenceScope, x: e.clientX, y: e.clientY });
+                  }}
+                  onKeyDown={e => {
+                    if (!overlayShell) return;
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveSubId(sub.id); }
+                    if ((e.shiftKey && e.key === 'F10') || e.key === 'ContextMenu') {
+                      e.preventDefault(); const r = e.currentTarget.getBoundingClientRect();
+                      if (preferenceScope) setSubtabMenu({ id: sub.id, scope: preferenceScope, x: r.left, y: r.bottom });
+                    }
+                  }}
+                  onClick={() => { if (!suppressTabClick.current) setActiveSubId(sub.id); }} style={{
                   // Sub-tab font is SMALLER than the main-tab title font
                   // (main = fontSize+1, sub = fontSize-1) in the shell.
                   fontSize: overlayShell ? `${Math.max(8, fontSize - 1)}px` : `${fontSize}px`,
@@ -9532,6 +9627,9 @@ export default function ChatOverlay() {
                   userSelect: 'none',
                   whiteSpace: 'nowrap', flexShrink: 0,   // sub-tab label never wraps mid-word
                   display: 'inline-flex', alignItems: 'center',
+                  boxShadow: tabDrag?.target === tabKey(sub.id) && tabDrag.source !== tabDrag.target
+                    ? `${subChannels.findIndex(t => tabKey(t.id) === tabDrag.source) < subChannels.findIndex(t => tabKey(t.id) === tabDrag.target) ? 2 : -2}px 0 ${primaryColor}` : undefined,
+                  touchAction: overlayShell ? 'none' : undefined,
                   // Clicking a sub-tab switches channel (not a drag).
                   ...(overlayShell ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}),
                 }}>
@@ -9550,6 +9648,7 @@ export default function ChatOverlay() {
                 </span>
               );
             })}
+            {overlayShell && tabLayout.ready && <button aria-label="Channel layout settings" title="Channel layout settings" onClick={() => setSubtabSettings(true)} style={{ color: primaryColor, background: 'transparent', border: 0, WebkitAppRegion: 'no-drag', flexShrink: 0 } as React.CSSProperties}>⋯</button>}
           </div>
         )}
 
@@ -11584,6 +11683,66 @@ export default function ChatOverlay() {
         document.body
       )}
 
+      {overlayShell && preferenceScope && subtabMenu?.scope === preferenceScope && createPortal(
+        <div onPointerDown={() => setSubtabMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 100000 }}>
+          <div role="menu" aria-label="Channel actions" onPointerDown={e => e.stopPropagation()}
+            onKeyDown={e => {
+              if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+              e.preventDefault();
+              const items = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+              const index = items.findIndex(item => item === document.activeElement);
+              const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (index + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+              items[next]?.focus();
+            }}
+            style={{ position: 'absolute', left: Math.max(0, Math.min(subtabMenu.x, window.innerWidth - 210)), top: Math.max(0, Math.min(subtabMenu.y, window.innerHeight - 220)), background: '#151515', color: primaryColor, border: `1px solid ${primaryColor}`, padding: 8, display: 'grid', gap: 5, width: 190 }}>
+            {(() => {
+              const tab = preferenceTabs.find(t => t.id === subtabMenu.id);
+              if (!tab) return null;
+              const parent = mainChannels.find(c => c.children?.some(t => t.id === tab.id));
+              const siblings = parent?.children ?? [];
+              const visible = siblings.filter(t => !tabLayout.prefs.hidden.includes(tabKey(t.id)));
+              const index = visible.findIndex(t => t.id === tab.id);
+              return <>
+                <button role="menuitem" autoFocus onClick={() => { tabLayout.update(hideTab(tabLayout.prefs, tab, preferenceTabs)); setSubtabMenu(null); }}>Hide channel</button>
+                <button role="menuitem" onClick={() => { tabLayout.update({ ...tabLayout.prefs, defaultKey: tabKey(tab.id) }); setSubtabMenu(null); }}>Set as default</button>
+                {([-1, 1] as const).map(direction => <button role="menuitem" key={direction} disabled={!visible[index + direction]} onClick={() => {
+                  const target = visible[index + direction];
+                  if (parent && target) tabLayout.update(moveTab(tabLayout.prefs, parent.id, siblings, tabKey(tab.id), tabKey(target.id)));
+                  setSubtabMenu(null);
+                }}>Move {direction < 0 ? 'left' : 'right'}</button>)}
+                <button role="menuitem" onClick={() => { setSubtabMenu(null); setSubtabSettings(true); }}>Channel layout settings</button>
+              </>;
+            })()}
+          </div>
+        </div>, document.body)}
+      {overlayShell && preferenceScope && subtabSettings && createPortal(
+        <div onClick={() => setSubtabSettings(false)} style={{ position: 'fixed', inset: 0, zIndex: 100001, background: '#0008', display: 'grid', placeItems: 'center' }}>
+          <section role="dialog" aria-modal="true" aria-label="Channel layout" onClick={e => e.stopPropagation()} style={{ background: '#151515', color: primaryColor, padding: 16, maxHeight: '80vh', overflowY: 'auto', width: 'min(360px, 90vw)', border: `1px solid ${primaryColor}` }}>
+            <h3>Channel layout</h3>
+            <p>Hidden channels are excluded from the combined feed. Layout is saved for this account on this device.</p>
+            <p>Default: {tabLayout.prefs.defaultKey === 'server' ? 'Server (when available)' : preferenceTabs.find(t => tabKey(t.id) === tabLayout.prefs.defaultKey)?.name ?? 'General / first visible channel'}</p>
+            <label>Default channel <select aria-label="Default channel" value={tabLayout.prefs.defaultKey ?? ''} onChange={e => {
+              const key = e.target.value;
+              tabLayout.update({ ...tabLayout.prefs, defaultKey: key || null, hidden: tabLayout.prefs.hidden.filter(k => k !== key) });
+            }}>
+              <option value="">General / first visible channel</option>
+              {preferenceTabs.filter(t => tabKey(t.id) !== 'server').map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              <option value="server">Server (when available)</option>
+            </select></label>
+            <fieldset><legend>Visible channels</legend>
+              {[...preferenceTabs.filter(t => tabKey(t.id) !== 'server'), { id: 'server:preference', name: 'Server' }].map(tab => {
+                const key = tabKey(tab.id);
+                return <label key={key} style={{ display: 'block' }}><input type="checkbox" checked={!tabLayout.prefs.hidden.includes(key)} onChange={e => {
+                  tabLayout.update(e.target.checked ? { ...tabLayout.prefs, hidden: tabLayout.prefs.hidden.filter(k => k !== key) } : hideTab(tabLayout.prefs, tab, preferenceTabs));
+                }} />{tab.name}</label>;
+              })}
+            </fieldset>
+            {tabLayout.prefs.hidden.filter(key => key !== 'server' && !preferenceTabs.some(t => tabKey(t.id) === key)).map(key => <div key={key}><button onClick={() => tabLayout.update({ ...tabLayout.prefs, hidden: tabLayout.prefs.hidden.filter(k => k !== key) })}>Restore unavailable channel</button></div>)}
+            <button onClick={() => { setActiveSubId(activeMainId); setSubtabSettings(false); }}>Open combined feed</button>
+            <button onClick={() => tabLayout.update(emptyTabPreferences())}>Reset layout and defaults</button>
+            <button autoFocus onClick={() => setSubtabSettings(false)}>Close</button>
+          </section>
+        </div>, document.body)}
       {/* ── Wiki panel ── */}
       {/* ── Settings modal — portalled to body so position:fixed escapes overflow:hidden ── */}
       {settingsOpen && createPortal(

@@ -1,10 +1,16 @@
 function createFakeRedis() {
   const sets = new Map();
+  const activity = new Map();
+  const prune = (_key, _min, max) => { for (const [id, score] of activity) if (score <= Number(max)) activity.delete(id); };
 
   return {
+    isReady: true,
+    withCommandOptions() { return this; },
     multi() {
       const ops = [];
       return {
+        zRemRangeByScore(...args) { ops.push(() => prune(...args)); return this; },
+        zAdd(_key, entry) { ops.push(() => activity.set(entry.value, Math.max(activity.get(entry.value) ?? 0, entry.score))); return this; },
         del(key) {
           ops.push(() => { sets.delete(key); });
           return this;
@@ -29,6 +35,8 @@ function createFakeRedis() {
     async sMembers(key) {
       return Array.from(sets.get(key) ?? []);
     },
+    async zRemRangeByScore(...args) { prune(...args); },
+    async zRangeByScore(_key, min) { return [...activity].filter(([, score]) => score > Number(String(min).replace('(', ''))).map(([id]) => id); },
     async *scanIterator({ MATCH }) {
       const prefix = MATCH.replace(/\*/g, '');
       for (const key of sets.keys()) {
@@ -42,10 +50,16 @@ function createFakeRedis() {
 describe('onlinePresenceService', () => {
   let fakeRedis;
   let service;
+  let accountRows;
 
   beforeEach(() => {
     jest.resetModules();
     fakeRedis = createFakeRedis();
+    accountRows = [];
+    jest.useFakeTimers(); jest.setSystemTime(new Date('2026-09-17T12:00:00Z'));
+    jest.doMock('../src/config/prisma', () => ({ __esModule: true, default: { user: {
+      findMany: jest.fn(async ({ where }) => accountRows.filter(row => where.discordId.in.includes(row.discordId))),
+    } } }));
 
     jest.doMock('../src/config/logger', () => ({
       __esModule: true,
@@ -58,6 +72,43 @@ describe('onlinePresenceService', () => {
 
     service = require('../src/services/onlinePresenceService');
   });
+  afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); });
+
+  test('Discord activity expires after 15 minutes and a new message restarts the window', async () => {
+    const id = '123456789012345678';
+    await service.noteDiscordMessageActivity(id);
+    await expect(service.getGlobalOnlineCount()).resolves.toBe(1);
+    jest.setSystemTime(Date.now() + 14 * 60_000);
+    await service.noteDiscordMessageActivity(id);
+    jest.setSystemTime(Date.now() + 14 * 60_000);
+    await expect(service.getGlobalOnlineCount()).resolves.toBe(1);
+    jest.setSystemTime(Date.now() + 60_000);
+    await expect(service.getGlobalOnlineCount()).resolves.toBe(0);
+  });
+  test('Discord and HUD/overlay deduplicate through the current linked account, including a merge', async () => {
+    const discordId = '123456789012345678';
+    await service.noteDiscordMessageActivity(discordId);
+    accountRows = [{ id: 'canonical', discordId }];
+    service.registerLocalPresenceSource(() => ['canonical', 'canonical']);
+    await expect(service.getGlobalOnlineCount()).resolves.toBe(1);
+    accountRows = [{ id: 'merged', discordId }];
+    service.registerLocalPresenceSource(() => ['merged']);
+    await expect(service.getGlobalOnlineCount()).resolves.toBe(1);
+    service.registerLocalPresenceSource(() => []);
+    await expect(service.getGlobalOnlineCount()).resolves.toBe(1);
+  });
+  test('transient Redis failures preserve the last good total, never substitute local zero', async () => {
+    fakeRedis._sets.set(`${service.ONLINE_USERS_KEY_PREFIX}remote`, new Set(['remote']));
+    await expect(service.getGlobalOnlineCount()).resolves.toBe(1);
+    fakeRedis.scanIterator = async function* () { throw new Error('offline'); };
+    await expect(service.getGlobalOnlineCount(0)).resolves.toBe(1);
+    jest.setSystemTime(Date.now() + 90_000);
+    await expect(service.getGlobalOnlineCount(0)).rejects.toThrow('offline');
+  });
+  test('a valid empty snapshot becomes zero and invalid Discord IDs are ignored', async () => {
+    await service.noteDiscordMessageActivity('not-an-id');
+    await expect(service.getGlobalOnlineCount()).resolves.toBe(0);
+  });
 
   test('deduplicates users across local sockets and backend instances', async () => {
     service.noteUserConnected('user-1');
@@ -68,6 +119,12 @@ describe('onlinePresenceService', () => {
     fakeRedis._sets.set(`${service.ONLINE_USERS_KEY_PREFIX}other-instance`, new Set(['user-1', 'user-3']));
 
     await expect(service.getGlobalOnlineCount(0)).resolves.toBe(3);
+  });
+  test('accepts the installed Redis client batched SCAN format', async () => {
+    service.noteUserConnected('local-user');
+    fakeRedis._sets.set(`${service.ONLINE_USERS_KEY_PREFIX}other`, new Set(['remote-user']));
+    fakeRedis.scanIterator = async function* () { yield [...fakeRedis._sets.keys()]; };
+    await expect(service.getGlobalOnlineCount()).resolves.toBe(2);
   });
 
   test('keeps a user counted during disconnect grace until the grace expires', async () => {

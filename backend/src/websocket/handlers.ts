@@ -40,6 +40,7 @@ import {
   noteUserPendingDisconnect,
   registerLocalPresenceSource,
   getLocalOnlineUserIds,
+  getGlobalOnlineCount,
 } from '../services/onlinePresenceService';
 import {
   PrivateConversationAccessError,
@@ -1751,7 +1752,7 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
   // Broadcast room:join (user connected)
   broadcast({ type: 'room:join', payload: { username: displayName, timestamp: new Date().toISOString() } }, ws);
 
-
+  let presenceStatsPending = false;
   ws.on('message', async (raw: RawData) => {
     let frame: any;
     try {
@@ -2137,6 +2138,24 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
         break;
       }
 
+      case 'presence:stats': {
+        const requestId = frame.payload?.requestId;
+        if (webTicketUserId || clients.get(token)?.ws !== ws || presenceStatsPending
+          || typeof requestId !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(requestId)) break;
+        presenceStatsPending = true;
+        try {
+          if (!(await checkWsRateLimitBucket('presence-stats', user.id, 4, 30))) break;
+          const statsRedis = await getRedisClient();
+          if (await statsRedis.get(`session:${token}`) !== user.id) break;
+          const [totalOnline, server] = await Promise.all([
+            getGlobalOnlineCount(getClientCount()), serverBridge.observedPlayerStats(),
+          ]);
+          if (await statsRedis.get(`session:${token}`) === user.id && clients.get(token)?.ws === ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'presence:stats', payload: { requestId, totalOnline, ...server } }));
+          }
+        } finally { presenceStatsPending = false; }
+        break;
+      }
       case 'bridge:watch': {
         if (webTicketUserId || clients.get(token)?.ws !== ws) break;
         if (await checkWsRateLimitBucket('bridge-watch', user.id, 4, 10)) await serverBridge.watch(frame.payload?.mode);
@@ -2163,9 +2182,9 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
         const client = clients.get(token);
         if (!client) return;
         logger.info({
-          userId: user.id, username: user.username,
-          channelId: frame.payload?.channelId,
-          content: String(frame.payload?.content ?? '').slice(0, 32),
+          // Receipt diagnostics are not moderation evidence. Do not log message
+          // text, identities or room membership, including rejected submissions.
+          contentLength: typeof frame.payload?.content === 'string' ? frame.payload.content.length : 0,
         }, '[chat:send] received');
 
         // Re-check mute status; auto-lift expired mutes in-flight

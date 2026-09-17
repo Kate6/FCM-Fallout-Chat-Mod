@@ -7,7 +7,7 @@
  */
 
 import { query as dbQuery } from '../config/database';
-import { getClientCount } from '../websocket/handlers';
+import { getGlobalOnlineCount } from './onlinePresenceService';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -167,7 +167,7 @@ export async function getPublicStats(): Promise<PublicStats> {
   ]);
 
   const stats: PublicStats = {
-    onlineNow: getClientCount(),
+    onlineNow: await getGlobalOnlineCount(),
     totalUsers,
     totalMessages,
     usersOverTime,
