@@ -8,8 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
-const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
-const version = process.env.FCM_BUILD_VERSION || `${pkg.version.split('-')[0]}-portable.${stamp}`;
+const version = process.env.FCM_BUILD_VERSION || pkg.version;
 const env = { ...process.env, BUILD_CHANNEL: 'qa', FCM_BUILD_VERSION: version };
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const eb = path.join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'electron-builder.cmd' : 'electron-builder');

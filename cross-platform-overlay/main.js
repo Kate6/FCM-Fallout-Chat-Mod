@@ -54,6 +54,8 @@ const os = require('os');
 // Pure logic lives in overlay-core (no electron / no side effects). Required up
 // here so the logger below can use resolveLogLevel/shouldRotateLog.
 const overlayCore = require('./overlay-core');
+const { LocalBridgeRelay } = require('./local-bridge-relay');
+const { discoverBridgePaths } = require('./local-bridge-paths');
 
 // Portable identity is build metadata, never a filename heuristic. Configure all
 // Electron-owned durable paths before logging, Linux relaunch, state constants,
@@ -1142,6 +1144,7 @@ function onGamePresenceChanged(found) {
   }
   const wasRunning = gameRunning;
   gameRunning = r.gameRunning;
+  localBridge.setGameRunning(gameRunning);
   diag('[game-gate] gameRunning changed to ' + gameRunning + ' chatActive=' + chatActive + ' isPrivileged=' + isPrivileged() + ' forceVisible=' + forceVisible);
   // On game-launch transition (not-running → running), clear userHidden so alt-tabbing
   // back into the game brings the overlay back after the user had hidden it with Delete.
@@ -1483,6 +1486,25 @@ let isDragging = false;
 
 // Active proxied relay sockets, keyed by a renderer-supplied id.
 const relaySockets = new Map();
+const localBridge = new LocalBridgeRelay({
+  relayHttp: RELAY_HTTP,
+  discover: environment => discoverBridgePaths({ environment, documents: app.getPath('documents') }),
+  emit: (id, frame) => sendToRenderer('proxy:ws:message', { id, data: JSON.stringify(frame) }),
+});
+
+// Every authentication path invalidates the previous desktop bridge owner.
+// Closing its sockets also prevents ordinary buffered frames using an old token.
+function setSessionToken(token) {
+  if (sessionToken === token) return;
+  localBridge.setAuth(token);
+  sessionToken = token;
+  for (const [id, socket] of relaySockets) {
+    try { socket.close(4001, 'Session changed'); } catch { /* Closing socket. */ }
+    sendToRenderer('proxy:ws:close', { id, code: 4001, reason: 'Session changed' });
+  }
+  relaySockets.clear();
+  relaySendBuffers.clear();
+}
 
 // Per-socket CONNECTING-state send buffers.
 // Key: socket id  Value: string[] (frames queued while upstream readyState === CONNECTING)
@@ -2122,6 +2144,12 @@ ipcMain.handle('proxy:http', async (_evt, reqDesc) => {
  * once a sessionToken becomes available.
  */
 function openRelaySocket(id) {
+  const previous = relaySockets.get(id);
+  if (previous) {
+    localBridge.closed(id, previous);
+    try { previous.close(); } catch { /* Closing socket. */ }
+  }
+  const socketToken = sessionToken;
   const sock = new WebSocket(RELAY_WS, {
     headers: {
       'X-Auth-Token': sessionToken,
@@ -2133,21 +2161,30 @@ function openRelaySocket(id) {
   relaySockets.set(id, sock);
   relaySendBuffers.set(id, []);
   sock.on('open', () => {
+    if (relaySockets.get(id) !== sock || socketToken !== sessionToken || isQuitting) {
+      try { sock.close(); } catch { /* Closing socket. */ }
+      return;
+    }
+    localBridge.opened(id, sock, socketToken);
     // Flush any frames that arrived while the socket was CONNECTING.
     const buf = relaySendBuffers.get(id) || [];
     relaySendBuffers.delete(id);
     for (const frame of buf) {
-      try { sock.send(frame); } catch { /* socket closed between open and flush */ break; }
+      const routed = localBridge.outgoing(id, sock, frame);
+      if (routed === null) continue;
+      try { sock.send(routed); } catch { /* socket closed between open and flush */ break; }
     }
     sendToRenderer('proxy:ws:open', { id });
   });
   sock.on('message', (raw) => {
+    if (relaySockets.get(id) !== sock || socketToken !== sessionToken) return;
     const data = raw.toString();
     // Intercept app:update-available (sent by the backend on WS connect) to show a
     // passive OS notification when a newer version exists. The message is still
     // forwarded to the renderer as normal.
     try {
       const msg = JSON.parse(data);
+      if (!localBridge.incoming(id, sock, msg)) return;
       if (msg && msg.type === 'app:update-available' && msg.payload && typeof msg.payload.latestVersion === 'string') {
         const latestVersion = msg.payload.latestVersion;
         if (!updateNotifiedThisSession && overlayCore.cmpVersions(latestVersion, APP_VERSION) > 0) {
@@ -2161,6 +2198,8 @@ function openRelaySocket(id) {
     sendToRenderer('proxy:ws:message', { id, data });
   });
   sock.on('close', (code, reason) => {
+    localBridge.closed(id, sock);
+    if (relaySockets.get(id) !== sock) return;
     relaySockets.delete(id);
     relaySendBuffers.delete(id);
     // Golden-build lock: the dev backend rejected this build as outdated. This is
@@ -2174,7 +2213,11 @@ function openRelaySocket(id) {
     }
     sendToRenderer('proxy:ws:close', { id, code, reason: reason && reason.toString() });
   });
-  sock.on('error', (err) => sendToRenderer('proxy:ws:error', { id, message: err.message }));
+  sock.on('error', (err) => {
+    if (relaySockets.get(id) === sock && socketToken === sessionToken) {
+      sendToRenderer('proxy:ws:error', { id, message: err.message });
+    }
+  });
 }
 
 /**
@@ -2207,6 +2250,8 @@ ipcMain.on('proxy:ws:open', (_evt, id) => {
 ipcMain.on('proxy:ws:send', (_evt, { id, data }) => {
   const sock = relaySockets.get(id);
   if (!sock) return;
+  data = localBridge.outgoing(id, sock, data);
+  if (data === null) return;
   if (sock.readyState === WebSocket.OPEN) {
     sock.send(data);
   } else if (sock.readyState === WebSocket.CONNECTING) {
@@ -2229,6 +2274,7 @@ ipcMain.on('proxy:ws:close', (_evt, { id }) => {
   const idx = pendingWsOpens.indexOf(id);
   if (idx !== -1) pendingWsOpens.splice(idx, 1);
   const sock = relaySockets.get(id);
+  if (sock) localBridge.closed(id, sock);
   if (sock) try { sock.close(); } catch { /* ignore */ }
   relaySockets.delete(id);
   relaySendBuffers.delete(id);
@@ -2289,7 +2335,7 @@ ipcMain.handle('overlay:dev-login-as', async (_evt, persona) => {
           try {
             const json = JSON.parse(data);
             if (json?.data?.token) {
-              sessionToken = json.data.token;
+              setSessionToken(json.data.token);
               flushPendingWsOpens();
               saveState({ discordLinked: true, discordName: json.data.displayName || '', userRole: json.data.role || null });
               userRole = json.data.role || null;
@@ -2549,15 +2595,16 @@ ipcMain.on('window:set-opacity', (_evt, v) => {
 // Only acts when the game is actually running ("if they came from the game") —
 // in standalone/no-game testing there's nothing to return to, so we no-op.
 //
-//   • Windows: blur() releases foreground; the OS hands focus to the window
-//     directly beneath (the game), and our always-on-top overlay stays visible.
+//   • Windows: keep foreground until the guarded helper activates the game.
+//     Blurring first can activate an unrelated window and cancel the handoff.
 //   • Linux (X11/Wayland): blurring an always-on-top window does NOT reliably
 //     transfer focus to the game, so we additionally ask the window manager to
 //     activate the FO76 window via wmctrl/xdotool (best-effort; silent if the
 //     tool isn't installed — blur is still applied as a fallback).
 let pendingGameFocusReturn = null;
-function cancelGameFocusReturn() {
+function cancelGameFocusReturn(reason = 'unspecified', ownerPid = null) {
   if (pendingGameFocusReturn) {
+    diag('[return-to-game] cancelling reason=' + reason + ' ownerPid=' + ownerPid + ' helperPid=' + pendingGameFocusReturn.pid);
     try { pendingGameFocusReturn.kill(); } catch { /* already exited */ }
     pendingGameFocusReturn = null;
   }
@@ -2569,16 +2616,18 @@ function returnFocusToGame() {
     diag('[return-to-game] skipped — game stopped or overlay no longer focused');
     return;
   }
-  cancelGameFocusReturn();
+  cancelGameFocusReturn('new-return-request');
   diag('[return-to-game] returning focus to FO76, clickThrough=' + clickThrough + ' platform=' + process.platform);
-  try { mainWindow.blur(); } catch { /* ignore */ }
+  if (process.platform !== 'win32') {
+    try { mainWindow.blur(); } catch { /* ignore */ }
+  }
   // Force the renderer to blur whichever DOM element currently has focus.
   // On Linux/XWayland, mainWindow.blur() does NOT reliably deliver a DOM blur
   // event to document.activeElement — the XWayland compositor (KWin) may never
   // send FocusOut to the Chromium Aura layer, leaving the chat input as
   // document.activeElement. tickIdle() then sees typing=true and permanently
-  // blocks idle-collapse. On Windows the async PowerShell helper means focus
-  // leaves after blur() returns, so the DOM element may also not blur in time.
+  // blocks idle-collapse. On Windows the async helper retains OS focus until
+  // activation, but the composer should stop accepting text immediately.
   // Sending overlay:blur-input forces the renderer to call .blur() on the active
   // element immediately, matching OS reality. (Pattern used by PoE/Exchange2.)
   sendToRenderer('overlay:blur-input');
@@ -2615,12 +2664,12 @@ function returnFocusToGame() {
     try {
       const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', ps], { windowsHide: true });
       pendingGameFocusReturn = child;
-      const timeout = setTimeout(() => { if (pendingGameFocusReturn === child) cancelGameFocusReturn(); }, 3000);
+      const timeout = setTimeout(() => { if (pendingGameFocusReturn === child) cancelGameFocusReturn('timeout'); }, 3000);
       timeout.unref?.();
-      child.on('exit', (code) => {
+      child.on('exit', (code, signal) => {
         clearTimeout(timeout);
         if (pendingGameFocusReturn === child) pendingGameFocusReturn = null;
-        diag('[return-to-game] win32 helper exited code=' + code);
+        diag('[return-to-game] win32 helper exited code=' + code + ' signal=' + signal);
       });
       child.on('error', (e) => diag('[return-to-game] win32 activate failed: ' + String(e && e.message || e)));
     } catch (e) { diag('[return-to-game] win32 spawn threw: ' + String(e && e.message || e)); }
@@ -2802,7 +2851,7 @@ function pollQaStatus(attempt = 0) {
         let d = {};
         try { d = (JSON.parse(data).data) || {}; } catch { /* ignore */ }
         if (d.authorized && d.token) {
-          sessionToken = d.token;
+          setSessionToken(d.token);
           flushPendingWsOpens();
           saveState({ discordLinked: true, displayName: d.displayName || '', userRole: d.role || null });
           userRole = d.role || null;
@@ -2911,7 +2960,7 @@ function refreshDiscordStatus(attempt = 0, oauthPoll = null) {
             if (clientKey && st2 && st2.installToken) {
               registerForToken(st2, clientKey).then((r) => {
                 if (requestGeneration !== authGeneration) return;
-                sessionToken = r.token;
+                setSessionToken(r.token);
                 providerLoginRequested = false;
                 flushPendingWsOpens();
                 saveState({ displayName: r.displayName || st2.displayName, discordLinked: !!r.discordLinked, discordName: r.discordName || discordName, steamLinked: !!r.steamLinked });
@@ -3025,7 +3074,7 @@ function finishProviderUnlink(provider) {
   const reason = label + ' account unlinked';
   authGeneration += 1;
   providerLoginRequested = false;
-  sessionToken = null;
+  setSessionToken(null);
   forceVisible = false;
 
   // Close renderer-proxied sockets before the renderer is moved to the login
@@ -3127,7 +3176,7 @@ function refreshSteamStatus(attempt = 0) {
             if (clientKey && st2 && st2.installToken) {
               registerForToken(st2, clientKey).then((r) => {
                 if (requestGeneration !== authGeneration) return;
-                sessionToken = r.token;
+                setSessionToken(r.token);
                 providerLoginRequested = false;
                 flushPendingWsOpens();
                 saveState({
@@ -3202,7 +3251,7 @@ ipcMain.handle('identity:set-name', async (_evt, rawName) => {
   try {
     const { token, userId: renamedUserId, displayName, discordLinked, discordName, discordUsername, discordDisplayName, discordAvatarUrl, steamLinked, steamDisplayName, username: savedUsername, userRole: renameRole, avatarUrl: renameAvatarUrl } =
       await registerForToken(renameState, clientKey);
-    sessionToken = token;
+    setSessionToken(token);
     flushPendingWsOpens();
     // Persist the new username + resolved display name so future launches use it.
     saveState({ username: name, displayName: displayName || name });
@@ -3356,7 +3405,7 @@ async function startRelay(retryCount = 0) {
   try {
     const { token, userId: regUserId, displayName, discordLinked, discordName, discordUsername, discordDisplayName, discordAvatarUrl, steamLinked, steamDisplayName, username: regUsername, userRole: role, avatarUrl: regAvatarUrl } = await registerForToken(loadState(), clientKey);
     if (requestGeneration !== authGeneration) return;
-    sessionToken = token;
+    setSessionToken(token);
     providerLoginRequested = false;
     flushPendingWsOpens();
     diag('[relay] registered OK — displayName=' + (displayName || '(none)') + ' discordLinked=' + !!discordLinked + ' steamLinked=' + !!steamLinked + ' role=' + (role || 'user'));
@@ -3491,7 +3540,7 @@ function stopRepaintTimer() {
 
 function _doShow() {
   if (!mainWindow) return;
-  cancelGameFocusReturn();
+  cancelGameFocusReturn('show-window');
   if (mainWindow.isMinimized()) mainWindow.restore();
   try { mainWindow.setFocusable(true); } catch { /* not critical */ }
   mainWindow.show();
@@ -3625,7 +3674,7 @@ function dispatchFocusInput(reason) {
 
 function focusToChat() {
   if (!mainWindow) return;
-  cancelGameFocusReturn();
+  cancelGameFocusReturn('focus-chat');
   // Treat the window as hidden if it is not visible OR if it is hidden-to-tray
   // (userHidden=true means the user pressed Delete; the window should be hidden
   // but defend against edge cases where isVisible() is true yet tray-hidden).
@@ -4209,7 +4258,7 @@ function _runForegroundPoll(available, tried) {
           // "overlay won't stay above the game" diagnosable without a manual capture.
           vdiag('[foreground] active-window class changed: "' + lastForegroundProc + '" → "' + line +
             '" (isGame=' + isGameClass(line) + ' unknown=' + overlayCore.isUnknownForegroundClass(line) + ' gameRunning=' + gameRunning + ')');
-          if (!isGameClass(line) && !overlayCore.isOverlayClass(line) && !overlayCore.isUnknownForegroundClass(line)) cancelGameFocusReturn();
+          if (!isGameClass(line) && !overlayCore.isOverlayClass(line) && !overlayCore.isUnknownForegroundClass(line)) cancelGameFocusReturn('linux-other-foreground');
           lastForegroundProc = line;
           if (gameRunning) applyZOrder();
           applyFocusClickThrough();
@@ -4237,6 +4286,9 @@ function _runForegroundPoll(available, tried) {
 // lines stop again).
 function spawnWindowsForegroundPoller() {
   if (process.platform !== 'win32' || isQuitting) return;
+  // Match our window owner, not the executable/product name (portable builds
+  // have a different name). Otherwise the poller cancels our own focus handoff.
+  // Other processes keep their real names so switching apps still cancels it.
   const ps = `
 $sig = @'
 using System;
@@ -4252,8 +4304,10 @@ while ($true) {
     $h = [Fg]::GetForegroundWindow()
     $pid2 = 0
     [void][Fg]::GetWindowThreadProcessId($h, [ref]$pid2)
+    Write-Output ('FCM_OWNER_PID=' + $pid2)
     $p = Get-Process -Id $pid2 -ErrorAction SilentlyContinue
-    if ($p) { Write-Output $p.ProcessName } else { Write-Output '' }
+    if ($pid2 -eq ${process.pid}) { Write-Output 'fallout-chat-mod' }
+    elseif ($p) { Write-Output $p.ProcessName } else { Write-Output '' }
   } catch { Write-Output '' }
   Start-Sleep -Milliseconds 100
 }`;
@@ -4264,6 +4318,7 @@ while ($true) {
     zorderProc = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true });
     diag('[foreground] win32 poller started (pid=' + (zorderProc && zorderProc.pid) + ')');
     let buf = '';
+    let foregroundOwnerPid = null;
     zorderProc.stdout.on('data', (d) => {
       buf += d.toString();
       let nl;
@@ -4271,6 +4326,10 @@ while ($true) {
         const line = buf.slice(0, nl).trim();
         buf = buf.slice(nl + 1);
         if (!line) continue;
+        if (/^FCM_OWNER_PID=\d+$/.test(line)) {
+          foregroundOwnerPid = Number(line.slice('FCM_OWNER_PID='.length));
+          continue;
+        }
         // A line arrived → the poller is healthy. Stamp the watchdog clock, reset the
         // restart backoff, and clear any fail-closed state from a previous silence.
         lastForegroundAt = Date.now();
@@ -4278,7 +4337,7 @@ while ($true) {
         if (!pollerEverEmitted) { pollerEverEmitted = true; diag('[foreground] win32 poller: first line ("' + line.toLowerCase() + '")'); }
         if (fgFailClosed) { fgFailClosed = false; diag('[foreground] win32 poller recovered — re-evaluating hotkeys'); }
         const foreground = line.toLowerCase();
-        if (foreground && foreground !== 'explorer' && !isGameClass(foreground) && !overlayCore.isOverlayClass(foreground)) cancelGameFocusReturn();
+        if (foreground && foreground !== 'explorer' && !isGameClass(foreground) && !overlayCore.isOverlayClass(foreground)) cancelGameFocusReturn('windows-other-foreground', foregroundOwnerPid);
         lastForegroundProc = foreground;
         if (gameRunning) applyZOrder();
         applyFocusClickThrough();
@@ -5118,6 +5177,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  localBridge.dispose();
   persistBounds();
   if (IS_LINUX) restorePanelHiding();
   // Hyprland's pin is a live attribute of the window object, not a persisted

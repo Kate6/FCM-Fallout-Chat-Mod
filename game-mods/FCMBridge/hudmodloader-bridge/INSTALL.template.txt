@@ -1,181 +1,77 @@
-FCM Server Bridge {version} - {target} local test build
+FCM Server Bridge {version} - {target} native-unverified test candidate
 
-Adds a Server sub-tab to a compatible FCM desktop overlay. The mod runs in the
-background, with no in-game chat window. Use HUDModLoader's menu for connection
-status, account linking and reconnecting; read and send chat in the desktop app.
+This optional invisible HUDModLoader child exports game HUD roster observations
+to the local desktop overlay. Sign into the overlay ONLY. There is no bridge
+login, code, pairing, network connection, or extra service.
 
-BUILD STATUS
-This candidate connects to {host}. Use a matching FCM desktop test
-build connected to that same environment. Server chat requires the matching
-service and desktop updates to be available there; the mod alone cannot enable
-it in an older overlay. In-game testing is still pending. This is not a public
-release package.
+PREREQUISITES
+HUDModLoader plus one supported extender: ZFE with zfe-storage-v1, or xScal with
+__SFCodeObj.version.runtime == xScal and modStorage.register/save. These are
+separate downloads. The visible FCM HUD and legacy FCMBridge must not coexist
+with this background bridge. The default overlay does not install any mods.
 
-BEFORE YOU START
-- Install HUDModLoader and exactly one supported script extender, following
-  their authors' instructions: ZFE with chat.v1, OR xScal with chatInterface.
-  ZFE must advertise zfe-chat-async-control-v1 for safe background room controls.
-  These dependencies and the desktop overlay are separate downloads.
-- Have your FCM account ready. The bridge and desktop overlay must use the same
-  linked account and environment. DEV builds require access to the DEV service.
-- Close Fallout 76 before changing files. Keep a backup of any existing
-  configuration files you edit below.
-- Disable the visible FCMChatWidget and legacy FCMBridge before enabling this
-  bridge: remove only their entries from Data\hudmodloader.ini and the game's
-  archive list. Keep HUDModLoader and unrelated mods enabled. If an older FCM
-  install replaced HUDMenu, disable that replacement and restore HUDModLoader
-  using the loader's instructions. Run only one FCM mod at a time.
+INSTALL (WITH FALLOUT 76 CLOSED)
+1. Back up the exact files being changed. Copy Data/FCMServerBridge.ba2 to the
+   game's Data directory.
+2. Add FCMServerBridge once to Data/hudmodloader.ini. Preserve all unrelated
+   entries. The supplied FCMServerBridge.hudmodloader.ini is a fragment, not a
+   replacement registry.
+3. Append FCMServerBridge.ba2 once to sResourceArchive2List in [Archive] in the
+   active Fallout76Custom.ini. Keep HUDModLoader.ba2 and other mods.
+   Windows: your actual Documents/My Games/Fallout 76 directory (including
+   redirected Documents). Proton: the corresponding game prefix directory.
+4. No extender chat endpoint or native authentication is required. Remove ONLY
+   an older bridge-specific Data/ZFE/TextChat/fragments/FCMServerBridge.ini
+   after backing it up; do not erase shared extender settings or HUD credentials.
+5. Run a compatible {target} overlay pointed at https://{host} and sign in there.
+   Start Fallout 76 and enter a world. Either startup order is supported.
 
-INSTALL
-1. Unzip the download into a temporary folder.
+The {target} environment is compiled into this BA2. EXPORT.json documents its
+exact provider output paths; do not create or edit the exported JSON manually.
+ZFE may use its documented Documents or LocalAppData fallback storage root.
+The desktop reads only known export files, asynchronously, and never writes
+game files. Steam Windows/Linux-Proton are the current native test targets;
+Game Pass is not yet certified.
 
-   Find your Fallout 76 game folder: it is the folder containing Fallout76.exe.
-   Copy the ZIP's Data\FCMServerBridge.ba2 into that game's Data folder:
+STATUS / CHAT
+F11 -> FCM Server Bridge reports provider, export/storage status and cached
+roster diagnostics. Refresh bridge observations retries discovery on a later
+tick; it does not connect to a relay. Exporting is NOT proof of backend room
+confirmation. Server appears in the overlay only after authenticated backend
+confirmation. Party remains a separate overlay feature.
 
-   <game folder>\Data\FCMServerBridge.ba2
+HUD users and bridge-plus-overlay users share the SAME Server room, history and
+message IDs when mutual roster evidence establishes the same world, irrespective
+of ZFE/xScal or Discord/display names. Missing or one-sided observations can delay
+discovery. No authoritative world ID is available; unrelated rooms must not be
+merged to conceal this limitation.
 
-   Do not copy the entire ZIP over existing configuration files. The .example
-   files and FCMServerBridge.hudmodloader.ini are references for the edits below.
-
-2. Register the mod with HUDModLoader.
-
-   Open <game folder>\Data\hudmodloader.ini in a text editor. Add this line once,
-   on its own line, preserving the existing entries:
-
-   FCMServerBridge
-
-   Use the name without .ba2 or .swf. The supplied FCMServerBridge.hudmodloader.ini
-   contains that one line; do not rename it over your existing loader registry.
-   If the registry is missing, finish HUDModLoader's setup first.
-
-3. Enable the archive in Fallout76Custom.ini.
-
-   Windows normally uses:
-   <Documents>\My Games\Fallout 76\Fallout76Custom.ini
-
-   Use your actual Documents folder, including its redirected location if any.
-   Proton/Wine uses the corresponding Documents\My Games\Fallout 76 folder
-   inside the game's prefix.
-
-   In the existing [Archive] section, append ,FCMServerBridge.ba2 to the end of
-   the existing sResourceArchive2List value, once. Preserve the other archives.
-   Do not add a second [Archive] section or a second sResourceArchive2List key.
-   If the section/key is missing, add it. A list with only the loader and bridge
-   looks like this:
-
-   [Archive]
-   sResourceArchive2List=HUDModLoader.ba2,FCMServerBridge.ba2
-
-   Fallout76Custom.ini.example is a reference, not a replacement for your file.
-   If creating the file, save it as plain text named Fallout76Custom.ini, not
-   Fallout76Custom.ini.txt.
-
-4. Configure ONE provider, matching the extender you installed.
-
-   ZFE
-   Copy examples\ZFE\FCMServerBridge.ini.example from the ZIP to:
-
-   <game folder>\Data\ZFE\TextChat\fragments\FCMServerBridge.ini
-
-   Create the destination folders if needed. Remove the .example extension.
-   The file contains:
-
-   [TextChat]
-   Endpoint=wss://{host}/relay
-   DefaultChannel=server
-   AllowedChannels=server
-   AutoConnect=false
-
-   If <game folder>\Data\configuration\zfe.ini already has a [TextChat]
-   section, its keys override this fragment. Update those same keys there when
-   necessary to match the values above. Preserve unrelated settings and avoid
-   duplicate sections/keys. No chat hotkey is needed for this background mod.
-   Skip the xScal instructions below.
-
-   xScal
-   Open xscal.ini beside Fallout76.exe. Merge the following values into its
-   existing [Chat] section, using examples\xScal\xscal.ini.example as a reference:
-
-   [Chat]
-   enabled=true
-   relayEndpoint=wss://{host}/relay
-
-   If the file or section is missing, create it once. Preserve unrelated
-   settings; do not replace the whole file or duplicate the [Chat] section.
-   Do not install the ZFE fragment for xScal.
-
-5. Start the desktop overlay and Fallout 76, then link your account.
-
-   In the game, open HUDModLoader's menu (F11 / DiagnosticSnapshot with the
-   standard keyboard mapping) and select FCM Server Bridge. If your loader menu
-   key is remapped, use that binding.
-
-   If a link code appears, visit https://{host}/link and sign in
-   with the SAME FCM account used by this desktop overlay. Enter the code shown
-   in the menu. Codes expire after ten minutes; use Reconnect bridge if you need
-   a new code. An existing native account link may be reused without a new code.
-
-6. Join a world and check the desktop overlay.
-
-   Once the bridge confirms your room, a Server sub-tab appears under Fallout 76.
-   Select Server to read or send to that room. General also shows its messages;
-   sending from General still sends to General. Each feed keeps one copy of each
-   message, including when messages are delivered again after reconnecting.
-
-   World changes replace the Server room and clear the previous room's messages.
-   Brief same-server fast travel preserves the room when the roster returns unchanged
-   or overlapping. Nearby/team-list changes alone no longer reset Server chat.
-   A prolonged loading screen or missing roster can still expire the binding;
-   the mod never keeps an uncertain room alive indefinitely.
-   Leaving the world removes the tab; if you were viewing it, selection returns
-   to General. Allow for confirmation and the overlay's ten-second refresh.
-   An unexpected disconnect can take about 55 seconds to remove the tab.
+Same-world fast travel retains the generation while evidence remains valid.
+World hopping, main menu, account change, logout, game exit, missing heartbeat
+or expired observations remove stale membership. Five-second heartbeats do not
+refresh the thirty-second observation limit. Old files alone cannot activate
+Server: the overlay requires advancing fresh snapshots after attaching.
+Dev and Prod use separate files and backend environments.
 
 TROUBLESHOOTING
-- FCM Server Bridge is missing from F11: check the BA2 destination, the exact
-  loader line and the archive-list entry. Verify HUDModLoader works, then restart
-  the game. The absence of a chat window is expected for this mod.
-- Waiting for native chat provider / connection error: verify the selected
-  extender supports chat, check its configuration and any overrides above, then
-  restart the game. Use Reconnect bridge to retry a stopped connection.
-- Linked but no Server tab: join a world, confirm the desktop build supports
-  this bridge, and check that both use the same account and environment. The
-  matching service update must also be available. Native linking alone does not
-  confirm a Server room.
-- Waiting for a fresh world roster: inspect the version/provider and Menu,
-  Roster and per-provider diagnostic rows in F11 -> FCM Server Bridge. These
-  cached fixed labels distinguish unavailable data, readiness, loading and
-  rejected lists without showing player data or making native calls. Capture
-  those rows without any link code; do not repeatedly press Reconnect. Version
-  0.1.5 distinguishes getter/processing phases and numeric error IDs, and shows
-  successful subscriptions out of eight. No error message or stack is shown.
-  The Missing class row extracts only a class identifier from the standard
-  E1014 message; other/absent formats show not reported. This is not proof that
-  a class is absent from the package or that the failure is fixed.
-  Version 0.1.6 shares a bounded roster reader with the visible HUD and separates
-  native decoding from session state. Repeated read exceptions back off up to
-  30 seconds; unchanged cache reads do not renew observation freshness. It is a
-  native-unverified candidate, not a confirmed fix for E1014 or the earlier freeze.
-- Multiple devices: use only one active background bridge per FCM account.
-  Close other game sessions using that account and allow their connection to
-  expire. The overlay disables Server access while multiple bridges are active.
-- Players on the same world are missing: rooms are inferred from names exposed
-  by the game's HUD. All participants need working Server chat in the same
-  environment. Opening the map may expose additional names, but incomplete HUD
-  data can still split players into separate rooms. Full-world discovery is not
-  guaranteed in this candidate.
+- No menu: check archive path, loader registry and active custom INI precedence.
+- Scoped storage required: update the selected official extender; the bridge
+  does not fall back to native chat or a separate login.
+- Storage unavailable: check provider-supported storage permissions. Export
+  failures are retried at most once per second.
+- Fresh roster unavailable: inspect fixed Menu/Roster/source diagnostics. Do
+  not share roster JSON, account names or private identifiers in bug reports.
+- Exporting but no Server: confirm overlay build/environment/auth, game
+  detection and advancing export age. Do not edit JSON to force room assignment.
+- Different devices: each overlay accepts only its own local game export and
+  authenticated session; another device's native link cannot grant access.
 
-UPDATE OR REMOVE
-To update this same bridge: close Fallout 76, replace Data\FCMServerBridge.ba2
-with the newer matching-environment build, and review that build's instructions.
-Keep the loader/archive entries once and retain your existing account link.
+UPDATE / REMOVE
+With the game closed, replace only the BA2 with the tested same-environment
+candidate. To remove, remove only FCMServerBridge from the loader registry and
+FCMServerBridge.ba2 from the archive list, then remove that BA2. Keep backups,
+unrelated mods, shared configs and native HUD credentials.
 
-To uninstall: close Fallout 76, remove the FCMServerBridge line from
-Data\hudmodloader.ini, remove only FCMServerBridge.ba2 from sResourceArchive2List,
-and delete Data\FCMServerBridge.ba2. If you installed its ZFE fragment, delete
-Data\ZFE\TextChat\fragments\FCMServerBridge.ini as well. Restore only provider
-settings you changed solely for this bridge, using your backup as a reference.
-Preserve other mods, shared configuration and native account credentials.
-
-This optional mod is installed manually. The desktop overlay never installs it
-or modifies game files. The ZIP includes no scripts or native executables.
+Ruffle/automated checks are required before packaging/installing, but do not
+prove native storage timing or game stability. This build requires fresh
+two-client native acceptance on both extenders before being called verified.

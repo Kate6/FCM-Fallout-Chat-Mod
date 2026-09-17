@@ -410,9 +410,13 @@ the entire surface is inert — see the supporter-tier doc.
 
 ## Background desktop Server bridge
 
-`relay/overlayServerBridge.ts` renews a 45-second device lease only from authenticated
-`FCMBRIDGE/1` roster controls. It resolves exactly one live device linked to the signed-in account,
-checks current token/roster/room/account state, and rejects ambiguity or expiry.
+`relay/localExportBridge.ts` accepts bounded, fresh observations from the overlay's own
+authenticated session. It checks game state, session ownership/connection ordering, environment,
+replay counters and a nonrenewable 30-second evidence deadline. Export names are roster evidence,
+not account authentication. `relay/roomCoordinator.ts` shares assignment/rebinding/backfill with
+the existing native HUD ROSTER dispatcher; no transport/provider-specific rooms are created.
+`relay/overlayServerBridge.ts` retains legacy 0.1.x native lease compatibility. An explicitly
+local-export desktop cannot fall back to those account-wide leases.
 `websocket/bridgeConnection.ts` owns private watched-socket history/live delivery and rejects
 stale asynchronous snapshots. `relay/serverMessageService.ts` is the shared native/desktop
 moderation, account flood-limit, cosmetics and single-publication path. `serverChat.ts` remains

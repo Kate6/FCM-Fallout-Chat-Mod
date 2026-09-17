@@ -30,14 +30,13 @@ import { normalizeDiscordReferences, type DiscordMessageEntity } from '../utils/
 import { outboundAllowedMentions, roleMentionAliases } from '../utils/discordMentions';
 import { normalizeDiscordRelayCard, type DiscordRelayEmbed } from './discordRelayCard';
 import { buildDiscordOverlayCard } from './discordOverlayCommandEmbeds';
-import { stabilizePresenceCount } from '../utils/discordPresence';
+import { getGlobalOnlineCount, noteDiscordMessageActivity } from './onlinePresenceService';
 
 let discordClient: Client | null = null;
 let broadcastFn: ((payload: any, excludeWs?: any) => void) | null = null; // Injected from WS handler to avoid circular deps
 let broadcastUsersFn: ((payload: any, userIds: string[]) => Promise<number>) | null = null;
 let discordStatus = 'disconnected';
-let lastNonZeroPresenceCount = 0;
-let lastNonZeroPresenceAt = 0;
+let presenceUpdatePending = false;
 
 // ZWS watermark -- inserted into all outbound relay messages (game->Discord)
 // so inbound handler can detect and reject echo loops (defense-in-depth)
@@ -436,44 +435,28 @@ async function relayDiscordTyping(typing: Typing): Promise<boolean> {
 }
 
 /**
- * Live "Watching N dwellers tune the Vault-Tec airwaves" presence. Pulled from the
- * WebSocket handlers' client map via a lazy require (avoids the circular import —
- * handlers.ts already imports relayToDiscord from this module).
+ * Shared global activity count: connected HUD/overlay accounts plus humans who
+ * posted in linked Discord channels within fifteen minutes, deduplicated.
  */
-function getOnlineUserCount(): number {
+async function updatePresence(): Promise<void> {
+  if (!discordClient?.user || presenceUpdatePending) return;
+  presenceUpdatePending = true;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const ws = require('../websocket/handlers') as { getClientCount?: () => number };
-    return typeof ws.getClientCount === 'function' ? ws.getClientCount() : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function stablePresenceCount(rawCount: number, now = Date.now()): number {
-  if (rawCount > 0) {
-    lastNonZeroPresenceCount = rawCount;
-    lastNonZeroPresenceAt = now;
-    return rawCount;
-  }
-  return stabilizePresenceCount(rawCount, lastNonZeroPresenceCount, lastNonZeroPresenceAt, now);
-}
-
-function updatePresence(): void {
-  if (!discordClient?.user) return;
-  const n = stablePresenceCount(getOnlineUserCount());
-  const noun = n === 1 ? 'dweller' : 'dwellers';
-  try {
+    let activity: string;
+    try {
+      const n = await getGlobalOnlineCount();
+      activity = `Watching ${n} ${n === 1 ? 'dweller' : 'dwellers'}`;
+    } catch { activity = 'Active user count unavailable'; }
     discordClient.user.setPresence({
       status: 'online',
       // Custom status renders the literal name string without a verb prefix —
       // ActivityType.Watching was being shown without its "Watching " verb on
       // some Discord clients, so we bake the verb into the text ourselves.
-      activities: [{ name: `Watching ${n} ${noun}`, type: ActivityType.Custom, state: `Watching ${n} ${noun}` }],
+      activities: [{ name: activity, type: ActivityType.Custom, state: activity }],
     });
   } catch (err) {
     logger.warn({ err }, 'Failed to update Discord presence');
-  }
+  } finally { presenceUpdatePending = false; }
 }
 
 async function loadRelayMappings(): Promise<Map<string, string>> {
@@ -781,11 +764,8 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
     discordStatus = 'connected';
     logger.info({ tag: discordClient!.user!.tag }, 'Discord bot ready');
     if (onStatusChange) onStatusChange('connected');
-    // Show live WS-connected count in the bot's "Watching ..." status.
-    // Refreshes every 60s — well under Discord's presence rate limit (5/20s per
-    // session) and responsive enough that the count tracks connects/disconnects
-    // without users staring at a stale number for minutes. getClientCount() now
-    // filters to OPEN sockets, so each refresh reflects the true live count.
+    // Refresh the same global count consumed by website/overlay every minute.
+    // An in-flight guard prevents overlapping aggregation/presence updates.
     updatePresence();
     setInterval(updatePresence, 60_000).unref?.();
   });
@@ -812,6 +792,10 @@ async function start(onStatusChange?: (status: string) => void): Promise<void> {
     }
 
     if (!channelId) return;
+
+    // Activity counts participation, not message acceptance. Media-only/filtered
+    // posts still indicate a human is active; automated embeds never do.
+    if (!msg.author.bot && !msg.webhookId) await noteDiscordMessageActivity(msg.author.id);
 
     // (see buildOverLengthDm above for the DM copy-back behaviour)
     // Hard length cap for the bridged channel. Messages of MORE than

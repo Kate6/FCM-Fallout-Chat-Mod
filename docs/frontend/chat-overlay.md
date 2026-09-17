@@ -1,5 +1,9 @@
 # ChatOverlay — One Component, Three Surfaces
 
+Desktop-only channel ordering, visibility and startup defaults are documented in
+[overlay channel customization](../overlay/subtab-customization-and-bridge-review.md).
+These controls are gated by the overlay shell; they do not change website or HUD UI.
+
 **File:** `admin-dashboard/src/features/chat/ChatOverlay.tsx`
 
 This is the single source of truth for the chat UI. It is rendered by all three
@@ -665,10 +669,15 @@ users, who render byte-identically to before the feature existed.
   copies (`content: attr(...)`).
 
 Effects live in `nameEffects.css` as **pure CSS**. No JS animation library may enter
-this component's import graph — the feed is virtualized and memoized, and the Electron
+this component's import graph — the feed retains a bounded message DOM, and the Electron
 overlay draws on top of a running game. `noMotionInOverlay.test.ts` walks the import
 graph transitively and fails CI if Motion ever becomes reachable from ChatOverlay.
 Motion IS used in `CosmeticsPanel`, which the overlay never loads.
+
+Shimmer uses one stepped whole-name color highlight per eight-second cycle (0.48 seconds
+highlighted), with a stable phase and a fixed outline. Character spans are inert; there
+are no per-letter animations or animated shadows. Retained names outside the viewport
+pause, as do names when the document/native overlay reports hidden.
 
 Animated effects compose with the opacity-aware halo; static names keep the existing
 multi-layer `textOutline`. The effect halo becomes lighter with transparent overlay chrome,
@@ -753,8 +762,10 @@ cross-surface identity and ping routing always use the Discord ID.
 
 ## Optional desktop Server bridge
 
-Local candidate FCMServerBridge 0.1.0 uses the same `ChatOverlay` component. On authenticated
-Electron sockets, `bridge:watch` refreshes a private account-derived room. `bridge:state` adds
+Source candidate FCMServerBridge 0.2.0 uses the same `ChatOverlay` component. Electron main
+discovers bounded provider exports and forwards observations using only its authenticated
+session; renderer IPC cannot submit observations or choose a room. `bridge:watch` selects this
+local-export mode. Only a fresh, generation-correlated backend `bridge:state` adds
 a local Server child under Fallout 76; the REST channel tree remains static. The browser/public
 surfaces do not initiate a bridge watch. Server appearing preserves the selected channel; an
 actively selected Server follows its confirmed room changes.
@@ -765,3 +776,9 @@ rows and reject old binding frames. Server sends carry the current binding and n
 offline outbox. Retired presence REST panels and UUID history pagination are excluded for the
 bridge room. See [background bridge](../overlay/zfe/background-server-bridge.md) for setup and
 remaining hosted/runtime acceptance.
+
+Party is independent of Server discovery. Only an explicit HTTP 404 disables its tab. Network,
+authentication, rate-limit, server and malformed-response failures retain retryable query state,
+one immediate retry and a 30-second focused-window recovery interval. The Party browser offers
+manual retry. Public visitors still use only the read-only public endpoint; account changes reset
+feature discovery and use a separate query key.

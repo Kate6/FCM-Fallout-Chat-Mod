@@ -11,7 +11,7 @@
 import cron from 'node-cron';
 import logger from '../config/logger';
 import { query as dbQuery } from '../config/database';
-import { getClientCount } from '../websocket/handlers';
+import { getGlobalOnlineCount } from '../services/onlinePresenceService';
 import { makeJobTracker } from './jobTracker';
 
 /**
@@ -28,14 +28,14 @@ export interface OnlineSnapshotDeps {
   /** Schedules a cron task. Defaults to `node-cron`'s `cron.schedule`. */
   schedule?: CronScheduler;
   /** Returns the current open WebSocket client count. */
-  getClientCount?: () => number;
+  getClientCount?: () => number | Promise<number>;
   /** Executes a parameterized SQL query. */
   dbQuery?: (text: string, params?: any[]) => Promise<{ rowCount?: number | null }>;
 }
 
 export function startOnlineSnapshotJob(deps: OnlineSnapshotDeps = {}): void {
   const schedule: CronScheduler = deps.schedule ?? ((expr, task) => cron.schedule(expr, task));
-  const clientCount = deps.getClientCount ?? getClientCount;
+  const clientCount = deps.getClientCount ?? getGlobalOnlineCount;
   const runQuery = deps.dbQuery ?? dbQuery;
 
   const snapshotTracker = makeJobTracker('[onlineSnapshot]');
@@ -56,8 +56,8 @@ export function startOnlineSnapshotJob(deps: OnlineSnapshotDeps = {}): void {
       return;
     }
     snapshotRunning = true;
-    const onlineCount = clientCount();
     return snapshotTracker(async () => {
+      const onlineCount = await clientCount();
       await runQuery(
         'INSERT INTO online_snapshots (online_count) VALUES ($1)',
         [onlineCount],

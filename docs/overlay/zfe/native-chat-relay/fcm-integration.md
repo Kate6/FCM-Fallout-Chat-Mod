@@ -598,6 +598,13 @@ chat ingestion. The actor comes exclusively from the verified token.
 
 Geometry lives on the active `hud_pairing_tokens.hud_layout` JSONB field, so it
 survives world changes and game restarts and remains separate for each device.
+Horizontal layout coordinates accept integers from `-960` through `2880 - width`,
+allowing manual placement outside the centered 1920×1080 authored HUD frame.
+Width remains 200–1920, height 120–1080, and y remains 0 through `1080 - height`.
+Both widget and relay validators must support this envelope before negative or
+extended-right layouts can be saved/restored through xScal. This changes validation,
+not the wire shape or device ownership rules; it does not detect monitor dimensions.
+
 Replies use private system events `FCMLAYOUT/1;requestId;json` (`null` when absent),
 forwarded only to subscribers for that relay identity, including across replicas.
 They are never saved as messages or bridged to Discord. ZFE's local settings store

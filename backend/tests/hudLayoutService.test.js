@@ -5,11 +5,11 @@ const prisma = require('../src/config/prisma').default;
 const { parseHudLayout, parseHudLayoutControl, readHudLayout, writeHudLayout } = require('../src/services/relay/hudLayoutService');
 const layout = { x: 20, y: 40, width: 600, height: 400 };
 beforeEach(() => jest.clearAllMocks());
-test('validates finite integral on-screen geometry and rejects extra identity/config fields', () => {
+test('validates finite integral bounded geometry and rejects extra identity/config fields', () => {
   expect(parseHudLayout(layout)).toEqual(layout);
-  for (const bad of [null, [], { ...layout, x: -1 }, { ...layout, y: Infinity },
+  for (const bad of [null, [], { ...layout, x: -961 }, { ...layout, y: Infinity },
     { ...layout, width: 2000 }, { ...layout, height: 20 }, { ...layout, x: 0.5 },
-    { ...layout, userId: 'another-device' }, { ...layout, x: 1500 }]) expect(parseHudLayout(bad)).toBeNull();
+    { ...layout, userId: 'another-device' }, { ...layout, x: 2281 }]) expect(parseHudLayout(bad)).toBeNull();
 });
 test('control parser bounds payloads and correlates GET/SET requests', () => {
   expect(parseHudLayoutControl('FCMCTL/1/LAYOUT/GET;one-2')).toEqual({ requestId: 'one-2' });
@@ -69,4 +69,15 @@ test('appearance payloads persist only allowed finite colors and opacity', async
   await writeHudLayout('device-a', appearance);
   prisma.hudPairingToken.findFirst.mockResolvedValueOnce({ hudLayout: appearance });
   expect(await readHudLayout('device-a')).toEqual(appearance);
+});
+
+test('ultrawide offsets survive control parsing and device persistence', async () => {
+  for (const x of [-960, -330, 0, 2280]) {
+    const wide = { ...layout, x };
+    expect(parseHudLayoutControl('FCMCTL/1/LAYOUT/SET;wide-1;' + JSON.stringify(wide)))
+      .toEqual({ requestId: 'wide-1', layout: wide });
+    await writeHudLayout('device-a', wide);
+    prisma.hudPairingToken.findFirst.mockResolvedValueOnce({ hudLayout: wide });
+    expect(await readHudLayout('device-a')).toEqual(wide);
+  }
 });

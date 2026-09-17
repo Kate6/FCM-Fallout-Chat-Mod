@@ -1,0 +1,10 @@
+.fcm-header-menu-item:hover,
+.fcm-header-menu-item:focus-visible {
+  /* Tint the opaque themed panel without overriding its text color. */
+  box-shadow: inset 0 0 0 100px color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.fcm-header-menu-item:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: -1px;
+}

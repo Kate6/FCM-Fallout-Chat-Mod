@@ -1,4 +1,4 @@
-/** Real invisible bridge + the same xScal/ZFE mock transports as the visible HUD. */
+/** Real invisible bridge + provider storage fakes; native chat must remain untouched. */
 @:access(FCMServerBridge)
 @:access(FcmBridgeState)
 @:access(FcmRoster)
@@ -10,13 +10,14 @@ class BridgeRosterScenario {
         timer.run = function():Void {
             try {
                 if (++attempts > 80) throw "bridge setup timed out";
-                if (!bridge.authenticated) return;
+                if (bridge.api == null) return;
                 step(bridge);
-                if (bridge.state.session.room.length == 0) return;
+                if (!bridge.state.fresh(flash.Lib.getTimer())) return;
                 timer.stop();
                 check("actual adapter matches request", bridge.api.provider == provider);
                 run(bridge);
                 bridge.shutdown();
+                check("bridge never authenticates or polls native chat", MockXscal.connectCount == 0 && MockXscal.pollCount == 0 && MockXscal.serverControlCount == 0);
                 check("owned timers and subscriptions released", bridge.disposed
                     && !bridge.timer.running && MockBridgeGameData.subscriptions() == 0);
                 flash.Lib.trace("BRIDGE-ROSTER PASS " + provider + " same=preserved hop=rebound expiry=left mainMenu=left teardown=clean");
@@ -29,11 +30,11 @@ class BridgeRosterScenario {
     }
     static function step(bridge:FCMServerBridge):Void {
         bridge.world(flash.Lib.getTimer());
-        for (_ in 0...4) bridge.poll(flash.Lib.getTimer());
+        // Roster lifecycle only; isolated packaged tests exercise real timed storage writes.
     }
     static function run(bridge:FCMServerBridge):Void {
         var nonce = bridge.state.session.requestId;
-        var room = bridge.state.session.room;
+
         var controls = MockXscal.serverControlCount;
         var leaves = MockXscal.leaveControlCount;
         check("bridge owns no chat UI or editor", bridge.numChildren == 0 && !SharedHUDTools.hasActiveEditor());
@@ -41,7 +42,7 @@ class BridgeRosterScenario {
         MockBridgeGameData.publish("TeamMarkers", {Markers:[]});
         step(bridge);
         check("loading preserves confirmed session", bridge.state.session.requestId == nonce
-            && bridge.state.session.room == room && MockXscal.serverControlCount == controls);
+            && bridge.state.fresh(flash.Lib.getTimer()) && MockXscal.serverControlCount == controls);
         MockBridgeGameData.menu("");
         MockBridgeGameData.publish("TeamMarkers", {Markers:[{name:"DifferentNearbyPeer"}]});
         step(bridge);
@@ -50,7 +51,7 @@ class BridgeRosterScenario {
         step(bridge);
         MockBridgeGameData.map(["PeerB", "PeerA"]);
         step(bridge);
-        check("empty then same reordered roster preserves room without controls", bridge.state.session.room == room
+        check("empty then same reordered roster preserves room without controls", bridge.state.fresh(flash.Lib.getTimer())
             && bridge.state.session.requestId == nonce && MockXscal.serverControlCount == controls);
         MockBridgeGameData.publish("PublicTeamsData", {publicTeams:[{members:[
             {playerName:"PeerA"}, {playerName:"PeerB"}]}]});
@@ -59,7 +60,7 @@ class BridgeRosterScenario {
         bridge.state.roster.emptySince = flash.Lib.getTimer() - 30000;
         step(bridge);
         check("empty map with populated public teams preserves bridge beyond empty grace",
-            bridge.state.session.room == room && bridge.state.session.requestId == nonce
+            bridge.state.fresh(flash.Lib.getTimer()) && bridge.state.session.requestId == nonce
             && MockXscal.serverControlCount == controls);
         for (cycle in 0...3) {
             MockBridgeGameData.map(["PeerB", "PeerA"]);
@@ -72,7 +73,7 @@ class BridgeRosterScenario {
             MockBridgeGameData.publish("TeamMarkers", {Markers:[]});
             step(bridge);
             check("loading does not leave or rebind cycle=" + cycle,
-                bridge.state.session.requestId == nonce && bridge.state.session.room == room
+                bridge.state.session.requestId == nonce && bridge.state.fresh(flash.Lib.getTimer())
                 && MockXscal.serverControlCount == controls && MockXscal.leaveControlCount == leaves);
             MockBridgeGameData.menu("");
             MockBridgeGameData.publish("PublicTeamsData", {publicTeams:[{members:[
@@ -84,7 +85,7 @@ class BridgeRosterScenario {
                     bridge.state.lastNames) == "PublicTeamsData"
                 && bridge.state.roster.emptySince == -1);
             check("repeated travel preserves invisible binding without controls cycle=" + cycle,
-                bridge.state.session.room == room && bridge.state.session.requestId == nonce
+                bridge.state.fresh(flash.Lib.getTimer()) && bridge.state.session.requestId == nonce
                 && MockXscal.serverControlCount == controls && MockXscal.leaveControlCount == leaves
                 && bridge.numChildren == 0 && !SharedHUDTools.hasActiveEditor());
             flash.Lib.trace("BRIDGE-CYCLE PASS " + cycle + " source=PublicTeamsData nonce=preserved controls=unchanged");
@@ -92,41 +93,41 @@ class BridgeRosterScenario {
         MockBridgeGameData.publish("TeamMarkers", {Markers:[{name:"PeerA"}]});
         MockBridgeGameData.map(["NewWorldPeer"]);
         step(bridge);
-        check("genuine hop leaves once and rebinds", MockXscal.leaveControlCount == leaves + 1
-            && bridge.state.session.requestId != nonce && bridge.state.session.room.length > 0
-            && MockXscal.serverControlCount == controls + 2);
+        check("genuine hop changes generation without native controls", MockXscal.leaveControlCount == leaves
+            && bridge.state.session.requestId != nonce && bridge.state.fresh(flash.Lib.getTimer())
+            && MockXscal.serverControlCount == controls);
         var nextNonce = bridge.state.session.requestId;
         MockBridgeGameData.menu("LoadingMenu");
         bridge.state.observedAt = flash.Lib.getTimer() - 30000;
         step(bridge);
-        check("long loading expires without renewing old world", MockXscal.leaveControlCount == leaves + 2
-            && bridge.state.session.room == "" && bridge.sentRequest == "");
+        check("long loading expires without renewing old world", MockXscal.leaveControlCount == leaves
+            && !bridge.state.fresh(flash.Lib.getTimer()) );
         MockBridgeGameData.menu("");
         MockBridgeGameData.map(["NewWorldPeer"]); // Explicit fresh push after expired evidence.
         step(bridge);
         check("fresh post-expiry roster binds with new nonce", bridge.state.session.requestId != nextNonce
-            && bridge.state.session.room.length > 0);
+            && bridge.state.fresh(flash.Lib.getTimer()));
         MockBridgeGameData.menu("MainMenu");
         step(bridge);
         step(bridge);
-        check("main menu leaves exactly once", MockXscal.leaveControlCount == leaves + 3
-            && bridge.state.session.room == "");
+        check("main menu retires evidence without native controls", MockXscal.leaveControlCount == leaves
+            && !bridge.state.fresh(flash.Lib.getTimer()));
         MockBridgeGameData.push("MenuStackData", {isTest:false, dataReady:true, data:{menuStackA:[]}});
         MockBridgeGameData.push("MapMenuData", {isTest:false, dataReady:true,
             data:{MarkerData:[{markerType:"PlayerRemote", text:"FreshEventPeer"}]}});
         step(bridge);
         check("fresh event wins over stale getter", bridge.state.fresh(flash.Lib.getTimer())
             && bridge.state.names(flash.Lib.getTimer()).join("|") == "FreshEventPeer"
-            && bridge.state.session.room.length > 0);
+            && bridge.state.fresh(flash.Lib.getTimer()));
         var freshNonce = bridge.state.session.requestId;
         var freshControls = MockXscal.serverControlCount;
         SharedHUDTools.selectMenu("retry");
         SharedHUDTools.selectMenu("retry");
         check("menu reconnect never calls transport or clears healthy room inline",
-            bridge.connected && bridge.state.session.requestId == freshNonce
+            bridge.api != null && bridge.state.session.requestId == freshNonce
             && MockXscal.serverControlCount == freshControls);
         bridge.tick(null);
-        check("coalesced refresh keeps healthy session", bridge.connected
+        check("coalesced refresh keeps healthy session", bridge.api != null
             && bridge.state.session.requestId == freshNonce);
         var nested = false;
         MockBridgeGameData.onRead = function():Void {
@@ -142,10 +143,10 @@ class BridgeRosterScenario {
         bridge.state.observedAt = staleAt;
         bridge.state.roster = new FcmRoster();
         step(bridge);
-        check("expired divergent event cannot be renewed by stale getter", bridge.state.session.room == "");
+        check("expired divergent event cannot be renewed by stale getter", !bridge.state.fresh(flash.Lib.getTimer()));
         MockBridgeGameData.push("MenuStackData", {isTest:true, dataReady:true, data:{menuStackA:[]}});
         step(bridge);
-        check("test-provider event cannot keep world active", !bridge.state.inWorld && bridge.sentRequest == "");
+        check("test-provider event cannot keep world active", !bridge.state.inWorld );
         flash.Lib.trace("BRIDGE-EVENTS PASS fresh-push=preferred retry=deferred test-provider=rejected");
         var menuControls = MockXscal.serverControlCount;
         var menuNonce = bridge.state.session.requestId;
@@ -221,7 +222,39 @@ class BridgeRosterScenario {
         check("subscription failure is visible without leaking error messages", bridge.callbacks.length == 0
             && [for (item in items) item.label].indexOf("Subscriptions - 0 of 8 E1006") >= 0);
         for (item in items) check("exception text is never rendered", item.label.indexOf("Private") < 0);
+        verifyRestoredReader(bridge);
         flash.Lib.trace("BRIDGE-ERRORS PASS getter=E1014 nested-names=rejected subscribe=E1006");
+    }
+
+    static function verifyRestoredReader(bridge:FCMServerBridge):Void {
+        bridge.state.reset();
+        bridge.state.menu(FcmHudRosterReader.menu(new MockBridgeProvider({menuStackA:[]})));
+        for (key in ["PlayerListData", "PartyMenuList", "TeamMarkers", "VoiceChatAreaData", "MapMenuData", "PublicTeamsData"]) {
+            var rows:Array<Dynamic> = [{displayName:"Peer|A<title>"}, {displayName:bridge.displayName},
+                {displayName:"PeerA"}, {displayName:"NotAPeer", isSelf:true}];
+            var data:Dynamic = rows;
+            if (key == "TeamMarkers") data = {Markers:rows};
+            else if (key == "VoiceChatAreaData") data = {participants:rows};
+            else if (key == "MapMenuData") data = {MarkerData:[{markerType:"PlayerRemote", text:"PeerA"},
+                {markerType:"Location", text:"NotAPeer"}]};
+            else if (key == "PublicTeamsData") data = {publicTeams:[{members:[{playerName:"PeerA"},
+                {playerName:bridge.displayName}]}]};
+            bridge.observe(key, true, new MockBridgeProvider(data));
+            var saved = null;
+            for (entry in bridge.state.roster.entries) if (entry.key == key) saved = entry;
+            check("restored bridge traversal copies valid names for " + key,
+                saved != null && saved.names.join("|") == "PeerA");
+            var at = saved.at;
+            var bad = new ThrowingBridgeName();
+            var broken:Dynamic = [{displayName:bad}];
+            if (key == "TeamMarkers") broken = {Markers:[{displayName:bad}]};
+            else if (key == "VoiceChatAreaData") broken = {participants:[{displayName:bad}]};
+            else if (key == "MapMenuData") broken = {MarkerData:[{markerType:"PlayerRemote", text:bad}]};
+            else if (key == "PublicTeamsData") broken = {publicTeams:[{members:[{playerName:bad}]}]};
+            bridge.observe(key, true, new MockBridgeProvider(broken));
+            check("damaged " + key + " cannot replace or renew evidence",
+                saved.names.join("|") == "PeerA" && saved.at == at);
+        }
     }
 }
 

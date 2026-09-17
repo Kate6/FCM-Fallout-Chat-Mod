@@ -12,6 +12,36 @@
 // watchdog (release keys when the poller goes silent), and the diagnostic logging.
 
 import core from '../overlay-core.js';
+import { readFileSync } from 'node:fs';
+
+describe('Windows foreground process identity', () => {
+  const source = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+  const poller = source.slice(source.indexOf('function spawnWindowsForegroundPoller()'), source.indexOf('function spawnWindowsForegroundPoller()') + 4000);
+  it('canonicalizes only the owning Electron PID, independent of portable product name', () => {
+    expect(poller).toContain("if ($pid2 -eq ${process.pid}) { Write-Output 'fallout-chat-mod' }");
+    expect(poller).toContain("elseif ($p) { Write-Output $p.ProcessName }");
+  });
+  it('retains cancellation when a different application takes foreground', () => {
+    expect(poller).toContain("!overlayCore.isOverlayClass(foreground)) cancelGameFocusReturn('windows-other-foreground', foregroundOwnerPid)");
+    expect(core.isOverlayClass('fallout-chat-mod')).toBe(true);
+    expect(core.isOverlayClass('notepad')).toBe(false);
+    expect(core.isOverlayClass('Fallout Chat Mod Portable Experimental')).toBe(false);
+  });
+  it('records bounded owner metadata separately from foreground classification', () => {
+    expect(poller).toContain("Write-Output ('FCM_OWNER_PID=' + $pid2)");
+    expect(poller).toContain("foregroundOwnerPid = Number(line.slice('FCM_OWNER_PID='.length))");
+    expect(source).toContain("cancelGameFocusReturn('timeout')");
+    expect(source).toContain("cancelGameFocusReturn('show-window')");
+    expect(source).toContain("cancelGameFocusReturn('focus-chat')");
+    expect(source).toContain("win32 helper exited code=' + code + ' signal=' + signal");
+  });
+  it('keeps Windows foreground while the guarded game activation is pending', () => {
+    const handoff = source.slice(source.indexOf('function returnFocusToGame()'), source.indexOf("  if (IS_LINUX) {", source.indexOf('function returnFocusToGame()')));
+    expect(handoff).toContain("if (process.platform !== 'win32') {\n    try { mainWindow.blur(); } catch { /* ignore */ }\n  }");
+    expect(handoff).toContain("sendToRenderer('overlay:blur-input')");
+    expect(handoff).toContain('$owner -eq ${process.pid}');
+  });
+});
 
 const { nextPollerBackoffMs, isForegroundStale, classifyPollerExit } = core;
 

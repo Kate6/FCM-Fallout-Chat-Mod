@@ -1,5 +1,9 @@
 # Discord Bot — Overview
 
+Online counts include Discord-only participants for 15 minutes after a human
+message in a linked channel. See [shared community presence](../realtime/README.md#community-online-count)
+for deduplication, expiry, failure behavior and refresh cadence.
+
 The Fallout Chat Mod Discord bot is a single discord.js `Client` instance
 started by `discordService.start()` in
 [`backend/src/services/discordService.ts`](../../backend/src/services/discordService.ts).

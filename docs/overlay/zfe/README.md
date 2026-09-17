@@ -7,6 +7,23 @@ must not add game-memory reads, code injection, or network/port scanning.
 
 ## Current implementation and verification
 
+**Background bridge 0.2.3 Dev candidate:** replaces native networking/linking
+with provider-scoped local exports. Sign into the overlay only. Visible HUD native
+authentication stays unchanged; both paths share canonical Server rooms/history
+across ZFE/xScal. Full mixed-client and native storage acceptance is required;
+older 0.1.x results below are historical, not acceptance of this candidate. See
+[current bridge contract](background-server-bridge.md) and
+[automated checks, Dev deployment and installed candidates](../../testing/bridge-drop-in-acceptance-2026-09-16.md).
+Desktop/xScal's 0.2.0 export worked; laptop/ZFE created no export. The 0.2.1 laptop
+candidate restores capability-checked `BRG_OBJ` discovery and exposes the selected
+storage route in the loader menu, but the laptop still reported provider pending.
+0.2.2 adds privacy-safe probe/lifecycle diagnostics without relaxing storage gates.
+The native screenshot then localized E1014 to the storage parse phase, with fresh roster
+data. 0.2.3 reuses `FcmJson` for runtime-info/write acknowledgements and forbids packaged
+`JsonParser` linkage. The 2026-09-17 laptop check confirmed active, advancing, fresh ZFE
+exports and the user reported it working. Full mixed-client shared-room/message/travel
+acceptance remains pending; the overlay log did not independently confirm room assignment.
+
 **Current production HUD release (2026-09-16):** visible FCMChatWidget **2.10.110** reapplies an authoritative
 supporter projection to retained rows from the same authenticated sender IDs, fixing old feed rows
 that remained unstyled after a later self-echo gained the star. Same-name foreign rows are excluded.
@@ -31,12 +48,15 @@ startup portion without turning one observed transition into universal hop accep
 on synthetic payloads. The rejected method is diagnostic-only;
 probe results never become roster evidence or renew leases.
 The widget retains copied names plus source timestamps only; unchanged getter reads do
-not renew freshness. FCMServerBridge **0.1.6** retains its separate shared decoder and is
-**previously installed locally with failed native roster acceptance** (`payload E1014` on four sources,
-`test provider` on two, no observed roster). It remains inactive during the visible-widget test.
-The background bridge remains unpublished and separate. The visible widget is now published as
-2.10.110; its desktop ZFE startup binding, Server-send/echo and same-room travel evidence remain
-the native basis for that path.
+not renew freshness. Historical FCMServerBridge **0.1.7** adapted that native-accepted split
+reader and was installed with ZFE for hosted Dev on 2026-09-16. Its desktop ZFE test confirmed
+initial binding, one message echo and retained history through same-world fast travel;
+xScal and laptop acceptance remained pending for that build. The previously
+installed **0.1.6** failed (`payload E1014` on four sources, `test provider` on two, no roster).
+Do not transfer visible-HUD acceptance or publication status to the background bridge.
+The background bridge remains unpublished and separate; its current 0.2.3 status is above.
+The visible widget is published as 2.10.110; its startup, Server-send/echo and same-room travel
+evidence is recorded in the [release record](../../deployment/hud-2.10.110-release-notes.md).
 See [bridge architecture](background-server-bridge.md) and the [test gate](../../testing/hud-automation-plan.md#isolated-packaged-bridge-gate).
 
 Historical **2026-09-15** acceptance: the source and rebuilt SWF/BA2 candidate were
@@ -71,14 +91,12 @@ coverage from remaining native checks. See
 | Duplicate/reconnect/send behavior | [Recovery checks](../../testing/hud-recovery.md), [retry receipts](hud-send-retries.md) |
 | Background HUDModLoader mod for desktop Server chat | [Background bridge implementation and acceptance](background-server-bridge.md) |
 
-The separate [FCMServerBridge diagnostic candidate](background-server-bridge.md) uses
-HUDModLoader and the same native provider adapter. It has no chat widget: status/linking live
-in the loader menu and chat appears in the desktop overlay through a private account/room
-lease. The fresh 0.1.5 bridge is installed locally with xScal, paired with a rebuilt isolated
-Dev overlay 1.4.0. Hosted protocol and in-game acceptance remain pending. The visible widget's
-room alone does not enable desktop Server chat.
+The separate [FCMServerBridge candidate](background-server-bridge.md) uses HUDModLoader
+and a storage-only adapter. Its loader menu shows cached export status, not a login.
+The overlay authenticates observations from its own local game; another device's HUD
+link never grants access. Backend confirmation, not file presence, enables Server.
 
-The previous 0.1.3 run reported an allowed world menu but exceptions on all six roster sources.
+Historical 0.1.3 run: an allowed world menu but exceptions on all six roster sources.
 Installed 0.1.4 adds cached getter/processing phases, numeric exception IDs and subscription
 counts; native acceptance is pending and it does not claim to fix the failure. See the background bridge
 guide for current evidence and next checks.
@@ -217,7 +235,7 @@ Ordinary HTTP(S) URLs embedded in message text follow the same behavior, includi
 also contain bundled emoji; when several links exist, the action opens the first one. Link
 activation is accepted only while `openKey` owns a visible editor and a link row is selected;
 before OpenChat, the same physical key remains a normal Fallout control.
-The highlight color is independently configurable as `Selected message` in F11 → Customize →
+The highlight color is independently configurable as `Selected message` in F11 → Customize → Appearance →
 Colors or as `selectedRowColor` in `FCMChat.ini`; it persists through ZFE storage and the xScal
 device-scoped layout relay.
 Configured feed scrolling acts only while chat owns a visible input session. The blank newest and

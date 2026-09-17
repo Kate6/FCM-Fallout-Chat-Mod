@@ -13,6 +13,9 @@ export interface BridgeBinding {
   requestId: string;
   room: string;
   displayName: string;
+  sessionId?: string;
+  worldGeneration?: string;
+  sequence?: number;
 }
 export type BridgeResolution = { status: 'ready'; binding: BridgeBinding }
   | { status: 'inactive' | 'ambiguous' };

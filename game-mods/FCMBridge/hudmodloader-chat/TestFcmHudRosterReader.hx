@@ -33,6 +33,9 @@ class TestFcmHudRosterReader {
         var same = reader.provider("PlayerListData", data, "Self", 21);
         check(first.revision == same.revision, "reread is not new cache evidence");
         check(same.at == first.at, "unchanged polling cannot extend observation age");
+        var cloned = reader.provider("PlayerListData", ready([{displayName:"PeerA"}]), "Self", 21.5);
+        check(cloned.revision == first.revision && cloned.at == first.at,
+            "replacement native wrappers with identical names cannot renew observation age");
         peer.displayName = "Changed";
         check(first.names.join("|") == "PeerA", "native mutation cannot change an emitted observation");
         var changed = reader.provider("PlayerListData", data, "Self", 22);

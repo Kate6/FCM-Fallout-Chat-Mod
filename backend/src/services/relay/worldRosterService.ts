@@ -26,20 +26,25 @@ export interface RosterEntry {
   seen: string[]; // observed HUD player names (lowercased)
   session: string;
   requestId: string;
+  /** Desktop exports expire at the original observation deadline, not heartbeat. */
+  expiresAt?: number;
 }
 
-export async function setRoster(relayUserId: string, ownName: string, seenNames: string[], requestId = ''): Promise<void> {
+export function normalizeRosterName(name: string): string { return name.trim().toLowerCase().slice(0, MAX_NAME_LENGTH); }
+
+export async function setRoster(relayUserId: string, ownName: string, seenNames: string[], requestId = '', expiresAt?: number): Promise<void> {
   try {
     const redis = await getRedisClient();
     const seen = [...new Set(seenNames
       .map((n) => n.trim().toLowerCase())
       .filter((n) => n.length > 0 && n.length <= MAX_NAME_LENGTH))]
       .slice(0, MAX_NAMES);
-    const name = (ownName || '').trim().toLowerCase().slice(0, MAX_NAME_LENGTH);
+    const name = normalizeRosterName(ownName || '');
     const previous = await readRoster(relayUserId);
     const session = previous && previous.requestId === requestId ? previous.session : randomUUID();
-    const value = JSON.stringify({ name, seen, session, requestId });
-    await redis.set(`${KEY_PREFIX}${relayUserId}`, value, { EX: TTL_SECONDS });
+    const value = JSON.stringify({ name, seen, session, requestId, ...(expiresAt === undefined ? {} : { expiresAt }) });
+    await redis.set(`${KEY_PREFIX}${relayUserId}`, value, expiresAt === undefined
+      ? { EX: TTL_SECONDS } : { PX: Math.max(1, Math.ceil(expiresAt - Date.now())) });
   } catch (err) {
     logger.warn({ err, relayUserId }, '[worldRoster] setRoster failed');
     throw err;
@@ -62,6 +67,7 @@ export async function readRoster(userId: string): Promise<RosterEntry | null> {
   if (!raw) return null;
   const value: unknown = JSON.parse(raw);
   if (!isRosterPayload(value)) return null;
+  if (value.expiresAt !== undefined && value.expiresAt <= Date.now()) return null;
   return { userId, ...value };
 }
 
@@ -86,6 +92,7 @@ async function getAllRosters(): Promise<RosterEntry[]> {
       if (!raw) return null;
       const parsed: unknown = JSON.parse(raw);
       if (!isRosterPayload(parsed)) return null;
+      if (parsed.expiresAt !== undefined && parsed.expiresAt <= Date.now()) return null;
       return { userId: key.slice(KEY_PREFIX.length), ...parsed };
     } catch {
       return null;
@@ -105,6 +112,7 @@ function isRosterPayload(value: unknown): value is Omit<RosterEntry, 'userId'> {
   return typeof value.name === 'string'
     && 'session' in value && typeof value.session === 'string' && value.session.length > 0
     && 'requestId' in value && typeof value.requestId === 'string'
+    && (!('expiresAt' in value) || (typeof value.expiresAt === 'number' && Number.isFinite(value.expiresAt)))
     && Array.isArray(value.seen)
     && value.seen.every((name) => typeof name === 'string');
 }

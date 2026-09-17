@@ -17,6 +17,10 @@ class FcmConfig {
     // ── HUD viewport (HUDModLoader fixed 1920x1080 space) ──────────────────────
     public static inline var VIEW_W:Int = 1920;
     public static inline var VIEW_H:Int = 1080;
+    // Manual offsets beyond the centered authored frame, up to a 32:9 envelope.
+    // This is a safety bound, not runtime viewport detection.
+    public static inline var MIN_X:Int = -960;
+    public static inline var RIGHT_X:Int = 2880;
 
     // ── Geometry + font ────────────────────────────────────────────────────────
     public var x:Int            = 10;
@@ -841,12 +845,12 @@ class FcmConfig {
         return true;
     }
 
-    /** Clamp every numeric value to a safe range; keep the panel on-screen. */
+    /** Clamp every numeric value to a safe range; bound manual horizontal offsets and vertical placement. */
     public function clamp():Void {
         // Size first (x/y bounds depend on it).
         width    = clampInt(width, 200, VIEW_W);
         height   = clampInt(height, 120, VIEW_H);
-        x        = clampInt(x, 0, VIEW_W - width);
+        x        = clampInt(x, MIN_X, RIGHT_X - width);
         y        = clampInt(y, 0, VIEW_H - height);
         inputHeight = clampInt(inputHeight, 28, 120);
         if (inputFontSize != 0) inputFontSize = clampInt(inputFontSize, 8, 47);

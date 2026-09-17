@@ -100,6 +100,25 @@ and after), then redeploy only `fcm-dev-stack` with fresh volumes disabled. Conf
 checkout SHA, running image/source, external health, and the specific public-route regression.
 Never run this operation against the Prod compose or discard local volume/network settings.
 
+On 2026-09-17, the stack-wide redeploy failed while pulling `minio/minio:latest`;
+the existing storage service remained healthy. For a backend-only change, after verifying
+the checkout and backing up/reconciling local edits, use the **existing Dev project name,
+Compose file and env file** with `docker compose up -d --build --no-deps --pull never backend-dev`.
+This rebuilds the backend (including its dashboard assets) without replacing database,
+Redis, MinIO or tunnel containers. It is not a fix for the unavailable MinIO image:
+resolve that separately before the next full-stack deployment. Dokploy may retain the
+failed stack-wide deployment status; verify actual container health, running compiled
+code and external routes rather than reporting that job as successful.
+
+The MinIO reference was corrected on 2026-09-17 to
+`quay.io/minio/minio@sha256:a1a8bd4ac40ad7881a245bab97323e18f971e4d4cba2c2007ec1bedd21cbaba2`.
+A remote pull succeeded and resolved to the running image ID
+`sha256:69b2ec208575b69597784255eec6fa6a2985ee9e1a47f4411a51f7f5fdd193a9`
+(MinIO `RELEASE.2025-09-07T16-13-09Z`), so this changes the image reference, not
+the storage binary or data format. Keep this pin in both the repository's Dev Compose
+and the hosted customized Compose; do not restore the failing Docker Hub `latest` tag.
+The pre-pin hosted Compose is retained under the stack's `reconcile-backups/` directory.
+
 ---
 
 ## Secure remote access (the critical part)

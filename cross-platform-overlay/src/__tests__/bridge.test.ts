@@ -256,6 +256,19 @@ describe('createWebSocketShim (ProxiedWebSocket lifecycle)', () => {
     handlers.message!({ id: ws.id, data: '{"type":"chat:message"}' });
     expect(onmessage).toHaveBeenCalledWith({ data: '{"type":"chat:message"}' });
   });
+  it('dispatches removable message listeners alongside the primary chat handler', () => {
+    const { bridge, handlers } = makeWsBridge();
+    const { ProxiedWebSocket } = createWebSocketShim(bridge);
+    const ws = new ProxiedWebSocket('x');
+    const listener = vi.fn(); const primary = vi.fn(); ws.onmessage = primary;
+    ws.addEventListener('message', listener);
+    handlers.message!({ id: ws.id, data: 'counts' });
+    expect(listener).toHaveBeenCalledOnce(); expect(primary).toHaveBeenCalledOnce();
+    expect(listener.mock.calls[0][0].data).toBe('counts');
+    ws.removeEventListener('message', listener);
+    handlers.message!({ id: ws.id, data: 'chat' });
+    expect(listener).toHaveBeenCalledOnce(); expect(primary).toHaveBeenCalledTimes(2);
+  });
 
   it('send proxies through bridge.wsSend', () => {
     const { bridge } = makeWsBridge();

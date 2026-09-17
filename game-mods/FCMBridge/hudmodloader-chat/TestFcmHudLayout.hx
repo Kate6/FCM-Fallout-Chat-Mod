@@ -1,6 +1,18 @@
 class TestFcmHudLayout {
     static function check(ok:Bool, s:String):Void { if (!ok) throw s; }
     static function main():Void {
+        for (px in [-960, -330, 0, 2280]) {
+            var wide = new FcmConfig();
+            var restore = new FcmHudLayout('wide');
+            check(restore.accept('FCMLAYOUT/1;wide-0;{"x":' + px + ',"y":10,"width":600,"height":260}', wide), 'wide restore');
+            check(wide.x == px, 'wide position preserved');
+            restore.changed();
+            check(restore.request(0, wide).indexOf('"x":' + px) >= 0, 'wide save');
+        }
+        for (px in [-961, 2281]) {
+            var invalidWide = new FcmHudLayout('wide');
+            check(!invalidWide.accept('FCMLAYOUT/1;wide-0;{"x":' + px + ',"y":10,"width":600,"height":260}', new FcmConfig()), 'reject beyond envelope');
+        }
         var cfg = new FcmConfig();
         var state = new FcmHudLayout('test');
         check(state.request(0,cfg) == 'FCMCTL/1/LAYOUT/GET;test-0','initial read');

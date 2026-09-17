@@ -1,4 +1,4 @@
-name: Build Windows (NSIS)
+name: Build Windows (installer or portable)
 
 on:
   workflow_dispatch:
@@ -12,6 +12,11 @@ on:
         required: false
         type: boolean
         default: false
+      target:
+        description: 'Windows artifact to build'
+        type: choice
+        options: [installer, portable, both]
+        default: both
 
 # Least privilege: the build reads the repo and publishes via SSH/HTTP to the
 # backend registry (not via GITHUB_TOKEN), so read is sufficient.
@@ -84,6 +89,12 @@ jobs:
           cd cross-platform-overlay
           npm run build:renderer
 
+      - name: Verify portable packaging regression tests
+        run: |
+          cd cross-platform-overlay
+          npm run test:unit -- __tests__/portable-release.test.js __tests__/portable-mode.test.js
+          if ($LASTEXITCODE -ne 0) { throw 'Portable regression tests failed' }
+
       - name: Build Windows NSIS + portable packages (Azure Trusted Signing)
         env:
           # Azure Trusted Signing auth via EnvironmentCredential. The service principal
@@ -102,11 +113,26 @@ jobs:
           # PR build attempt to sign and fail. publisherName comes from a repo variable
           # so the signer's legal name stays out of git history (it is still public on
           # every signed binary's cert subject).
-          .\node_modules\.bin\electron-builder --win nsis portable --publish never `
+          if ('${{ inputs.target }}' -ne 'portable') {
+          .\node_modules\.bin\electron-builder --win nsis --publish never `
             "-c.win.azureSignOptions.publisherName=${{ vars.AZURE_PUBLISHER_NAME }}" `
             "-c.win.azureSignOptions.endpoint=https://eus.codesigning.azure.net" `
             "-c.win.azureSignOptions.certificateProfileName=fcm-public-trust" `
             "-c.win.azureSignOptions.codeSigningAccountName=fcm-trusted-signing"
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
+          }
+          if ('${{ inputs.target }}' -ne 'installer') {
+          .\node_modules\.bin\electron-builder --win portable --publish never `
+            "-c.extraMetadata.fcmPortable=true" `
+            "-c.extraMetadata.fcmChannel=stable" `
+            "-c.extraMetadata.fcmExperimental=false" `
+            '-c.portable.artifactName=Fallout Chat Mod Portable ${version}.exe' `
+            "-c.win.azureSignOptions.publisherName=${{ vars.AZURE_PUBLISHER_NAME }}" `
+            "-c.win.azureSignOptions.endpoint=https://eus.codesigning.azure.net" `
+            "-c.win.azureSignOptions.certificateProfileName=fcm-public-trust" `
+            "-c.win.azureSignOptions.codeSigningAccountName=fcm-trusted-signing"
+          if ($LASTEXITCODE -ne 0) { throw 'Portable build failed' }
+          }
 
       - name: Verify Windows artifact contract
         env:

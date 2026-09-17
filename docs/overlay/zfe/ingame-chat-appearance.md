@@ -1,7 +1,7 @@
 # HUD appearance and customization
 
-This guide describes the current **FCMChatWidget 2.10.78 local candidate**. It covers source and
-packaged behavior, not the installed or publicly released version. See the
+This guide describes the current FCMChatWidget source, including the unreleased ultrawide
+positioning changes. It does not establish installed or publicly released behavior. See the
 [HUD index](README.md) for verification status and [styling history](../../testing/hud-emoji-status.md)
 for the earlier desktop ZFE confirmation.
 
@@ -27,6 +27,21 @@ generation. Emoji fallback is not evidence of artwork corruption without diagnos
 ## F11 menu
 
 Open **F11 → FCM → Customize**. Settings apply to this HUD, not other players.
+
+Customize now groups controls into **Position**, **Panel size**, **Text and input**,
+**Appearance**, and **Auto-hide**, with Reset all settings at the Customize root.
+These branches contain at most seven entries, avoiding the previous tall control list.
+Colors and its palettes retain their existing submenus under Appearance.
+
+Position accepts manual horizontal offsets from `-960` to `2880 - width` in the
+centered 1920×1080 authored coordinate system. For example, `x=-330` is preserved
+through INI parsing, local persistence and relay layout restore/save. This bounded
+32:9 envelope is not automatic monitor detection: narrower screens can hide the panel
+if moved too far. **Position → Reset position** restores `x=10, y=10` while preserving
+other settings. Vertical limits and panel maximum dimensions are unchanged.
+The relay must deploy the matching layout validator before xScal can save these offsets.
+Native 21:9/32:9 placement, menu visibility and editor alignment still require in-game
+acceptance on both providers; Ruffle only proves the movement/menu/persistence contract.
 
 | Setting | Behavior |
 | --- | --- |

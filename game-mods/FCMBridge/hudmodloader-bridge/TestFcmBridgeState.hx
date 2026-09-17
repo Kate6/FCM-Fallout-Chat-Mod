@@ -99,7 +99,6 @@ class TestFcmBridgeState {
         observe(state, "PlayerListData", ready(data), "Self", 10);
         state.settle(10);
         check(state.fresh(10) && state.names(10).join("|") == "Other", "roster normalized and bounded to unique peers");
-        check(state.target() == "FCMBRIDGE/1;nonce-1", "background control carries an explicit nonce");
         check(!state.session.accept("FCMCTL/1/SERVER-READY:stale|r:old", 10), "stale room confirmation rejected");
         check(state.session.accept("FCMCTL/1/SERVER-READY:nonce-1|r:one", 10), "matching room confirmation accepted");
         menu(state, ready({menuStackA:[{menuName:"LoadingMenu"}]}));
@@ -164,7 +163,11 @@ class TestFcmBridgeState {
         observe(travel, "MapMenuData", ready({MarkerData:[]}), "Self", 30700);
         travel.settle(30700);
         check(!travel.holding(30700) && travel.session.requestId != travelNonce && travel.session.room == "", "empty grace expires at exactly 30 seconds and retires old nonce");
-        check(travel.fresh(30700) && travel.names(30700).length == 0, "new solo candidate does not revive old player-list names");
+        check(!travel.fresh(30700), "unchanged empty getter wrappers cannot establish a fresh solo world after expiry");
+        observe(travel, "MapMenuData", ready({MarkerData:[]}), "Self", 30701, true);
+        travel.settle(30701);
+        check(travel.fresh(30701) && travel.names(30701).length == 0,
+            "fresh solo push does not revive old player-list names");
         var publicTravel = new FcmBridgeState(function() return "public-" + ++nonce);
         menu(publicTravel, ready({menuStackA:[]}));
         observe(publicTravel, "MapMenuData", ready(map), "Self", 100);
@@ -177,14 +180,6 @@ class TestFcmBridgeState {
         publicTravel.settle(200);
         check(!publicTravel.holding(200) && publicTravel.names(200).join("|") == "PeerA|PeerB"
             && publicTravel.session.requestId == publicNonce, "empty map must not hold or reset populated public-team membership");
-        check(FcmBridgeState.linkCode("LINK REQUIRED - visit example/link, sign in, and enter code: ABCD-1234 (expires 10m)") == "ABCD-1234", "link code reads only the canonical notice");
-        check(FcmBridgeState.linkCode("chat contains code: ABCD-1234 (expires 10m)") == "", "chat cannot spoof the link notice");
-        check(!FcmBridgeState.terminal("connecting", "auth.connecting"), "asynchronous connect is not terminal");
-        check(FcmBridgeState.terminal("limited", "auth_token_revoked"), "revocation stops automatic reconnect");
-        check(FcmBridgeState.authenticated({state:"authenticated"}), "ZFE state confirms auth");
-        check(FcmBridgeState.authenticated({status:"authenticated"}), "xScal status confirms auth");
-        check(!FcmBridgeState.authenticated({success:false, state:"authenticated"}), "failed stale auth snapshot cannot authorize");
-        check(!FcmBridgeState.authenticated({status:"connecting", success:true}), "transport acceptance alone cannot authorize");
         var collector = new FcmHudRosterReader();
         var isolated = new FcmBridgeState(function() return "copied-session");
         menu(isolated, ready({menuStackA:[]}));

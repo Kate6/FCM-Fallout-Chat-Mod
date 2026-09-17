@@ -6,6 +6,7 @@ import MockXscal.SimLog;
 
 class FCMHarness extends Sprite {
     public var __SFECodeObj:Dynamic;
+    public var __SFCodeObj:Dynamic;
     public var __ZFE:Dynamic;
     public var BSUIDataManager:Dynamic;
     var widget:FCMChatWidget;
@@ -30,6 +31,7 @@ class FCMHarness extends Sprite {
         if (scenario == "delayed-auth") MockXscal.authReady = false;
         if (provider == "zfe") __ZFE = MockZfe.root();
         else __SFECodeObj = MockXscal.root();
+        if (scenario == "bridge-fast-travel" && provider == "xscal") __SFCodeObj = MockBridgeStorage.root();
         // Deterministic regressions must never load a user's hosted snapshot or send live chat.
         if (scenario != "fast-travel" && scenario != "bridge-fast-travel" && scenario != "delayed-auth" && scenario != "queue-loss")
             MockXscal.loadScenario("/hosted-dev-snapshot.json");
@@ -66,6 +68,7 @@ class FCMHarness extends Sprite {
             if (scenario == "fast-travel") RosterScenario.start(widget, provider);
             if (scenario == "delayed-auth") DelayedAuthScenario.start(widget, provider);
             if (scenario == "queue-loss") QueueLossScenario.start(widget, provider);
+            if (scenario == "ultrawide") UltrawideScenario.start(widget, provider);
             if (scenario == "cosmetics-history") CosmeticsHistoryScenario.start(widget, provider);
         } catch (error:Dynamic) {
             flash.Lib.trace("HARNESS widget construction failed: " + Std.string(error));

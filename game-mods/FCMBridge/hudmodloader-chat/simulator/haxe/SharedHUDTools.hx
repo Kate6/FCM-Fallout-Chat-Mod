@@ -23,10 +23,10 @@ class SharedHUDTools {
     public function new(_:String, __:String) { active = this; }
     public function Register(_:Dynamic):Bool return true;
     public function RegisterMenu(prepare:Dynamic, select:Dynamic):Bool { menuPrepare = prepare; menuSelect = select; return true; }
-    public static function inspectMenu():Array<{id:String, label:String, enabled:Bool}> {
+    public static function inspectMenu(parent:String = ""):Array<{id:String, label:String, enabled:Bool}> {
         if (active == null || active.menuPrepare == null) return [];
         active.menuItems = [];
-        active.menuPrepare("");
+        active.menuPrepare(parent);
         return active.menuItems.copy();
     }
     public static function selectMenu(item:String):Void {

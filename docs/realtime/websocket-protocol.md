@@ -856,17 +856,27 @@ Ordinary text that merely contains `u0000` is returned untouched, so message bod
 silently rewritten. Remove this once ZFE ships a fix *and* the affected builds are out of
 circulation.
 
-## Optional background Server bridge (local 0.1.0 candidate)
+## Optional background Server bridge (0.2.0 source candidate)
 
-Authenticated desktop sockets send `bridge:watch` every ten seconds. The server resolves one
-fresh native bridge leased to the same account and returns `bridge:state`: `status` is ready,
-inactive, ambiguous or unavailable. Ready adds `channelId` (`server:r:<session>`) and an opaque
-`bindingId`. `bridge:history` and `bridge:message` contain those two fields plus normalized
-`messages[]`, preserving each canonical `server:<room>:<sequence>` ID.
+The bridge writes credential-free scoped provider storage; it never authenticates or connects
+to `/relay`. The authenticated desktop selects `bridge:watch {mode:"local-export"}` and forwards
+validated schema-1 `bridge:observe` snapshots. `bridge:leave` revokes that connection immediately.
+See the [exact snapshot contract](../overlay/zfe/background-server-bridge.md#local-export-contract).
+Only header-authenticated desktop sockets with their own `client:status {inGame:true}` may observe.
+Local-export mode never falls back to the legacy account-wide native lease. The existing HUD
+authentication and ROSTER/LEAVE protocol are unchanged; both enter one room coordinator.
+
+`bridge:state` reports ready/inactive/unavailable. Ready adds canonical `channelId`, opaque
+`bindingId`, `sessionId`, `worldGeneration`, and accepted `sequence`. The desktop rejects stale
+generation/binding confirmations. `bridge:history` and `bridge:message` contain binding/channel
+plus normalized `messages[]`, preserving canonical `server:<room>:<sequence>` IDs.
+Observation freshness is capped at 30 seconds from receipt minus reported age; queue time
+consumes this budget. Heartbeats cannot extend it. Per-session connection ordering fences old
+sockets across replicas; leave/exit synchronously fences already queued work and sends.
 
 Server `chat:send` requires `content`, the current `channelId`, and `bridgeBindingId`; membership
 is derived server-side again. Server sends are never queued offline. Snapshots/live events are
 serialized, revalidated and deduplicated; stale bindings are discarded. Public mode and admin
 observer sockets do not participate. Ordinary UUID channel history/typing is unchanged. See
-[background bridge](../overlay/zfe/background-server-bridge.md) for lease keys, moderation,
+[background bridge](../overlay/zfe/background-server-bridge.md) for authority, moderation,
 installation, source ownership and the pending deployment/runtime acceptance.

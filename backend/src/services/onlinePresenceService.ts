@@ -1,8 +1,37 @@
 import { randomUUID } from 'crypto';
 import { getRedisClient } from '../config/redis';
 import logger from '../config/logger';
+import prisma from '../config/prisma';
 
 export const ONLINE_USERS_KEY_PREFIX = 'fcm:online:instance:';
+export const DISCORD_ACTIVITY_KEY = 'fcm:online:discord-active';
+export const DISCORD_ACTIVITY_MS = 15 * 60_000;
+const COUNT_FAILURE_GRACE_MS = 90_000;
+let lastGoodCount: { count: number; at: number } | undefined;
+let countPending: Promise<number> | undefined;
+
+async function presenceRedis() {
+  const redis = await getRedisClient();
+  if (!redis.isReady) throw new Error('Presence storage unavailable');
+  return redis.withCommandOptions({ timeout: 5_000 });
+}
+
+/** Only trusted Discord gateway messages from mapped channels call this. Discord
+ * IDs survive account linking/merges; resolve to current account IDs when counting. */
+export async function noteDiscordMessageActivity(discordId: string): Promise<void> {
+  if (!/^[0-9]{15,22}$/.test(discordId)) return;
+  try {
+    const redis = await presenceRedis();
+    const now = Date.now();
+    await redis.multi()
+      .zRemRangeByScore(DISCORD_ACTIVITY_KEY, '-inf', now)
+      .zAdd(DISCORD_ACTIVITY_KEY, { score: now + DISCORD_ACTIVITY_MS, value: discordId }, { GT: true })
+      .expire(DISCORD_ACTIVITY_KEY, DISCORD_ACTIVITY_MS / 1000)
+      .exec();
+  } catch (err) {
+    logger.warn({ err }, '[onlinePresenceService] Discord activity write failed');
+  }
+}
 
 const ONLINE_USERS_TTL_SEC = 45;
 const INSTANCE_ID = randomUUID();
@@ -38,7 +67,7 @@ export function getLocalOnlineUserIds(): string[] {
 
 export async function flushLocalPresenceToRedis(): Promise<void> {
   try {
-    const redis = await getRedisClient();
+    const redis = await presenceRedis();
     const userIds = getLocalOnlineUserIds();
     const multi = redis.multi();
     multi.del(INSTANCE_KEY);
@@ -75,24 +104,43 @@ export function noteUserDisconnected(userId: string): void {
   void flushLocalPresenceToRedis();
 }
 
-export async function getGlobalOnlineCount(localFallback = 0): Promise<number> {
+async function readGlobalOnlineCount(): Promise<number> {
   await flushLocalPresenceToRedis();
   try {
-    const redis = await getRedisClient();
-    const keys: string[] = [];
-    for await (const key of redis.scanIterator({ MATCH: `${ONLINE_USERS_KEY_PREFIX}*`, COUNT: 100 })) {
-      if (typeof key === 'string') keys.push(key);
+    const redis = await presenceRedis();
+    const keys = new Set<string>();
+    for await (const batch of redis.scanIterator({ MATCH: `${ONLINE_USERS_KEY_PREFIX}*`, COUNT: 100 })) {
+      // node-redis 5/6 yields arrays; retain compatibility with older adapters.
+      for (const key of Array.isArray(batch) ? batch : [batch]) if (typeof key === 'string') keys.add(key);
     }
-    if (keys.length === 0) return 0;
-
-    const users = new Set<string>();
+    const users = new Set(getLocalOnlineUserIds());
     for (const key of keys) {
       const members = await redis.sMembers(key);
       for (const userId of members) users.add(userId);
     }
+    const now = Date.now();
+    await redis.zRemRangeByScore(DISCORD_ACTIVITY_KEY, '-inf', now);
+    const discordIds = await redis.zRangeByScore(DISCORD_ACTIVITY_KEY, `(${now}`, '+inf');
+    // Bounded SQL batches; identities are never returned in public stats.
+    for (let offset = 0; offset < discordIds.length; offset += 500) {
+      const batch = discordIds.slice(offset, offset + 500);
+      const accounts = await prisma.user.findMany({ where: { discordId: { in: batch } }, select: { id: true, discordId: true } });
+      const byDiscord = new Map(accounts.map(account => [account.discordId, account.id]));
+      for (const id of batch) users.add(byDiscord.get(id) ?? `discord:${id}`);
+    }
+    lastGoodCount = { count: users.size, at: Date.now() };
     return users.size;
   } catch (err) {
     logger.warn({ err }, '[onlinePresenceService] failed to aggregate global online count');
-    return localFallback;
+    // A failed read is not a zero or a process-local total. Keep a bounded last
+    // good value, then report unavailable to callers instead of inventing a count.
+    if (lastGoodCount && Date.now() - lastGoodCount.at < COUNT_FAILURE_GRACE_MS) return lastGoodCount.count;
+    throw err;
   }
+}
+
+export function getGlobalOnlineCount(_legacyLocalFallback = 0): Promise<number> {
+  // Share simultaneous reads so bot/site/overlay requests do not duplicate work.
+  if (!countPending) countPending = readGlobalOnlineCount().finally(() => { countPending = undefined; });
+  return countPending;
 }

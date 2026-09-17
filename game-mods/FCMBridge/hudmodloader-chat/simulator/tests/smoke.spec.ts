@@ -407,3 +407,11 @@ test('releases every old provider key before installing a complete rebound profi
   expect(zfeSource).toContain('if (verb == "updateChatHotkey") { hotkey = Std.string(payload); hotkeyDown = false;');
   expect(zfeSource).toContain('if (keyCode == FcmCommand.virtualKeyCode(hotkey)) hotkeyDown = down;');
 });
+
+for (const provider of ['xscal', 'zfe']) {
+  test(`ultrawide positioning and compact customization through ${provider}`, async ({ page }) => {
+    await page.goto(`/?mode=harness&provider=${provider}&scenario=ultrawide`);
+    await expect(page.locator('#log')).toContainText(/ULTRAWIDE (PASS|FAIL)/, { timeout: 25_000 });
+    await expect(page.locator('#log')).toContainText(`ULTRAWIDE PASS ${provider} negative=preserved menus=bounded editor=aligned reset=recovered`);
+  });
+}

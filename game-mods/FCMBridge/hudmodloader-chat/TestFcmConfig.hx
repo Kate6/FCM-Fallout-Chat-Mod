@@ -28,6 +28,11 @@ class TestFcmConfig {
     }
 
     static function main():Void {
+        var wide = FcmConfig.parse("[FCMChat]\nx=-330\nwidth=600");
+        eqi("negative INI x survives", wide.x, -330);
+        eqi("negative x round trip", FcmConfig.parse(wide.toIni()).x, -330);
+        wide.x = -9999; wide.clamp();
+        eqi("left envelope", wide.x, -960);
         // ── parseHexColor: accepts #RRGGBB / RRGGBB / 0xRRGGBB; invalid -> fallback ──
         eqi("hex #RRGGBB",       FcmConfig.parseHexColor("#F5CB5B", 0), 0xF5CB5B);
         eqi("hex RRGGBB",        FcmConfig.parseHexColor("F5CB5B", 0),  0xF5CB5B);
@@ -383,9 +388,9 @@ class TestFcmConfig {
         eqs("blank scroll-bottom stays unset", FcmConfig.parse("[FCMChat]\nscrollBottomKey=\n").scrollBottomKey, "");
         eqi("invalid color->default", bad.bgColor, 0x0A0907);
 
-        // ── x/y clamped into the 1920x1080 viewport given width/height ──
+        // ── x/y clamped into the horizontal envelope and vertical viewport ──
         var off = FcmConfig.parse("[FCMChat]\nx=5000\ny=5000\nwidth=480\nheight=306\n");
-        eqi("clamp x to viewport", off.x, 1920 - 480);
+        eqi("clamp x to horizontal envelope", off.x, 2880 - 480);
         eqi("clamp y to viewport", off.y, 1080 - 306);
 
         // ── section-scoped: keys outside [FCMChat] ignored; comments skipped ──

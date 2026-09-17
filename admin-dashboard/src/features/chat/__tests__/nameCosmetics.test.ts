@@ -249,23 +249,23 @@ describe('supporter effect readability', () => {
     expect(two['--fcm-effect-delay']).not.toBe(one['--fcm-effect-delay']);
   });
 
-  it('sweeps a slow readable gradient across shimmer glyphs without transparent text clipping', () => {
+  it('briefly highlights the whole shimmer name without animated shadows or transparent text clipping', () => {
     const css = readFileSync(resolve(__dirname, '..', 'nameEffects.css'), 'utf8');
 
-    expect(css).toContain('@keyframes fcm-shimmer-letter');
+    expect(css).toContain('@keyframes fcm-shimmer-highlight');
+    expect(css).not.toContain('@keyframes fcm-shimmer-letter');
     expect(css).toContain('.fcm-name-fx--shimmer .fcm-shimmer-letter');
-    expect(css).toContain('animation: fcm-shimmer-letter 8s linear infinite');
-    expect(css).toContain('animation-delay: calc(var(--fcm-effect-delay, 0s) - (var(--fcm-shimmer-index) * 0.22s))');
-    expect(css).toContain('35% {\n    color: color-mix(in srgb, var(--fcm-fx-color) 72%, #fff);');
-    expect(css).toContain('50% {\n    color: #fff;');
+    expect(css).toContain('animation: fcm-shimmer-highlight 8s steps(1, end) infinite');
+    expect(css).toContain('88% {\n    color: color-mix(in srgb, var(--fcm-fx-color) 35%, #fff);');
+    expect(css).toContain('0%, 94%, 100%');
     expect(css).toContain('var(--fcm-fx-outline)');
     expect(css).not.toContain('color: transparent');
     expect(css).not.toContain('-webkit-text-fill-color: transparent');
     expect(css).not.toContain('.fcm-name-fx--shimmer::after');
     expect(css).not.toContain('mix-blend-mode: multiply');
     expect(css).not.toContain('background: repeating-linear-gradient');
-    expect(css).toContain('  .fcm-name-fx--shimmer {\n    /* The static fallback is painted by the letter spans; do not add a second\n       parent halo after the overlay has already adapted each letter\'s outline. */\n    text-shadow: none;\n  }');
-    expect(css).toContain('.fcm-name-fx--shimmer.fcm-no-name-motion {\n  /* Keep viewer opt-out consistent with the reduced-motion fallback. */\n  text-shadow: none;\n}');
+    expect(css).toContain('  .fcm-name-fx--shimmer {\n    color: var(--fcm-fx-color);\n    text-shadow: var(--fcm-fx-outline);\n  }');
+    expect(css).toContain('.fcm-name-fx--shimmer.fcm-no-name-motion {\n  /* Keep viewer opt-out consistent with the reduced-motion fallback. */\n  color: var(--fcm-fx-color);\n  text-shadow: var(--fcm-fx-outline);\n}');
     expect(css).toContain('.fcm-name-fx--shimmer.fcm-no-name-motion .fcm-shimmer-letter');
 
     const component = readFileSync(resolve(__dirname, '..', 'ChatOverlay.tsx'), 'utf8');
