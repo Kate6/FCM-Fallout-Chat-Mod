@@ -1,24 +1,26 @@
-# FCM HUD Mod — post-2.10.85 production release (DRAFT)
+# FCM HUD Mod 2.10.110 production release record
 
-**Status: native-accepted; commit/hosted CI and release-owner publication confirmation pending.**
+**Status: released 2026-09-16 to Nexus, the website feed, and Discord.**
 
-Investigation update: source is now **2.10.110; 2.10.109 was native-accepted on both providers**. The 2.10.108
+Source and published HUD are **2.10.110; 2.10.109 was the native-accepted recovery precursor**. The 2.10.108
 capture proved xScal emits contiguous markers when already-consumed entries age out of its
 128-entry queue. The HUD now acknowledges those without history replay, while actual cursor gaps
 still recover. Fresh 2.10.109 xScal runs on both machines cross the retention boundary without a
 single resync or FCM error. Fresh ZFE 0.15.0 launches restore authentication/history on both and
-confirm the desktop Server room with populated rosters. Publication remains gated on the accepted
-commit, hosted CI, exact artifact verification and release-owner confirmation below.
+confirm the desktop Server room with populated rosters. The final 2.10.110 build added retained
+local-row supporter refresh, passed the complete local/hosted gates, and was published after exact
+artifact verification and release-owner confirmation.
 
-This is a HUD-only release packet. The last Nexus HUD archive was `2.10.85` (published
-2026-09-13). The current source identifies itself as `2.10.110`. Native 2.10.106 restores roster
+This is the completed HUD-only release record. The comparison baseline is Nexus HUD `2.10.85`
+(published 2026-09-13); the released source identifies itself as `2.10.110`. Native 2.10.106 restores roster
 reads but exposes a separate delayed-ZFE-auth race; 2.10.107 adds automatic pending-auth refresh.
 Fresh desktop ZFE logs confirm automatic startup binding, Server sends and one same-room travel
 cycle. Desktop and MSI laptop xScal logs confirm automatic authentication and room binding;
 the desktop's Server send reconciles without duplication. Candidate 2.10.109 then passes the
 former six-minute failure boundary on both xScal machines with contiguous retention markers,
 zero resyncs and zero FCM errors. A follow-up ZFE 0.15.0 run restores auth/history on both and
-desktop Server membership. Hosted CI and release-owner publication approval remain required.
+desktop Server membership. Final 2.10.110 native startup checks, hosted CI, and owner publication
+approval then passed.
 
 The desktop overlay, its installer, and the default EULA-safe overlay path are not part of
 this release. The HUD is the separate, explicit opt-in HUDModLoader `.ba2` track.
@@ -47,25 +49,22 @@ and [native investigation](../testing/hud-xscal-acceptance-2026-09-15.md#210105-
 
 ## Verified comparison baseline and scope (2026-09-16)
 
-- The [Nexus files page](https://www.nexusmods.com/fallout76/mods/4082?tab=files) lists
-  `FCM HUD Mod-2.10.85 (PROD)-Nexus`, uploaded 13 September 2026, as the current HUD file.
-  Its description matches [the previous notes](hud-2.10.85-release-notes.md).
+- The [Nexus files page](https://www.nexusmods.com/fallout76/mods/4082?tab=files) now lists
+  `FCM HUD Mod-2.10.110 (PROD)-Nexus` (file `23572`) as Main; 2.10.85 is archived.
 - Source baseline `cdbddbe0` contains widget `VERSION=2.10.85`. Compare that revision to the
   candidate, not the latest desktop-overlay release or the unrelated intermediate diagnostic builds.
-- The public [release API](https://falloutchatmod.com/api/releases) still reports HUD `2.10.78`
-  alongside overlay `1.3.100`. Website metadata and Nexus are therefore not synchronized.
-  Do not describe the website's metadata as proof of the last Nexus upload.
-- After fetching origin, `origin/prod` (`8bdab8fe`) and `dev` (`9e9ae096`) have identical trees,
-  although their histories differ. The visible HUD's uncommitted 2.10.103-to-2.10.109 delta,
-  its tests and owning documentation are the pending promotion, not a backend/overlay update.
+- The public [release API](https://falloutchatmod.com/api/releases) reports HUD `2.10.110`
+  alongside unchanged overlay `1.3.100`.
+- Commit `775905d0` supplied the final HUD change and production merge `782024f6` promoted the
+  accepted dev tree. Hosted CI, CodeQL, and production deployment completed successfully.
 - Exclude concurrent changes to `cross-platform-overlay/main.js` and
   `cross-platform-overlay/__tests__/hide-show.test.js`, and any concurrent dashboard/overlay
   renderer or identity edits. Preserve separate background-bridge
   documentation edits locally; do not ship a bridge archive, provider DLL or overlay installer.
-- Proposed commit, **not committed; approval required**:
-  `fix(hud): restore server binding and queue recovery`
+- The release was intentionally HUD-only. Concurrent overlay/backend work was not packaged into
+  the HUD ZIP, and no provider DLL or background bridge was included.
 
-## Proposed public patch notes
+## Published public patch notes
 
 - Improved chat responsiveness during busy history and message bursts. The HUD coalesces
   bursty refreshes, reuses unchanged message rows, and keeps rendering in bounded slices.
@@ -98,9 +97,9 @@ Do not repeat 2.10.85's white-flash fix, six-row slicing, full-word typing, lost
 Insert/Delete defaults, or unified-provider packaging as newly introduced features. This release
 builds on them. No claim here covers the separate invisible FCMServerBridge or new backend features.
 
-## Discord announcement draft — not posted
+## Discord announcement — posted
 
-**FCM HUD Mod 2.10.109 — Server-tab recovery and HUD improvements**
+**FCM HUD Mod 2.10.110 — Server-tab recovery and HUD improvements**
 
 This update is for the optional in-game HUD mod only. Desktop overlay downloads are unchanged.
 
@@ -112,20 +111,21 @@ This update is for the optional in-game HUD mod only. Desktop overlay downloads 
 - Improves delayed authentication and ZFE send/history completion handling.
 - Stops xScal's bounded queue-retirement notices from triggering repeated history resyncs while
   preserving recovery for actual unread gaps.
+- Refreshes retained messages from the authenticated local account when authoritative supporter
+  styling arrives; same-name messages from other accounts remain unchanged.
 
 Exit Fallout 76 before updating. Replace the HUD BA2 and version stamp, preserve customized
 settings and other mods, and merge any new settings from the included instructions. Use one
 provider, ZFE or xScal; do not coinstall the visible HUD with FCMBridge/FCMServerBridge.
 
-Download: use the approved HUD-only Nexus file link after upload. No live URL is fabricated here.
-Post only after the blocker and release gates below are cleared. Retain the prior announcement
-policy: HUD update role only, `suppressNotifications: true`, never `@everyone`.
+The backend posted this to the configured HUD update channel with the HUD role only,
+`suppressNotifications: true`, and no broad mention parsing.
 
-## Nexus file draft — not uploaded
+## Nexus file — published
 
-**Name:** `FCM HUD Mod-2.10.109 (PROD)-Nexus`
+**Name:** `FCM HUD Mod-2.10.110 (PROD)-Nexus`
 
-**Version:** `2.10.109` (final publication approval pending)
+**Version:** `2.10.110` (Nexus file `23572`, Main)
 
 Unified optional HUDModLoader widget for ZFE or xScal, configured for production. Restores
 automatic Server-tab binding and native roster compatibility, improves loading continuity,
@@ -150,8 +150,8 @@ included. Follow INSTALL.txt and preserve your existing loader/archive registrat
 | 2.10.106 | Restores earlier widget traversal and map/team helper. **Native populated-roster reads observed; Server joining still blocked by pending auth.** |
 | 2.10.107 | Recheck pending ZFE authentication automatically. **Desktop ZFE startup binding, Server-send/echo and one same-room travel cycle pass; both xScal machines bind automatically; desktop xScal send/echo passes. All 35 Ruffle cases pass again. Long-session xScal dropped-event/resync loop blocks release.** |
 | 2.10.108 | Adds bounded numeric-only queue diagnostics. **Both-machine native evidence proves xScal's marker is contiguous queue retirement, not an unread gap. Diagnostic-only; not published.** |
-| 2.10.110 | Repaint retained local-account rows when authoritative supporter cosmetics arrive; same-name foreign rows remain unchanged. Native acceptance pending. |
 | 2.10.109 | Acknowledge contiguous/stale retirement markers while retaining fail-closed recovery for forward or unidentified gaps. **All 37 Ruffle cases and local build gates pass; both xScal machines cross the old boundary with zero resyncs/errors; ZFE 0.15.0 startup/auth/history and desktop Server binding pass.** |
+| 2.10.110 | Repaint retained local-account rows when authoritative supporter cosmetics arrive; same-name foreign rows remain unchanged. **Final local gate, hosted CI, final ZFE startup checks on both machines, retained 2.10.109 xScal recovery evidence, and publication passed.** |
 
 ## Release gate
 
@@ -166,10 +166,10 @@ The production release gates are:
    user-launched: link/authenticate, receive static history, confirm the Server tab, send and
    receive a Server message, transition through loading/fast travel, and leave to the main menu.
    There must be no roster-snapshot `E1014` and no unconfirmed Server-room exposure.
-4. **Pending accepted commit/hosted CI:** build fresh production packages from the accepted commit. Verify the normalized SWF equals
+4. **Passed:** build fresh production packages from the accepted commit. Verify the normalized SWF equals
    the BA2-extracted SWF, inspect production endpoint stamps, and generate the separate
    executable-free Nexus archive.
-5. **Pending owner confirmation:** before any production publication, confirm the final widget version, public notes, release
+5. **Passed:** before production publication, confirm the final widget version, public notes, release
    target (`hud`), download URL, and announcement behavior with the release owner.
 
 ## Publishing reminder
@@ -181,23 +181,25 @@ The Nexus package must contain no executable or script files. Do not replace the
 download or describe the HUD as required for ordinary Fallout Chat Mod use.
 
 The existing `POST /admin/releases` is not merely a Discord post: it verifies overlay URLs,
-upserts release metadata by overlay version, and mirrors to GitHub. Before using it, confirm the
-exact HUD URL/version and these metadata side effects with the owner. Preserve the existing
-overlay version/download values; never rebuild or overwrite overlay binaries for this HUD update.
-No API publish, upload, announcement, commit, push or prod merge has occurred in this preparation.
+upserts release metadata by overlay version, and attempts a best-effort GitHub mirror. For this
+release the missing Linux 1.3.100 website artifacts were restored byte-for-byte from the existing
+Nexus Linux bundle so the fail-closed verifier could pass. The request preserved overlay version
+and download values, updated only the HUD metadata, and posted the suppressed HUD-role announcement.
+The GitHub mirror returned 401 and remained non-fatal; Nexus, website metadata, and Discord all
+completed successfully.
 
-## Built 2.10.109 candidate files — final publication approval pending
+## Published 2.10.110 files
 
-Directory: `/tmp/fcm-hud-release-2.10.109-final/`.
+Build directory: `/tmp/fcm-hud-release-2.10.110-final/`.
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `FCM HUD Mod-2.10.109 (PROD)-Nexus.zip` | 5,991,493 | `8ca8d44f0437332feb2fb7bee8084c7dd80f66ca4591681189ad5a24eea1852c` |
-| `FCM HUD Mod-2.10.109 (PROD).zip` | 5,992,903 | `5c36bd3ff135df5b203cb165338e42b929c40f534173d46eaee6aee1a0a8abd6` |
+| `FCM HUD Mod-2.10.110 (PROD)-Nexus.zip` | 5,991,747 | `6883fa5f0ff734590027e82c053c116c5a235c7756633d0b9ce47b63567df0db` |
+| `FCM HUD Mod-2.10.110 (PROD).zip` | 5,993,156 | `1a8be8f7b48d5f74ad2e992fbdce4ae4703e6e2a7d47047a64d4b97b0403fc90` |
 
 Both contain the exact tested BA2, SHA-256
-`e19f41ac36ab33697135f0b53dd48d43c2e87b5ca2309a5e8261d5f80167ab6b`.
+`7db1b0149d637772c0c1db8b884c8dc41e3017c0833e23ad242db50edd7422b2`.
 The fresh compile, normalized SWF and BA2-extracted SWF compare byte-for-byte. Production
 endpoint stamps are verified for both providers, Nexus CRCs pass, and the 17-entry Nexus
 manifest contains no executable/script/extender files. All 37 Ruffle cases passed;
-the owned server released its test port. Hosted CI for the new uncommitted delta remains pending.
+the owned server released its test port, and hosted CI passed on production merge `782024f6`.

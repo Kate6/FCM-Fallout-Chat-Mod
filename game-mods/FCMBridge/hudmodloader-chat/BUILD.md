@@ -7,13 +7,30 @@ This is the explicit opt-in HUD-mod track. The desktop overlay never installs or
 
 ## Status and scope
 
+**Released 2026-09-16.** Commit `775905d0` was promoted to production through merge
+`782024f6`. The complete local Haxe/source/package/SWF/BA2/emoji gate and 37-case Ruffle suite
+passed, followed by hosted CI and fresh native checks. The exact production packages are:
+
+| File | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `FCM HUD Mod-2.10.110 (PROD)-Nexus.zip` | 5,991,747 | `6883fa5f0ff734590027e82c053c116c5a235c7756633d0b9ce47b63567df0db` |
+| `FCM HUD Mod-2.10.110 (PROD).zip` | 5,993,156 | `1a8be8f7b48d5f74ad2e992fbdce4ae4703e6e2a7d47047a64d4b97b0403fc90` |
+
+Both packages contain BA2 SHA-256
+`7db1b0149d637772c0c1db8b884c8dc41e3017c0833e23ad242db50edd7422b2`.
+Nexus file `23572` is Main and the website release feed reports HUD `2.10.110` while retaining
+desktop overlay `1.3.100`. The HUD-only Discord announcement was posted with suppressed
+notifications. The [release record](../../../docs/deployment/hud-2.10.110-release-notes.md)
+contains the public notes and evidence split.
+
 Fresh 2.10.108 logs from both xScal machines prove its retention marker is contiguous with the
 last consumed cursor at the 128-entry boundary. The old unconditional loss path replayed history;
 that replay generated a 77-entry retirement marker and sustained the loop. 2.10.109 acknowledges
 contiguous or stale retirement markers without resyncing. A marker that skips forward, lacks a
 usable ID, or otherwise proves an unread gap still fails closed into the existing recovery path.
-Pure tests and compiled scenarios cover both cases. The bounded numeric-only diagnostics remain;
-fresh native acceptance is required before publication.
+Pure tests and compiled scenarios cover both cases. The bounded numeric-only diagnostics remain.
+Fresh 2.10.109 xScal runs on both test machines crossed the former failure boundary with no
+history resync and no FCM errors; 2.10.110 retained that behavior.
 
 2.10.105 native probes confirmed E1014 before the first instruction of `FcmRoster.readNative`,
 including on empty/local synthetic payloads; numeric helpers passed. 2.10.106 restores the
@@ -37,8 +54,9 @@ exercise both providers through real timer-driven auth, roster and visible-tab r
 Fresh 2.10.107 desktop ZFE logs now confirm automatic authentication, history completion and
 relay-confirmed binding, followed by a populated 23-name map roster, without a user send or
 roster error. Two Server sends reconcile their echoes without duplicate rows, and one loading/
-fast-travel cycle preserves the room despite empty auxiliary lists. Real hop/MainMenu, repeated/
-extended empty-primary fallback and laptop/xScal checks remain outstanding.
+fast-travel cycle preserves the room despite empty auxiliary lists. In that intermediate run,
+real hop/MainMenu, repeated/extended empty-primary fallback and laptop/xScal checks remained
+outstanding; later release evidence is summarized above.
 See the [fresh evidence](../../../docs/testing/hud-xscal-acceptance-2026-09-15.md#210107-desktop-zfe-automatic-startup-binding-passes).
 
 2.10.107 passes all local Haxe/source/emoji/artifact/package checks and the complete **35-test**
@@ -48,7 +66,8 @@ Production-target ZFE/xScal Nexus and unified website artifacts are built under
 on the desktop after verifying the game closed. Exact prior files are recoverable under
 `.extender-backups/before-fcm-hud-2.10.107-dJcA9w/`. Settings and loader configuration are
 byte-identical; saved auth remains untouched. Desktop ZFE startup binding, Server send/echo
-and one same-room travel cycle pass natively; the candidate is not published.
+and one same-room travel cycle passed natively. This paragraph describes the unpublished
+2.10.107 precursor, not current release status.
 
 The subsequent authorized test setup installs the same 2.10.107 BA2/stamp on the MSI laptop
 through SSH Manager and switches only the desktop provider DLL from ZFE to the verified
@@ -59,11 +78,13 @@ on both machines at install time; see the [installation evidence](../../../docs/
 
 Subsequent xScal logs confirm automatic authentication and binding on both machines and a matched
 desktop Server-send echo. However, both develop repeated dropped-event/history-RESYNC cycles
-after roughly six minutes. This unresolved native issue blocks prod promotion/publication.
+after roughly six minutes. This issue blocked 2.10.107. The 2.10.108 diagnosis established
+contiguous queue retirement, and 2.10.109 fixed the recovery decision without weakening real-gap
+handling; that correction shipped in 2.10.110.
 The complete 35-case Ruffle rerun and local source/artifact checks pass, but do not accept the
 soak-test failure. Fresh byte-identical builds and unified prod Nexus/website packages are in
-`/tmp/fcm-hud-release-2.10.107-VbN645/`, marked as blocked candidates in the
-[release packet](../../../docs/deployment/hud-post-2.10.85-release-notes-draft.md).
+`/tmp/fcm-hud-release-2.10.107-VbN645/`, recorded as blocked historical candidates in the
+[release record](../../../docs/deployment/hud-2.10.110-release-notes.md).
 
 ### Previous diagnostic candidate
 
@@ -96,8 +117,8 @@ General/Server echoes and room continuity through two loading transitions with a
 The exact empty-map fallback still needs native acceptance. That visible HUD was then retained
 inactive for the separate FCMServerBridge/xScal/hosted-Dev test; the desktop is now testing the
 visible widget again. The two must not share the native queue.
-Prod is unchanged. The widget is not published, and hosted CI
-is still required for promotion.
+At that point Prod was unchanged and hosted CI was still required. This is historical evidence
+for 2.10.102; see the release status at the top of this file for the current state.
 The 2.10.100 correction keeps the low-end render coalescing/six-row slices while moving ZFE's
 two-stage send/control receipt decoding onto the bundled GFx-safe JSON reader.
 The 2.10.101 correction prefers fresh map/player rosters over nearby/team lists, waits through
@@ -349,5 +370,5 @@ Building or packaging does not deploy the relay, modify a game install, or publi
 The backend defaults `RELAY_PRODUCTION_ENABLED` to false; verify deployment configuration and
 an authenticated target handshake before a release. Keep backend permissions/migrations and
 widget capability negotiation aligned. Complete hosted CI, target/provider runtime acceptance,
-and the applicable release/distribution checks before publishing. This documentation audit
-performed no deployment, installed-game change, or publication.
+and the applicable release/distribution checks before publishing a future build. The 2.10.110
+release evidence above is the completed instance of this gate.

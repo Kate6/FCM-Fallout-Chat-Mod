@@ -77,6 +77,14 @@ Some native responses report transport authentication without a linked FCM accou
 not clear the widget’s sticky link gate or the relay’s send permission check. The token can be linked after a web device-code flow;
 the normal relay event flow then refreshes the widget state.
 
+Provider startup is asynchronous. `status:"connecting"`, a missing stable local identity, or a
+history event is not authenticated readiness. From HUD 2.10.107, every ordinary event-poll cycle
+rechecks ZFE while auth is pending or identity is missing, matching the existing continuous xScal
+refresh. Once ZFE returns a settled linked identity, the widget stops redundant reads. This is the
+critical startup recovery path: roster/history may already be buffered, but Server remains hidden
+until auth becomes ready, the roster control is sent, and the relay emits matching
+`FCMCTL/1/SERVER-READY`. Sending a General message must not be required to refresh auth.
+
 HUD reload recovery also covers limited identities. An exact `server` send of
 `FCMCTL/1/RESYNC`, authenticated with a valid relay token, reissues the private link notice
 to that identity's surviving subscriber(s). It does not enable sending or room controls and
@@ -253,6 +261,13 @@ from producing two HUD events. The provider RPC itself is queued one timer tick 
 render because both ZFE and xScal expose a synchronous call surface; this avoids making a socket
 timeout look like a missing local message. The matching backend deployment is required for the
 same-process latency path.
+
+From HUD 2.10.110, an authoritative ACK or self-echo also refreshes retained messages from the
+authenticated local account. The widget matches only stable sender IDs against the relay and
+linked-account aliases learned from auth; it never promotes rows by display name alone. This lets
+older local history gain a newly resolved supporter star, tag, and colors while leaving another
+account's same-name messages unchanged. The projection is presentation-only and does not rewrite
+message identity, channel, body, timestamp, or room membership.
 The shared finalizer passes the server-resolved supporter tier to the outbound Discord
 relay, which renders the immutable `★` beside the author; Discord cannot reproduce the
 web/HUD star colour in ordinary message text.

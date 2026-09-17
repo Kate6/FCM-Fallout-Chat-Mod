@@ -1,6 +1,6 @@
 # SERVER session binding
 
-Introduced in v2.10.58 and retained by the local 2.10.78 candidate. The observations below are
+Introduced in v2.10.58 and shipped with the current 2.10.110 HUD. The observations below are
 dated; [the HUD index](../README.md) owns current build and in-game verification status.
 
 Visible HUD widgets use this native binding directly. The separate
@@ -36,6 +36,15 @@ Same/overlapping recovered lists retain Server history, selection, and nonce. Di
 primary lists still leave/rebind, and MainMenu still leaves immediately. This is a continuity
 heuristic on the exposed HUD data, not a new authoritative server identifier.
 
+Authentication readiness and roster readiness are independent gates. Native history and roster
+events may arrive while the provider still reports `connecting` or lacks a stable authenticated
+sender ID. The widget retains that bounded evidence but does not send `ROSTER`, expose Server, or
+accept room rows until authentication is linked and the relay confirms the current request ID.
+From 2.10.107, the ordinary event poll rechecks pending/missing-identity ZFE auth just as the xScal
+path already did. This fixes the startup race where sending an unrelated message happened to force
+the missing refresh. Once ZFE is settled, the widget stops redundant auth reads. A send is neither
+required nor accepted as proof of authentication.
+
 ## Protocol
 
 Existing `FCMCTL/1/ROSTER`, WORLD and LEAVE bodies remain compatible. A new widget includes
@@ -64,6 +73,12 @@ before link-notice rendering and accepts only its current request ID. Native RPC
 logged as acceptance, never as proof of delivery. Pending binds retry every 10 seconds; confirmed
 sessions refresh every 30 seconds and lose readiness after 60 seconds without confirmation.
 
+Saved provider credentials belong to ZFE/xScal, not the BA2. On a normal game launch the provider
+restores its token, the widget obtains authenticated identity through `getAuthState`, drains history,
+submits the current roster, and waits for matching `SERVER-READY`. If any stage is pending, Server
+stays hidden while static channels may still render. A completed web link or recovered sign-in
+notice re-arms history and roster recovery; it does not bypass confirmation.
+
 The widget holds up to 64 early server rows until confirmation, then validates them before
 rendering. This preserves live rows that arrive during the history read. It requires canonical message IDs prefixed
 with `server:<confirmedRoomKey>:`. An outgoing SERVER message carries
@@ -80,9 +95,12 @@ Stale UI data remains a runtime concern. A solo room means no confirmed matching
 not an empty Fallout world. Cluster membership changes can change the ephemeral room key;
 history continuity is not guaranteed after the last FCM participant leaves.
 
-Automated tests cover both adapters, map/team shapes, main-menu detection, delayed confirmation
+Automated tests cover both adapters, map/team shapes, delayed provider authentication, main-menu detection, delayed confirmation
 rejection, expiry, old-room row/send rejection, empty-room confirmation, replay order, solo hops,
-storage failures and mutual-sighting isolation. They run in the existing Haxe and backend CI jobs.
+storage failures and mutual-sighting isolation. The delayed-auth scenario begins with history and
+roster evidence already present, advances normal timers, and requires authentication, one roster
+control, relay confirmation, and a visible Server tab without a user send. These checks run in the
+Haxe/Ruffle and backend CI jobs; native logs remain required for the extender/GFx boundary.
 
 For live acceptance, test two linked FCM users on the same public world, first before and then
 after opening the map. Check that both report nonzero roster names and the same confirmed room,

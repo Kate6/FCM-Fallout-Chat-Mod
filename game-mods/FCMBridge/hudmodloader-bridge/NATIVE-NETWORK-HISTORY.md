@@ -17,7 +17,7 @@ acceptance remain pending. No publication is claimed. See the
 
 ## Restored-reader candidate (0.1.7)
 
-The [HUD release packet](../../../docs/deployment/hud-post-2.10.85-release-notes-draft.md)
+The [HUD release record](../../../docs/deployment/hud-2.10.110-release-notes.md)
 and its native evidence supersede the earlier recommendation to repeat the synthetic probe.
 HUD 2.10.105 already failed that probe before decoder entry; 2.10.106 restored populated reads
 by returning to the earlier split traversal. Subsequent 2.10.109 runs confirm automatic Server
