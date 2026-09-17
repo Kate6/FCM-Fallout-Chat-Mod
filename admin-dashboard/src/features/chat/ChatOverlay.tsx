@@ -1,5 +1,6 @@
 import { nextConversation, type NavigationSlot } from './channelNavigation';
 import { isOlderHistoryBatch } from './historyPagination';
+import { loadPartyDirectory, readPublicPartyDirectory, partyRecoveryInterval } from './partyAvailability';
 import { FONT_OPTIONS, FONT_SAMPLE, normalizeFontId, resolveFontFamily, OVERLAY_SETTINGS_EVENT, type FontId } from './overlayFonts';
 import { INACTIVE_BRIDGE, readBridgeState, mergeBridgeRows, clearBridgeRows, bridgeSendPayload, type BridgeState } from './bridgeFeed';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -4764,42 +4765,28 @@ export default function ChatOverlay() {
     return () => clearTimeout(t);
   }, [partySearch]);
 
-  const { data: partiesData, refetch: refetchParties } = useQuery({
-    queryKey: ['parties', debouncedPartySearch, partySort, isPublicMode],
-    queryFn: () => (
+  const { data: partiesData, refetch: refetchParties, isError: partiesError } = useQuery({
+    queryKey: ['parties', debouncedPartySearch, partySort, isPublicMode, user?.id],
+    queryFn: () => loadPartyDirectory<Party>(() => (
       // Public (logged-out) visitors have no auth token — hit the public,
       // read-only endpoint that returns ONLY public parties via a plain fetch
       // (api.get would attach/expect auth). Auth users use the full endpoint.
       isPublicMode
         ? fetch(`/api/parties/public?search=${encodeURIComponent(debouncedPartySearch)}`)
-            .then(r => r.json())
-            .then(j => (j?.data ?? j) as { parties: Party[] })
+            .then(readPublicPartyDirectory)
         : api.get<{ parties: Party[] }>(
             `/api/parties?search=${encodeURIComponent(debouncedPartySearch)}&sort=${partySort}`
           )
-    ).then(d => {
-      // Treat ANYTHING that isn't a well-formed { parties: [...] } payload as
-      // "parties unavailable". The dev overlay points at the PROD backend,
-      // where /api/parties may not exist yet — instead of a clean 404 it can
-      // return 401 (requireClientAuth), an HTML error page (non-JSON), or a
-      // 200 with the wrong shape. Only a real parties array flips the feature ON.
-      if (!d || !Array.isArray((d as any).parties)) {
-        setPartiesAvailable(false);
-        return null;
-      }
-      setPartiesAvailable(true);
-      return d;
-    }).catch(() => {
-      // Any failure — 401/403/404/parse error/network — means the feature is
-      // not usable against this backend. Hide the tab rather than leave it
-      // clickable (and crash-prone) against a backend that lacks the endpoint.
-      setPartiesAvailable(false);
-      return null;
-    }),
+    )),
     enabled: isOnPartyTab || partiesAvailable === null,
     staleTime: 10_000,
-    retry: false,
+    retry: 1,
+    refetchInterval: query => partyRecoveryInterval(query.state.status),
   });
+  useEffect(() => { setPartiesAvailable(null); }, [isPublicMode, user?.id]);
+  useEffect(() => {
+    if (partiesData !== undefined) setPartiesAvailable(partiesData !== null);
+  }, [partiesData]);
 
   const { data: partyInvitesData, refetch: refetchPartyInvites } = useQuery({
     queryKey: ['party-invites'],
@@ -9653,7 +9640,13 @@ export default function ChatOverlay() {
           )}
 
           {isOnPartyTab && partyView === 'browser' ? (
-            <PartyErrorBoundary>{renderPartyContent()}</PartyErrorBoundary>
+            <PartyErrorBoundary>
+              {partiesError && <div role="status" style={{ padding: '8px', color: primaryColor }}>
+                Party list temporarily unavailable. Retrying automatically.
+                <button type="button" onClick={() => void refetchParties()}>Retry now</button>
+              </div>}
+              {renderPartyContent()}
+            </PartyErrorBoundary>
           ) : isOnPmTab && pmView === 'inbox' ? (
             renderPrivateInboxContent()
           ) : adminFeedActive ? (

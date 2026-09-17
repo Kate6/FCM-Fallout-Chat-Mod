@@ -78,3 +78,23 @@ test('disposed connection cannot emit a pending snapshot', async () => {
   s.bridge.dispose(); gate.resolve([event()]); await work;
   expect(s.frames).toHaveLength(count);
 });
+test('local-export opt-in synchronously fences a delayed legacy account-wide resolution', async () => {
+  const s = setup(), gate = deferred(); s.deps.resolve.mockReturnValueOnce(gate.promise);
+  const legacy = s.bridge.watch(); await new Promise(setImmediate);
+  const local = s.bridge.watch('local-export');
+  gate.resolve({ status: 'ready', binding });
+  await Promise.all([legacy, local]);
+  expect(s.frames.some(frame => frame.payload.status === 'ready')).toBe(false);
+  expect(s.deps.history).not.toHaveBeenCalled();
+});
+test('a delayed send guard cannot revive after leave even if the same binding recovers', async () => {
+  const s = setup(); await s.bridge.watch();
+  let guard;
+  s.deps.sendMessage.mockImplementationOnce(async (_actor, _room, _content, check) => { guard = check; });
+  await s.bridge.send('server:r:one', bridgeBindingId(binding), 'old work');
+  await s.bridge.leave();
+  // Simulate recovery to identical room/nonce. Epoch, not room identity, must reject.
+  s.bridge.local = { resolve: async () => ({ status: 'ready', binding }) };
+  await s.bridge.watch('local-export');
+  expect(await guard()).toBe(false);
+});

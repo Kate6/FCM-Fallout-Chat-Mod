@@ -30,11 +30,16 @@ function resetRedisIncrMock() {
   redisMock.incr.mockImplementation(async (key) => {
     if (key === 'relay:seq' || key === undefined) return ++_redisSeq;
     _counters[key] = (_counters[key] || 0) + 1;
+    _worldStore[key] = String(_counters[key]); // Redis INCR is visible to GET.
     return _counters[key];
   });
 }
 
 const redisMock = {
+  eval: jest.fn(async (_script, { keys, arguments: args }) => {
+    if (_worldStore[keys[0]] === args[0]) { delete _worldStore[keys[0]]; return 1; }
+    return 0;
+  }),
   incrBy: jest.fn(async (_key, count) => (_redisSeq += count)),
   get:  jest.fn().mockImplementation(async (key) => _worldStore[key] ?? null),
   set:  jest.fn().mockImplementation(async (key, val, options) => { if (options?.NX && _worldStore[key] !== undefined) return null; if (options?.XX && _worldStore[key] === undefined) return null; _worldStore[key] = val; return 'OK'; }),
@@ -2957,6 +2962,63 @@ describe('roster-derived world rooms', () => {
     const res = await sendRaw(a, bad);
     expect(res).toMatchObject({ success: false, error: { code: 'message_too_long' } });
   });
+
+  test('cross-replica roster read failure does not reject an unawaited Redis subscriber callback', async () => {
+    const a = await registerAndLink('RebindFailure', 'fcm-rebind-failure');
+    await sendRaw(a, makeRosterBody(a.rawId, []));
+    const room = _worldStore[`relay:world:${a.rawId}`];
+    redisMock.get.mockImplementation(async key => {
+      if (key === `relay:roster:${a.rawId}`) throw new Error('roster storage unavailable');
+      return _worldStore[key] ?? null;
+    });
+    try {
+      const frame = JSON.stringify({ kind: 'rebind', userId: a.rawId, worldId: room,
+        requestId: 'remote-request', sourceInstanceId: 'other-replica' });
+      await expect(Promise.all(_pubCallbacks.map(callback => callback(frame)))).resolves.toBeDefined();
+    } finally { redisMock.get.mockImplementation(async key => _worldStore[key] ?? null); }
+  });
+
+  test.each(['zfe', 'xscal'].flatMap(hud => ['zfe', 'xscal'].map(bridge => [hud, bridge])))
+    ('native %s subscriber and local export %s converge through real ROSTER dispatch and exchange once', async (hudProvider, provider) => {
+      const { LocalExportBridge } = require('../src/services/relay/localExportBridge');
+      const { BridgeConnection } = require('../src/websocket/bridgeConnection');
+      const { bridgeBindingId } = require('../src/services/relay/overlayServerBridge');
+      const { getServerHistory } = require('../src/services/relay/serverChat');
+      const native = await registerAndLink('NativeBob', `fcm-${hudProvider}`);
+      const stream = await connectWs(srv.port);
+      await waitForMsg(stream.ws, stream.msgs, () => send(stream.ws, { op: 'subscribe', token: native.token, cursor: 0 }));
+      _userMap['fcm-desktop'] = { id: 'fcm-desktop', isBanned: false, isMuted: false };
+      _worldStore['session:desktop-session'] = 'fcm-desktop';
+      const local = new LocalExportBridge('fcm-desktop', 'desktop-session', () => true);
+      const frames = [];
+      const bridge = new BridgeConnection('fcm-desktop', frame => frames.push(frame), () => new Set(), undefined, local);
+      const callback = data => { const envelope = JSON.parse(data); void bridge.receive(envelope); };
+      _pubCallbacks.push(callback);
+      try {
+        // Both native providers intentionally share the unchanged authenticated chat.v1 frame.
+        await sendRaw(native, makeRosterBody(native.rawId, ['DesktopAlice']));
+        await bridge.observe({ schemaVersion: 1, environment: 'dev', provider, build: '0.2.0',
+          sessionId: 'movie-a', worldGeneration: 'world-a', sequence: 1, observationSequence: 1,
+          observationAgeMs: 0, state: 'active', ownName: 'DesktopAlice', names: ['NativeBob'] });
+        const binding = (await local.resolve()).binding;
+        expect(_worldStore[`relay:world:${native.rawId}`]).toBe(binding.room);
+        const before = stream.msgs.length;
+        await sendRaw(native, 'native to desktop');
+        await bridge.watch('local-export');
+        await bridge.send(`server:${binding.room}`, bridgeBindingId(binding), 'desktop to native');
+        await bridge.watch();
+        await new Promise(resolve => setTimeout(resolve, 60));
+        const nativeRows = stream.msgs.slice(before).filter(frame => frame.event?.channel === 'server').map(frame => frame.event);
+        const desktopRows = frames.flatMap(frame => frame.payload.messages ?? []);
+        const history = await getServerHistory(binding.room, 0, 50);
+        expect(history.map(row => row.body)).toEqual(['native to desktop', 'desktop to native']);
+        expect(nativeRows.map(row => row.messageId)).toEqual(history.map(row => row.messageId));
+        expect(desktopRows.map(row => row.id)).toEqual(history.map(row => row.messageId));
+      } finally {
+        _pubCallbacks.splice(_pubCallbacks.indexOf(callback), 1);
+        await local.close(); bridge.dispose(); stream.ws.close();
+      }
+    });
 });
 
 // ── IngestSource type check ───────────────────────────────────────────────────

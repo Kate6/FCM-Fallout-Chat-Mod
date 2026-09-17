@@ -5,7 +5,8 @@
 Fallout Chat Mod is a governed, real-time community chat platform for Fallout 76 — community channels
 (General / Trading / Events / Raids) with a Discord bridge and a browser-based moderation portal,
 rendered through a transparent in-game overlay. The desktop client only checks whether the `Fallout76`
-process is running (to show/hide the overlay) — it does not read game state.
+process is running (to show/hide the overlay). Optional bridge integration reads only
+explicitly installed provider-scoped exports; it never reads game memory or writes game files.
 
 Full architecture and how the pieces connect: **[docs/README.md](docs/README.md)** and
 [docs/architecture/](docs/architecture/README.md).
@@ -32,10 +33,12 @@ Full architecture and how the pieces connect: **[docs/README.md](docs/README.md)
 
 The background server bridge is the separate **FCMServerBridge HUDModLoader child** in
 `game-mods/FCMBridge/hudmodloader-bridge/`. The user explicitly revised the no-HUDModLoader
-requirement. Keep it invisible: no chat widget/editor, only status/linking in the loader menu.
-The local 0.1.0 candidate includes private backend/desktop routing; hosted deployment and
-in-game acceptance are still pending. Preserve fresh account/device leases, room nonces and
-canonical-ID deduplication. Never coinstall it with the visible widget or legacy FCMBridge.
+requirement. Keep it invisible: no chat widget/editor or bridge login; only cached export status.
+The overlay owns bridge authentication. Preserve the existing visible HUD architecture,
+authentication and native protocol; adapt the bridge to its canonical Server room service.
+Roster names are evidence, never authentication. Preserve per-session authority, freshness,
+generation checks and canonical-ID deduplication. Never coinstall with the visible widget or
+legacy FCMBridge. See the bridge guide for deployment/native acceptance status.
 
 ## CI Infrastructure
 
@@ -127,17 +130,23 @@ These are non-negotiable. Each links to the doc with the full context.
   [docs/testing/overlay-test-plan.md](docs/testing/overlay-test-plan.md).
 - **EULA §4(F) — two tracks, kept strictly separate.** The product ships in two forms:
 - **Every HUD-mod change runs through the Ruffle harness (HARD RULE).** For any change under
-  `game-mods/FCMBridge/hudmodloader-chat/`, run the pure Haxe/source/package checks and the complete
+  `game-mods/FCMBridge/hudmodloader-chat/` or `hudmodloader-bridge/`, run the pure Haxe/source/package checks and the complete
   `simulator/` Playwright suite before packaging or local installation. Add or update a simulator
   scenario for every behavior Ruffle can exercise, retain automatic teardown, and document anything
   that remains GFx/game-only. A passing harness is required regression evidence, not a substitute
   for the bounded in-game acceptance matrix. Follow
   [docs/testing/hud-automation-plan.md](docs/testing/hud-automation-plan.md).
+- **Shared Server compatibility is mandatory.** Test all four HUD/ZFE or HUD/xScal ↔ bridge/ZFE
+  or bridge/xScal pairings, plus HUD↔HUD and bridge↔bridge. Require equal canonical rooms,
+  bidirectional exactly-once delivery, common history, isolation, discovery delays, travel/hops,
+  expiry and stale-confirmation rejection. Run backend/overlay/dashboard and full Ruffle gates;
+  then manual two-client native acceptance. Heartbeats never refresh stale observations.
 - **EULA §4(F) — two tracks, kept strictly separate.** The product ships in two forms:
   1. **Default overlay (EULA-safe).** The transparent desktop overlay is the default, EULA-safe path.
      It only checks whether the `Fallout76` process is running (to show/hide the overlay) — it never
      reads game memory, never modifies game files, never injects code, and never scans
-     networks/ports. This track must stay clean of all game intrusion.
+     networks/ports. Optional, explicitly installed bridge integration may read only bounded
+     provider export files; it must not install mods or alter game files.
   2. **In-game HUD mods (`.ba2`) — explicit opt-in.** The FCMBridge / FCMChatWidget `.ba2` files render
      chat inside the game HUD. These are an **additional, separate install option** the user chooses
      and installs at their own discretion — never bundled into or auto-installed by the overlay, and

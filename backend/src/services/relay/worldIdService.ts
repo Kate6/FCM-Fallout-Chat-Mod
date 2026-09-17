@@ -23,10 +23,11 @@ function worldKey(relayUserId: string): string {
  * TTL is reset by each roster/world keepalive. Mutation failures propagate so
  * callers cannot acknowledge a binding that was not persisted.
  */
-export async function setWorldId(relayUserId: string, worldId: string): Promise<void> {
+export async function setWorldId(relayUserId: string, worldId: string, expiresAt?: number): Promise<void> {
   try {
     const redis = await getRedisClient();
-    await redis.set(worldKey(relayUserId), worldId, { EX: TTL_SECONDS });
+    await redis.set(worldKey(relayUserId), worldId, expiresAt === undefined
+      ? { EX: TTL_SECONDS } : { PX: Math.max(1, Math.ceil(expiresAt - Date.now())) });
   } catch (err) {
     logger.warn({ err, relayUserId }, '[worldIdService] setWorldId failed');
     throw err;

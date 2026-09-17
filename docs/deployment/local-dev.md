@@ -98,9 +98,45 @@ path/PID rather than assuming the initial launcher PID is still the application.
 Non-portable `dist:dev` uses the existing QA Discord sign-in flow. Complete it in the browser;
 the backend's QA-role/build gate still applies. Do not consume `/api/auth/qa-status` in a parallel
 diagnostic script: it hands the login grant back exactly once and would strand the overlay.
-For FCMServerBridge acceptance, use the **same real linked account** on the Dev overlay and native
-bridge, not a synthetic persona. The Server tab is expected to be absent until an authenticated
-in-world bridge lease is confirmed. See the [bridge flow and acceptance matrix](../overlay/zfe/background-server-bridge.md).
+For FCMServerBridge 0.2.0 acceptance, sign into the **Dev overlay only** using a real account,
+not a synthetic persona. The bridge has no login or linking code. The Server tab is expected to
+be absent until advancing, fresh in-world exports receive backend confirmation. A second,
+distinct HUD account in the same world verifies shared-room interoperability. See the
+[bridge flow and acceptance matrix](../overlay/zfe/background-server-bridge.md).
+
+For **native Windows** bridge acceptance, build on Windows with the same `dist:dev` script:
+
+```powershell
+# Run from the repo root with a supported Node version.
+npm.cmd ci --prefix admin-dashboard
+npm.cmd ci --prefix cross-platform-overlay
+Set-Location cross-platform-overlay
+npm.cmd run test:unit
+npm.cmd run dist:dev -- --win --x64 --dir --publish never
+```
+
+The current locked jsdom 30 test dependency requires Node `^22.22.2 || ^24.15.0 || >=26`;
+the laptop's system Node 24.11 is insufficient. A checksum-verified portable Node 24.18 was
+used for the 0.1.7 acceptance setup without changing the system installation. Do not copy Linux
+`node_modules` to Windows. A reduced staging tree must include the overlay tests' repository
+fixtures (`Packaging/`, `.github/workflows/`, and referenced game-mod source/artifacts), not just
+the renderer source. Keep test failures fatal; do not omit those suites to make staging pass.
+
+Validate `dist-electron/win-unpacked/resources/app.asar` metadata as above (`qa`, intended
+version, unchanged product name), copy the **whole** unpacked directory into a new user-owned
+application folder, and launch `Fallout Chat Mod.exe` with an explicit isolated profile such as
+`--user-data-dir=C:\Users\White\.fcm\hosted-dev`. Remove inherited relay/persona overrides first.
+A distinct **Hosted Dev** shortcut must keep that profile argument. Back up only the exact old
+application/launcher being replaced; preserve existing profile and native credentials.
+
+SSH-launched Windows child processes can die when their session closes, and the workstation's
+SSH Manager currently times out long commands at 30 seconds. For longer native builds, use a
+uniquely named, on-demand Windows task with a time limit and file logs; remove that temporary
+task after success/failure. Launch the installed overlay in the signed-in interactive desktop,
+not SSH's service session, and verify its executable, session, Dev host/profile and startup log.
+Remove temporary build dependencies after verifying the installed copy; retain hashes and logs.
+This is an authorized local test install, not a published/signed release or Windows native
+bridge acceptance. Do not change CI/release gates or consume the QA login grant externally.
 
 ---
 

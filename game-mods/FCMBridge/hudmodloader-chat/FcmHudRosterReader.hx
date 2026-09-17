@@ -1,9 +1,9 @@
-/** The only roster decoder shared by the visible HUD and invisible bridge.
- * Game-owned objects stay here; consumers receive copied strings and a local revision.
+/** Background bridge adapter for the native-accepted 2.10.106+ HUD reader split.
+ * Game-owned objects are never retained; consumers receive copied strings and a local revision.
  * A revision is cache identity, NOT a world identifier or proof of freshness. */
 class FcmHudRosterReader {
     public var phase(default, null):String = "reader entry";
-    var sources:Array<{key:String, data:Dynamic, signature:String, revision:Int, at:Float}> = [];
+    var sources:Array<{key:String, signature:String, revision:Int, at:Float}> = [];
     var nextRevision:Int = 0;
     public function new() {}
     public function clear():Void { sources = []; } // Never reuse revision numbers after detach.
@@ -55,70 +55,83 @@ class FcmHudRosterReader {
         phase = "payload";
         return payload(key, field(value, "data"), localName, at, pushed);
     }
-    /** Payload-only entry is for the visible widget's existing callback contract.
-     * The background bridge must use provider(), retaining envelope provenance. */
+    /** Payload-only entry for tests; the live bridge must retain provider provenance.
+     * Keep map/team traversal in the native-accepted helper, separate from auxiliary rows.
+     * Do not restore the unified decoder: it fails GFx method entry even on synthetic data. */
     public function payload(key:String, data:Dynamic, localName:String, at:Float, pushed:Bool = false):FcmRosterObservation {
         var result = new FcmRosterObservation(key, at);
         phase = "list shape";
-        var rows:Dynamic = switch key {
-            case "MapMenuData": field(data, "MarkerData");
-            case "PublicTeamsData": field(data, "publicTeams");
-            case "TeamMarkers": field(data, "Markers");
-            case "VoiceChatAreaData": field(data, "participants");
-            case "PlayerListData", "PartyMenuList": data;
-            default: result.reason = "unknown source"; return result;
-        };
-        var n = count(rows, 2048);
-        if (n < 0) { result.reason = "invalid list"; return result; }
-        phase = "names";
-        var local = cleanName(localName).toLowerCase();
-        for (i in 0...n) try {
-            var row:Dynamic = rows[i];
-            if (row == null) continue;
-            if (key == "MapMenuData") {
-                if (field(row, "markerType") == "PlayerRemote") add(result, field(row, "text"), local);
-            } else if (key == "PublicTeamsData") {
-                var members = field(row, "members");
-                var memberCount = count(members, 24);
-                if (memberCount < 0) { result.skipped++; continue; }
-                for (j in 0...memberCount) try { add(result, field(members[j], "playerName"), local); }
-                    catch (_:Dynamic) { result.skipped++; }
-            } else {
-                if (field(row, "isLocalPlayer") == true || field(row, "isLocal") == true || field(row, "isSelf") == true) continue;
-                for (candidate in ["displayName", "characterName", "name", "playerName"]) {
-                    var value = field(row, candidate);
-                    if (value == null) continue;
-                    var name = cleanName(Std.string(value));
-                    if (name.length == 0) continue;
-                    add(result, name, local); break;
-                }
-            }
-        } catch (_:Dynamic) { result.skipped++; }
-        // A damaged list is not evidence of an empty/partial world. Keep diagnostics,
-        // but do not let the bridge renew a lease or choose a boundary from it.
-        if (result.skipped > 0) { result.reason = "unreadable entries"; return result; }
+        var rows:Dynamic = null;
+        var names:Array<String> = null;
+        if (key == "MapMenuData" || key == "PublicTeamsData") {
+            rows = field(data, key == "MapMenuData" ? "MarkerData" : "publicTeams");
+            if (count(rows, 2048) < 0) { result.reason = "invalid list"; return result; }
+            phase = "map team helper";
+            names = FcmRoster.readNames(key, data, localName);
+        } else {
+            if (key == "TeamMarkers") { try { rows = data.Markers; } catch (_:Dynamic) {} }
+            else if (key == "VoiceChatAreaData") { try { rows = data.participants; } catch (_:Dynamic) {} }
+            else if (key == "PlayerListData" || key == "PartyMenuList") rows = data;
+            else { result.reason = "unknown source"; return result; }
+            var n = count(rows, 2048);
+            if (n < 0) { result.reason = "invalid list"; return result; }
+            phase = "auxiliary helper";
+            names = readAuxiliary(rows, n, localName);
+        }
+        // Invalid/damaged data is not evidence of an empty or partial world.
+        if (names == null) { result.reason = "unreadable entries"; result.skipped = 1; return result; }
         phase = "copy";
+        var local = cleanName(localName).toLowerCase();
+        for (name in names) {
+            var clean = cleanName(name);
+            if (clean.length > 0 && clean.toLowerCase() != local && result.names.indexOf(clean) < 0
+                    && result.names.length < 24) result.names.push(clean);
+        }
         result.names.sort(compare);
+        return remember(result, pushed);
+    }
+
+    /** Mirrors the accepted widget's four-source traversal, without map/team branches. */
+    function readAuxiliary(rows:Dynamic, n:Int, localName:String):Array<String> {
+        phase = "auxiliary rows";
+        var names:Array<String> = [];
+        var local = cleanName(localName).toLowerCase();
+        var damaged = false;
+        for (i in 0...n) {
+            try {
+                var row:Dynamic = rows[i];
+                if (row == null) continue;
+                if (field(row, "isLocalPlayer") == true || field(row, "isLocal") == true || field(row, "isSelf") == true) continue;
+                var name:String = "";
+                for (candidate in ["displayName", "characterName", "name", "playerName"]) {
+                    var value:Dynamic = field(row, candidate);
+                    if (value != null && Std.string(value).length > 0) { name = Std.string(value); break; }
+                }
+                name = cleanName(name);
+                if (name.length > 0 && name.toLowerCase() != local && names.indexOf(name) < 0
+                        && names.length < 24) names.push(name);
+            } catch (_:Dynamic) {
+                damaged = true;
+            }
+        }
+        return damaged ? null : names;
+    }
+
+    function remember(result:FcmRosterObservation, pushed:Bool):FcmRosterObservation {
         var signature = result.names.join("|");
         var previous = null;
-        for (source in sources) if (source.key == key) previous = source;
+        for (source in sources) if (source.key == result.key) previous = source;
         if (previous == null) {
-            previous = {key:key, data:data, signature:signature, revision:++nextRevision, at:at}; sources.push(previous);
-        } else if (pushed || previous.data != data || previous.signature != signature) {
-            previous.data = data; previous.signature = signature; previous.revision = ++nextRevision;
-            previous.at = at;
+            previous = {key:result.key, signature:signature, revision:++nextRevision, at:result.at}; sources.push(previous);
+        } else if (pushed || previous.signature != signature) {
+            previous.signature = signature; previous.revision = ++nextRevision;
+            previous.at = result.at;
         }
         result.revision = previous.revision;
         result.at = previous.at; // Rereading an unchanged cache must not renew freshness.
         return result;
     }
     static function compare(a:String, b:String):Int return a < b ? -1 : a > b ? 1 : 0;
-    static function add(result:FcmRosterObservation, value:Dynamic, local:String):Void {
-        if (value == null) return;
-        var name = cleanName(Std.string(value));
-        if (name.length > 0 && name.toLowerCase() != local && result.names.indexOf(name) < 0 && result.names.length < 24)
-            result.names.push(name);
-    }
 }
 
 /** No provider, payload, event, or native object references may cross this boundary. */

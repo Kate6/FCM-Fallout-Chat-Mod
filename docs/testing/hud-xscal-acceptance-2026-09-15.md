@@ -1065,3 +1065,196 @@ ZFE itself emits a short burst of `mod API bridge live install failed for all me
 warnings (15 desktop / 16 laptop) while installing its bridge into unrelated UI movies. The active
 FCM widget already reports its API capability as available and continues successfully afterward;
 these are provider-level warnings, not FCM transport/auth/history failures.
+
+## Bridge 0.1.7 follow-up from the accepted HUD release
+
+The release owner pointed to `docs/deployment/hud-post-2.10.85-release-notes-draft.md` and
+reported that the newly released HUD has working Server chat. Review of the current `dev`
+checkout (`7f7647ee` before this change) and the native evidence above changes the bridge plan:
+the proposed synthetic decoder probe already ran in visible HUD 2.10.105. It failed before
+decoder entry; the split reader restored in 2.10.106 recovered populated native rosters.
+2.10.109 subsequently confirmed automatic Server binding on both providers within the
+recorded per-machine limits. The precise rejected bytecode construct is still unknown.
+
+Source candidate **FCMServerBridge 0.1.7** adapts that split. `FcmHudRosterReader` delegates
+map/public-team lists to the same `FcmRoster.readNames` used by the working HUD; the other four
+sources use a separate bounded traversal. It rejects invalid/damaged lists before storing
+observations. Cached reader state now holds only copied signatures, timestamps and revisions,
+not game-owned payloads. Replacing a wrapper around identical names cannot renew freshness;
+validated pushes and changed normalized contents can. Provider readiness, test-data rejection,
+world/loading gates, room nonces, relay confirmation and expiry/backoff limits remain intact.
+
+The bridge already calls `getAuthState` on every poll and has no HUD history-resync path. The
+widget-specific 2.10.107 pending-auth and 2.10.109 retirement-marker fixes were therefore not
+transplanted. No widget live source, backend, overlay or native extender changed.
+
+[Confirmed] The new freshness regression and accepted-reader source guard failed on the old
+bridge code before correction. The former state test's fresh-solo expectation relied on new
+empty getter wrappers: it now requires expiry to remain closed, followed by an explicit fresh
+push to establish solo evidence. Local verification passes:
+
+- 67 bridge-state checks; 37 reader checks within all 21 widget Haxe suites; native API/auth tests.
+- Four bridge source/package tests across Dev/Prod, widget package/anchors, SWF/BA2 validators,
+  emoji catalog/embedded linkage and three JavaScript emoji tests.
+- **39 Ruffle tests, 1.8 minutes**, including all six valid/throwing-name sources in both actual
+  bridge scenarios, retained same-world/hop/expiry/privacy gates and isolated exact-package tests.
+- Backend four suites/41 tests; overlay 44 files/1,163 tests; dashboard bridge feed six tests.
+- Compiler diagnostics for bridge, widget and changed scenario report `[]`; `git diff --check`
+  passes. Automatic teardown was independently checked by binding/closing port 41739.
+
+The first alternate-output widget compile supplied a second SWF target and was rejected by
+Haxe; replacing the existing output argument fixed the command. The resulting normalized
+visible-HUD SWF compares byte-for-byte with the existing tracked artifact. Existing archive
+helper ResourceWarnings and backend Jest's force-exit notice remain; hosted CI was not run.
+
+Prepared `/tmp/fcm-bridge-017-yvCWtN/FCM-Server-Bridge-0.1.7-DEV.zip`, 31,474 bytes. Fresh ZIP
+extraction/BA2 decoding equals the exact child used by the completed Ruffle run. Its sole entry
+is `Interface/FCMServerBridge.swf`, 48,673 bytes, FWS v32, 400x300, 30fps, one frame, seven tags,
+with a final End tag. Both provider examples and linking instructions target hosted Dev.
+
+- ZIP SHA-256: `20bbbbc387d13c729b1ad20f51ece3c01e7766bb1b8e53176d993dcdfba356aa`.
+- BA2 SHA-256: `b74c5100424dae7760df8042d9491e5cf74b842fd94cdc3fb869adc7b35507b0`.
+- SWF SHA-256: `16659de436934a91f65a8c918e4734b888173841c0108efa8b644b7bbf2fe557`.
+
+**Not installed, published or native-accepted.** The user-launched next test must independently
+confirm 0.1.7's fresh roster → native relay room → same-account Dev overlay tab, then continuity
+and expiry under each extender. Visible-HUD success and passing Ruffle do not certify this
+new compiled child. There was no game input, game-file/config/auth write, live network test,
+commit, push or deployment. Unnamed MCP project tools were unavailable; tracker preflight and
+synchronization remain pending, not claimed complete.
+
+## 0.1.7 local install and Dev overlay launch
+
+The user subsequently authorized replacing the local visible HUD with this bridge and building/
+running the matching Dev overlay. Exact process-name checks found Fallout 76 closed before
+game-file changes. The Steam/Proton game root is
+`/mnt/ExtraStorage/SteamLibrary/steamapps/common/Fallout76`.
+
+- Installed the exact tested 0.1.7 DEV BA2 above; installed bytes and SHA-256 match
+  `b74c5100424dae7760df8042d9491e5cf74b842fd94cdc3fb869adc7b35507b0`.
+  `FCMServerBridge.build.json` and `FCMServerBridge-INSTALL.txt` beside the game executable
+  also compare byte-for-byte with the final tested package.
+- Backups are under the game root's `.extender-backups/bridge-0.1.7-dev-etb0ZR/`.
+  The visible `Data/FCMChatWidget.ba2`, both active version stamps and the widget's ZFE fragment
+  were moved into its `removed/` tree. Loader/custom INI, widget appearance settings and the
+  previous Dev desktop launcher were copied into the backup. Existing unrelated backups remain.
+- Changed only the FCM loader entry and FCM archive name: `FCMServerBridge`, with
+  `sResourceArchive2List=HUDModLoader.ba2,FCMServerBridge.ba2`. A byte comparison confirms
+  the active Proton `Fallout76Custom.ini` has no other changes. No loose FCM SWF was present.
+- Retained the existing ZFE installation; no extender or credential files were changed.
+  The bridge fragment uses `Endpoint=wss://dev.falloutchatmod.com/relay`,
+  `DefaultChannel=server`, `AllowedChannels=server`, `AutoConnect=false`.
+  `Data/configuration/zfe.ini` is absent, so no global TextChat override is present.
+  The inactive xScal configuration was left untouched.
+- Re-ran overlay unit tests: **44 files / 1,163 tests passed**. `npm run dist:dev -- --linux --dir`
+  completed; packaged metadata is `Fallout Chat Mod`, version `1.4.0`, `fcmChannel=qa`.
+  Existing Vite config/deprecation/chunk warnings remain, with no build failure.
+- Installed the whole unpacked app in
+  `/home/devotek/.local/opt/fcm-dev/1.4.0-bridge017-MfLwgp/`, including its launcher icon.
+  `resources/app.asar` SHA-256:
+  `8cdee84f87a3e4a665d53925d867dcd9be1a27bbe560b09e0e7343696677b518`.
+  Updated only `fcm-hosted-dev-bridge.desktop` to this executable, retaining the explicit
+  `--user-data-dir=/home/devotek/.fcm/hosted-dev --ozone-platform=x11` arguments.
+- Fresh startup at `2026-09-16T23:07:12Z` confirms packaged execution, the exact new executable,
+  `relayHost=dev.falloutchatmod.com`, and that isolated profile. No missing-module, uncaught or
+  fatal startup error was observed. The renderer reached active chat, then hid to the tray and
+  closed its WebSocket normally because the game was closed. This is startup evidence, not
+  evidence of a new bridge room or matching-account native acceptance.
+
+The user-requested Dev overlay remains running. No game input was automated; the game, Prod
+overlay/launcher/profile, backend and native auth were not modified or restarted. No publication,
+commit, push or hosted deployment occurred. Next: launch the game manually, enter a world,
+check F11 → FCM Server Bridge for 0.1.7/provider/roster/room status, then verify the same-account
+Dev overlay's Server tab, send/echo and same-world travel. Do not repeatedly press Reconnect
+while collecting the first native result. Rollback requires the game closed and restoring only
+the backed-up FCM files/registrations, not overwriting unrelated later configuration changes.
+
+## 0.1.7 desktop ZFE acceptance and next-provider setup
+
+[Confirmed, 2026-09-16] The fresh desktop ZFE log identifies bridge `0.1.7`, authenticates at
+19:16:19 local time, observes a fresh in-world roster at 19:16:47 and reports `bound=true` at
+19:16:50. It remains authenticated/fresh/bound through the subsequent half-hour observation.
+During user-confirmed same-world fast travel it changes status to `Waiting for world roster
+recovery` at 19:48:55, then `Connected - chat is in the desktop overlay` at 19:49:07. All recorded
+states in that transition retain `auth=true`, `fresh=true`, `bound=true`; there is no connect or
+disconnect call in the inspected travel window. The user confirms the Server message appeared
+once and the preceding history stayed intact. Message delivery is user-observed acceptance,
+not an inferred backend acknowledgment: this overlay log does not record message ACKs or room IDs.
+
+No E1014 or FCM transport error appears in that inspected run. ZFE's UI attach E37 / failed
+bridge-publication warnings recur around other UI loads despite the working FCM binding. Two
+earlier control calls took 413/434ms; 95% of the first 110 measured controls were at most 9ms.
+Travel-window controls were at most 10ms. This bounded pass does not certify all freeze paths,
+real world hops, extended loading/expiry, two-account room matching or native xScal.
+
+The user then requested Windows-laptop ZFE testing and desktop xScal testing. With the desktop
+game confirmed closed, its provider was switched to the retained official xScal **0.2.16** DLL,
+SHA-256 `185de187aa616ae5db118f463aa43ff760f7819df77ca4a09f6b71714195fd5a`.
+Only `xscal.ini`'s relay endpoint changed from Prod to `wss://dev.falloutchatmod.com/relay`;
+all other xScal settings compare unchanged. Bridge BA2 and loader remain the tested 0.1.7 DEV
+artifact. The inactive ZFE fragment/auth are retained; credentials were not read or migrated.
+Rollback snapshot: `.extender-backups/bridge017-before-xscal-3b2JfX/` under the desktop game root.
+Fresh xScal native acceptance remains pending. Use one in-world bridge at a time for a shared
+account; simultaneous devices deliberately make its background-bridge lease ambiguous.
+
+## 0.1.7 Windows laptop install and native Dev overlay build
+
+[Confirmed, 2026-09-16 local time] Connected to the existing SSH Manager `msi` entry; no
+network/port scan was performed. The Windows game was closed. Nexus mod 4065's current files
+page still lists ZFE **0.15.0**, uploaded 2026-09-15 20:46 UTC. The laptop's existing `dxgi.dll`
+is already byte-identical by SHA-256 to the retained official archive payload:
+`3431d70517fd979e4f5193b1d9fd9d76dae7a8d341fae9838e5249b8f3fcb8b0`.
+It was therefore verified and retained, not replaced with an unneeded duplicate download.
+
+Installed the exact 39-scenario-tested bridge 0.1.7 DEV package in
+`C:\Program Files (x86)\Steam\steamapps\common\Fallout76`. Its installed BA2 hash remains
+`b74c5100424dae7760df8042d9491e5cf74b842fd94cdc3fb869adc7b35507b0`.
+Visible-HUD BA2/stamps and its ZFE fragment were moved into the recoverable
+`.extender-backups\bridge017-dev-QA71bh\removed\` tree. Loader/archive/settings and ZFE DLL
+snapshots are in the parent backup. Appearance config and native credentials remain untouched.
+The loader now lists only `FCMServerBridge`; the archive list retains HUDModLoader and replaces
+only `FCMChatWidget.ba2` with `FCMServerBridge.ba2`. The new ZFE fragment targets hosted Dev,
+server-only, `AutoConnect=false`. The existing global ZFE INI has no `[TextChat]` override.
+
+Built the current overlay source **natively on the MSI Windows laptop**, not under Wine:
+
+- Staging/evidence: `C:\Users\White\fcm-build\bridge017-QA71bh\`.
+  Current source archive SHA-256:
+  `2fa57bcd235905dc7b824a9824f5519c2b8d07a211d3d02198f252f7d68f279f`.
+- The original SSH child exited without output. A held-open SSH attempt exposed the system
+  Node 24.11/jsdom 30 engine mismatch and PowerShell treating npm stderr as terminating output;
+  a later held-open command hit SSH Manager's observed 30-second cap despite a longer requested
+  timeout. Used a unique, time-limited on-demand task with explicit exit-code checks and logs.
+- Used portable Node **24.18.0** only in staging, verified against the official Node checksum
+  list: ZIP `0ae68406b42d7725661da979b1403ec9926da205c6770827f33aac9d8f26e821`.
+  System Node was not upgraded. The initial reduced staging archive omitted three test fixture
+  surfaces; their ENOENT errors were corrected by supplying the actual repository files, not
+  suppressing tests. The final run passes **44 files / 1,163 tests** on Windows in 13.54 seconds.
+- `npm run dist:dev -- --win --x64 --dir --publish never` succeeded. Verified packaged metadata
+  (`1.4.0`, `Fallout Chat Mod`, `fcmChannel=qa`) and required main/preload/core/renderer entries.
+  Installed `resources/app.asar` matches the build, SHA-256
+  `ccd8087edefdde3f5270c43c7c7651cfc397294e040c652fe4e832e18d535ffe`.
+- New application: `C:\Users\White\Apps\FCM-Hosted-Dev-1.4.0-bridge017\`.
+  New desktop shortcut: **Fallout Chat Mod (Hosted Dev)**. It removes inherited relay/persona
+  overrides and launches with `--user-data-dir=C:\Users\White\.fcm\hosted-dev`.
+  The old portable Dev executables (1.3.91/1.3.98) and prior on-demand task definition are backed
+  up in `C:\Users\White\FCM-dev-uninstall-backup-bridge017-QA71bh\`. No registered NSIS
+  overlay installation or running old overlay was found. Old installers in Downloads and all
+  existing application profiles were left alone.
+- The existing **FCM Dev Overlay Interactive** on-demand task now launches the new installation
+  in the signed-in Windows session. Fresh startup at `2026-09-17T00:08:42Z` confirms `win32`,
+  Electron 43.2.0, the exact installed executable, `relayHost=dev.falloutchatmod.com` and the
+  isolated profile. Processes run in interactive session 1, with no observed missing-module,
+  uncaught or renderer-crash startup entry. This is a startup smoke check, not authenticated
+  room/message acceptance or a signed/published release.
+- Removed the temporary build task, both staged `node_modules` trees, staged duplicate package
+  output and portable build Node runtime/archive after installed-hash verification. No staged
+  executable remained running. Source archives, scripts, logs, installed app and rollback copies
+  are retained. The intentionally running installed Dev overlay is not a temporary harness.
+
+Next Windows test requires normal Dev Discord sign-in in the new isolated overlay profile and
+native linking at `https://dev.falloutchatmod.com/link` if prompted, using the same account on that
+machine. Native credentials were not copied from desktop or Prod. Start only one in-world bridge
+for that account, then verify 0.1.7/ZFE, fresh roster, Server tab, one send/echo and preserved
+history during same-world travel. Windows native acceptance and the desktop xScal follow-up
+are still pending. No game input automation, backend deployment, publication, commit or push.

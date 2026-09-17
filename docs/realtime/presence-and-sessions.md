@@ -150,9 +150,13 @@ tab. The native relay's Redis rooms are separate from these legacy database sess
 The old two-minute database-world validation is not part of the current desktop connect path.
 Native room expiry and confirmation are documented in
 [SERVER session binding](../overlay/zfe/native-chat-relay/server-session-binding.md).
-The background bridge validates its independent 45-second device/session lease on every
-protected room operation; a retained database field or stale in-process room value is insufficient.
-`bridge:watch` refreshes every ten seconds and supplies the local desktop Server tab. The static
+The 0.2.0 background bridge uses a credential-free local export and the overlay's authenticated
+session, not a second bridge login. Every protected operation validates that exact socket/device,
+game-active state, fresh observation, and current canonical room. Heartbeats cannot renew roster
+evidence. Exit/logout/leave invalidate queued work immediately. Legacy 0.1.x native leases remain
+compatible but are never a fallback for an explicitly local-export client.
+`bridge:watch` selects local-export authority; `bridge:observe` supplies evidence and confirmed
+`bridge:state` supplies the desktop Server tab. The static
 channel tree and retired `worldSessionId` field are not used as room authorization.
 
 ---

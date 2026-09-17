@@ -35,8 +35,9 @@ import { clientIp } from '../../utils/clientIp';
 import { mintToken, verifyToken, updateDisplayName, markRelayTokenLinked } from './tokenService';
 import { slugToChannelId, channelIdToSlug, ALL_SLUGS, SLUG_TO_UUID } from './channelMap';
 import { repairChannel, repairBody, readWireDisplayName } from './wireSanitize';
-import { setWorldId, getWorldId, clearWorldId } from './worldIdService';
-import { setRoster, clearRoster, computeRooms, readRoster } from './worldRosterService';
+import { setWorldId, getWorldId } from './worldIdService';
+import { readRoster } from './worldRosterService';
+import { coordinateRooms, clearRoomMembership, observeNativeRoster, registerNativeRoomHooks } from './roomCoordinator';
 import { nextRelaySeq } from './relaySeq';
 import {
   rememberClientVersion,
@@ -769,34 +770,9 @@ async function handleWorldJoin(identity: RelayToken, worldId: string, requestId 
   await backfillWorldToUser(identity.userId, worldId, requestId);
 }
 
-/**
- * Recompute roster-derived rooms and apply changes: any user whose roomKey moved is
- * re-bound exactly like a worldId change (setWorldId + subscriber rebind + backfill).
- */
-async function applyRoomAssignments(requester = ''): Promise<void> {
-  const rooms = await computeRooms();
-  if (requester && !rooms.has(requester)) throw new Error('Current roster could not be assigned');
-  for (const [userId, roomKey] of rooms) {
-    const current = await getWorldId(userId);
-    const shouldBackfillResync = consumeServerHistoryResyncPending(userId);
-    await setWorldId(userId, roomKey);
-    const requestId = (await readRoster(userId))?.requestId ?? '';
-    if (current === roomKey && !shouldBackfillResync && !(userId === requester && requestId)) continue;
-    rebindLocalSubscribers(userId, roomKey);
-    await publishRebind(userId, roomKey, requestId, relayInstanceId);
-    await backfillWorldToUser(userId, roomKey, requestId);
-    logger.info({ userId, roomKey }, '[relayHandler] roster room assigned');
-  }
-}
-
-/** LEAVE: the player left their world. Clear membership locally + across instances. */
-async function handleWorldLeave(identity: RelayToken): Promise<void> {
-  pendingServerHistoryResyncs.delete(identity.userId);
-  await clearWorldId(identity.userId);
-  await clearRoster(identity.userId);
-  rebindLocalSubscribers(identity.userId, null);
-  await publishRebind(identity.userId, null);
-}
+registerNativeRoomHooks({ consumeResync: consumeServerHistoryResyncPending,
+  clearResync: userId => { pendingServerHistoryResyncs.delete(userId); },
+  rebind: rebindLocalSubscribers, backfill: backfillWorldToUser });
 
 async function ensurePubSub(): Promise<void> {
   if (pubSubReady) return;
@@ -897,15 +873,21 @@ async function ensurePubSub(): Promise<void> {
         const userId = typeof parsed.userId === 'string' ? parsed.userId : null;
         const worldId = typeof parsed.worldId === 'string' ? parsed.worldId : null;
         if (userId) {
-          const shouldBackfillResync = consumeServerHistoryResyncPending(userId);
-          rebindLocalSubscribers(userId, worldId);
-          const requestId = typeof parsed.requestId === 'string' && /^[a-z0-9-]{1,64}$/.test(parsed.requestId) ? parsed.requestId : '';
-          if ((shouldBackfillResync || requestId) && worldId) {
-            try {
+          try {
+            // Delayed cross-replica announcements must not re-enable an old room.
+            if (await getWorldId(userId) !== worldId) return;
+            const requestId = typeof parsed.requestId === 'string' && /^[a-z0-9-]{1,64}$/.test(parsed.requestId) ? parsed.requestId : '';
+            const roster = requestId ? await readRoster(userId) : null;
+            if (roster && roster.requestId !== requestId) return;
+            const shouldBackfillResync = consumeServerHistoryResyncPending(userId);
+            rebindLocalSubscribers(userId, worldId);
+            if ((shouldBackfillResync || requestId) && worldId) {
               await backfillWorldToUser(userId, worldId, requestId);
-            } catch (err) {
-              logger.warn({ err, userId, worldId }, '[relayHandler] server history backfill on resync rebind failed');
             }
+          } catch (err) {
+            // node-redis does not await subscriber callbacks. A failed roster
+            // read must fail closed, not reject out of this async listener.
+            logger.warn({ err }, '[relayHandler] remote room rebind verification failed');
           }
         }
         return;
@@ -1222,10 +1204,12 @@ async function handleSend(ws: WebSocket, frame: Record<string, unknown>): Promis
         await deliver(errEnvelope('rate_limited', 'World controls are temporarily rate limited'));
         return;
       }
-      if (!isBackgroundBridge || (await readRoster(identity.userId))?.requestId === requestId) {
-        await clearBridgeLease(identity.userId);
-        await handleWorldLeave(identity);
-      }
+      await coordinateRooms(async assertCurrent => {
+        if (!isBackgroundBridge || (await readRoster(identity.userId))?.requestId === requestId) {
+          await clearBridgeLease(identity.userId);
+          await clearRoomMembership(identity.userId, assertCurrent);
+        }
+      });
       sendControlAck(ws);
       return;
     }
@@ -1237,8 +1221,7 @@ async function handleSend(ws: WebSocket, frame: Record<string, unknown>): Promis
         await deliver(errEnvelope('rate_limited', 'World controls are temporarily rate limited'));
         return;
       }
-      await setRoster(identity.userId, identity.fo76Name, names, requestId);
-      await applyRoomAssignments(identity.userId);
+      await observeNativeRoster(identity.userId, identity.fo76Name, names, requestId);
       if (isBackgroundBridge) await renewBridgeLease(identity.linkedUserId!, identity.userId, requestId);
       else await clearBridgeLease(identity.userId);
       sendControlAck(ws);

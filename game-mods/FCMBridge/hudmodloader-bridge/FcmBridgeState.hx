@@ -93,6 +93,20 @@ class FcmBridgeState {
     public static function cleanName(name:String):String return FcmHudRosterReader.cleanName(name);
     public function fresh(now:Float):Bool { return inWorld && now - observedAt < 30000; }
     public function names(now:Float):Array<String> { return roster.sessionNames(now, 30000, lastNames); }
+    /** Timestamp of the evidence actually selected by the existing roster policy.
+     * A fresh auxiliary list cannot renew an older primary map/player roster.
+     * Union fallback is conservatively limited by its oldest contributing source. */
+    public function evidenceAt(now:Float):Float {
+        var source = roster.sessionSource(now, 30000, lastNames);
+        var oldest = Math.POSITIVE_INFINITY;
+        var newest:Float = -60000;
+        for (entry in snapshots) if (!entry.blocked && now - entry.at < 30000) {
+            if (entry.key == source) return entry.at;
+            newest = Math.max(newest, entry.at);
+            if (entry.names.length > 0) oldest = Math.min(oldest, entry.at);
+        }
+        return source != "" ? -60000 : Math.isFinite(oldest) ? oldest : newest;
+    }
     /** Settle a complete observation batch before sending controls. No timers or lease renewal. */
     public function settle(now:Float):Void {
         waiting = false;
@@ -122,24 +136,4 @@ class FcmBridgeState {
     }
     /** Suppress both ROSTER and LEAVE while a bounded transition is unresolved. */
     public function holding(now:Float):Bool { return fresh(now) && (loading || waiting); }
-    public function target():String { return "FCMBRIDGE/1;" + session.requestId; }
-    public static function linkCode(body:String):String {
-        if (body == null || !StringTools.startsWith(body, "LINK REQUIRED - ")) return "";
-        var re = ~/code: ([A-Z0-9]{4}-[A-Z0-9]{4}) \(expires 10m\)/;
-        return re.match(body) ? re.matched(1) : "";
-    }
-    public static function terminal(state:String, code:String):Bool {
-        state = StringTools.trim(state).toLowerCase();
-        code = StringTools.trim(code).toLowerCase();
-        return ["banned", "denied", "revoked"].indexOf(state) >= 0
-            || ["auth_token_invalid", "auth_token_revoked", "user_banned", "user_kicked"].indexOf(code) >= 0;
-    }
-    public static function authenticated(auth:Dynamic):Bool {
-        if (auth == null || field(auth, "success") == false) return false;
-        for (key in ["state", "status"]) {
-            var value = field(auth, key);
-            if (value != null && StringTools.trim(Std.string(value)).toLowerCase() == "authenticated") return true;
-        }
-        return false;
-    }
 }

@@ -28,6 +28,13 @@ class MockZfe {
         var chat:Dynamic = Reflect.field(xscal, "chatInterface");
         var out:Dynamic = {};
         Reflect.setField(out, "call", function(verb:String, payload:Dynamic = null):Dynamic {
+            if (verb == "getRuntimeInfo") return haxe.Json.stringify({success:true,capabilities:["zfe-storage-v1"]});
+            if (verb == "writeStorage") {
+                var args:Dynamic = haxe.Json.parse(Std.string(payload));
+                if (args.vendor != "FCMServerBridge") return '{"success":false}';
+                var saved = MockBridgeStorage.save(args.text);
+                return haxe.Json.stringify({success:saved,status:saved ? "saved" : "failed"});
+            }
             if (verb == "Input.RegisterKey" || verb == "Input.IsKeyPressed" || verb == "Input.UnregisterKey") {
                 return Reflect.callMethod(xscal, Reflect.field(xscal, "call"), [verb, payload]);
             }

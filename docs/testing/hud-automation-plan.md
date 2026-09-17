@@ -1,5 +1,7 @@
 # Automated HUD-mod test harness plan
 
+Latest drop-in bridge evidence: [rollout, fallback and diagnostic candidates](bridge-drop-in-acceptance-2026-09-16.md).
+
 ## Required change-to-install flow
 
 Every visible HUD widget or background FCMServerBridge change follows this sequence; shared
@@ -24,7 +26,7 @@ a game install:
 Any failing step blocks packaging and installation. New harness-testable HUD behavior must add
 Playwright coverage in the same change and run in the required `hud-ruffle` CI gate.
 
-For the background bridge, also run `haxe test-state.hxml`, bridge compiler diagnostics and
+For the background bridge, also run `haxe test-state.hxml`, `haxe test-export.hxml`, bridge compiler diagnostics and
 `python3 test_package.py` in `hudmodloader-bridge/`. Build a **fresh** target ZIP with its
 `package.py`; compare the installed BA2 and decoded SWF to that ZIP's `BUILD.json`, not an older
 same-version package. Run backend `overlayServerBridge`, `serverMessageService`, `bridgeConnection`
@@ -33,11 +35,19 @@ the desktop/bridge handoff. The existing backend/dashboard and `gamemod-anchors`
 jobs cover these gates. A local pass is not a hosted CI pass.
 
 For a manual Dev test, use the [isolated packaged Dev overlay workflow](../deployment/local-dev.md#packaged-dev-overlay-for-bridge-acceptance),
-disable the visible widget before enabling the invisible bridge, and sign both clients into the
-same account. Keep the user-requested desktop overlay running for acceptance; tear down the
+disable the visible widget before enabling the invisible bridge, and sign into the overlay only.
+Use two distinct accounts for mixed-client room acceptance. Keep the user-requested desktop overlay running for acceptance; tear down the
 automated harness and any diagnostic-only sockets/processes. Never stop or automate the game.
 
 ## Isolated packaged bridge gate
+
+Bridge 0.2.0 retains 0.1.7's native-accepted split reader, not the unified method
+rejected by GFx. Its source gate requires `FcmRoster.readNames` for map/public teams and separate
+auxiliary traversal, and prohibits native payload retention in the reader cache. Pure tests
+prove wrapper replacement cannot renew unchanged observations; explicit fresh pushes still can.
+Both compiled `bridge-fast-travel` scenarios exercise all six sources and reject throwing names
+without replacing/renewing prior snapshots before emitting the required `BRIDGE-ERRORS PASS`.
+Keep this gate plus the isolated packaged tests; neither emulates native method verification.
 
 `npm test --prefix game-mods/FCMBridge/hudmodloader-chat/simulator` also runs
 `tests/packaged-bridge.spec.ts`. Preparation builds a temporary DEV ZIP using the real bridge
@@ -49,16 +59,34 @@ manifest remain ignored test artifacts; owned temporary packaging directories ar
 loads that exact child into `new ApplicationDomain(null)` and asserts that the host has no FCM
 class definitions before or after loading. Accessor-backed providers/events cross the movie
 boundary, rather than being compiled alongside the consumer. Only public provider calls,
-production timer ticks, logged binding status and subscription ownership are observed; there
+production timer ticks, scoped storage writes and subscription ownership are observed; there
 are no `@:access` calls into the packaged bridge.
 
-Both local mock adapters must pass initial roster submission/room acknowledgement, unready
-provider rejection and recovery, loading/resume without nonce churn, disjoint rebinding,
-MainMenu leave and unload. Unload must release subscriptions/disconnect exactly once and stop
-poll counts across subsequent timer periods. The older combined harness remains necessary for
+Both storage adapters must pass bounded initial export, unready-provider rejection/recovery,
+loading/resume without generation churn, disjoint generation change, inactive MainMenu export
+and unload. No native chat/auth call is allowed. Unload releases subscriptions/timers and stops
+writes; rate-limited final inactive writes rely on desktop exit/expiry cleanup. The combined harness remains necessary for
 exact boundary/expiry, malformed data, push/getter divergence, exception-backoff and other
 state-focused scenarios. Pure `test-roster-reader.hxml` runs in `gamemod-anchors`; all packaged
 cases run automatically in the existing required `hud-ruffle` gate.
+
+The 0.2.1 regression requires an isolated `BRG_OBJ`-only host with no modern ZFE
+aliases. It must export, preserve a loading/resume generation and stop on unload.
+A second case withholds `zfe-storage-v1`: writes must remain zero until a fresh
+capability probe confirms support. Pure tests also reject malformed/failed/throwing
+responses and preserve xScal/modern-ZFE priority. Native fallback storage support
+remains a separate acceptance check; mocks cannot establish that support.
+
+0.2.2 adds isolated native-call-exception and malformed-runtime-reply scenarios.
+Observe the child's public read-only diagnostic method, require distinct fixed labels,
+zero writes before capability recovery, no private exception/reply text, and teardown.
+Do not link production helpers into the host or use diagnostics to bypass capability
+gates. Native method-entry verification remains outside Ruffle's certification scope.
+
+0.2.3 additionally rejects oversized runtime replies before capability acceptance and tests
+recovery, formatted/escaped capabilities, and bounded write-ack decoding. Package and isolated
+artifact checks require `FcmJson` and reject `JsonParser` linkage, guarding the generic-parser
+dependency seen at the native 0.2.2 parse failure. Ruffle does not reproduce native E1014.
 
 Native-failure control (2026-09-16): the installed 0.1.5 bridge, which fails in Fallout with
 E1014, also passed the isolated packaged lifecycle tests under both mocks. The expanded suite
@@ -71,6 +99,26 @@ This mode does not load hosted snapshots or call live relay services. It validat
 and mock transport contract, **not** native ZFE/xScal scheduling, GFx class availability, a hosted
 lease or actual desktop delivery. Complete those using the separate backend/renderer tests and
 bounded manual two-client native acceptance. No game input automation is used.
+
+## Shared HUD/bridge compatibility gate (0.2.0+)
+
+One room-assignment coordinator serves native HUD ROSTER and authenticated local-export
+observations. Test HUD/ZFE ↔ bridge/ZFE, HUD/ZFE ↔ bridge/xScal, HUD/xScal ↔ bridge/ZFE,
+HUD/xScal ↔ bridge/xScal, plus HUD↔HUD and bridge↔bridge. Require equal canonical rooms,
+bidirectional exactly-once publication and shared retained history after mutual discovery.
+Use real assignment/history/publication services in integration tests, not mocked room IDs.
+
+Cover isolated worlds, one-sided/missing sightings, delayed convergence, repeated fast travel,
+world hops, expiry and stale confirmations. File-reader tests must cover oversized/malformed/
+stale exports, nonadvancing heartbeat, old files at startup, provider storage failures, both
+startup orders, auth replacement, game exit and teardown. Same-observation heartbeat cannot
+extend the original observation deadline. CI's backend Jest, overlay/dashboard Vitest,
+gamemod-anchors and hud-ruffle jobs own these gates.
+
+Backend support goes to hosted Dev before isolated desktop builds. Install only while game
+closed with exact backups/artifact checks. Manual Steam Windows and Linux/Proton acceptance
+must measure native storage timing and repeat the mixed matrix; Game Pass is unverified.
+Simulator success cannot certify native stability. No production changes or game input automation.
 
 ## Existing simulator coverage
 
@@ -185,21 +233,21 @@ actual server identity still require manual in-game acceptance.
 
 For the invisible background mod, `scenario=bridge-fast-travel` loads `FCMServerBridge` instead
 of `FCMChatWidget`. Its ready-provider mock drives real cache/CHANGE subscriptions through the
-same two native transport mocks. Both adapters must preserve the binding through short loading
-and primary-empty recovery, leave/rebind on a disjoint full roster, expire prolonged loading,
-leave MainMenu once, and release owned subscriptions/timers on shutdown. No chat UI/editor or
+two storage provider mocks. Both adapters preserve the generation through short loading
+and primary-empty recovery, retire it on a disjoint full roster, expire prolonged loading,
+invalidate MainMenu evidence, and release owned subscriptions/timers on shutdown. No chat UI/editor or
 live traffic is created. Run the full suite for bridge changes as well as visible-widget changes;
 the existing required `hud-ruffle` job includes both scenarios. The visible scenario additionally
 asserts `SERVER` exists in its visible, attached tab text field after a room confirmation.
 
-Bridge 0.1.2 extends that scenario with sealed, AS3-style getter-backed provider/event classes,
+Retained regressions from 0.1.2 use sealed, AS3-style getter-backed provider/event classes,
 fresh `fromClient` pushes while `GetDataFromClient` remains stale, original observation-time
 expiry, test-provider rejection, duplicate menu reconnect requests and nested getter callbacks.
 `BRIDGE-EVENTS PASS` is required on both providers. A healthy reconnect refresh must neither
 disconnect from the menu dispatch stack nor discard the established room/cursor. Timers and
 subscriptions still terminate on success/failure. These tests cover AVM2 control flow, not native
-disconnect latency or the cause of a Fallout freeze; the bridge now emits capped, privacy-safe
-phase entry/exit and status diagnostics for the next manual native run.
+native storage latency or the cause of a Fallout freeze. The 0.2.0 bridge has no native
+connect/disconnect/send path; status is cached in the loader menu.
 
 Bridge 0.1.3 adds `BRIDGE-DIAGNOSTICS PASS` to both provider scenarios. The mock retains the
 actual loader menu preparation callback and records its rows; assertions require the correct

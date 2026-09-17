@@ -54,6 +54,8 @@ const os = require('os');
 // Pure logic lives in overlay-core (no electron / no side effects). Required up
 // here so the logger below can use resolveLogLevel/shouldRotateLog.
 const overlayCore = require('./overlay-core');
+const { LocalBridgeRelay } = require('./local-bridge-relay');
+const { discoverBridgePaths } = require('./local-bridge-paths');
 
 // Portable identity is build metadata, never a filename heuristic. Configure all
 // Electron-owned durable paths before logging, Linux relaunch, state constants,
@@ -1142,6 +1144,7 @@ function onGamePresenceChanged(found) {
   }
   const wasRunning = gameRunning;
   gameRunning = r.gameRunning;
+  localBridge.setGameRunning(gameRunning);
   diag('[game-gate] gameRunning changed to ' + gameRunning + ' chatActive=' + chatActive + ' isPrivileged=' + isPrivileged() + ' forceVisible=' + forceVisible);
   // On game-launch transition (not-running → running), clear userHidden so alt-tabbing
   // back into the game brings the overlay back after the user had hidden it with Delete.
@@ -1483,6 +1486,25 @@ let isDragging = false;
 
 // Active proxied relay sockets, keyed by a renderer-supplied id.
 const relaySockets = new Map();
+const localBridge = new LocalBridgeRelay({
+  relayHttp: RELAY_HTTP,
+  discover: environment => discoverBridgePaths({ environment, documents: app.getPath('documents') }),
+  emit: (id, frame) => sendToRenderer('proxy:ws:message', { id, data: JSON.stringify(frame) }),
+});
+
+// Every authentication path invalidates the previous desktop bridge owner.
+// Closing its sockets also prevents ordinary buffered frames using an old token.
+function setSessionToken(token) {
+  if (sessionToken === token) return;
+  localBridge.setAuth(token);
+  sessionToken = token;
+  for (const [id, socket] of relaySockets) {
+    try { socket.close(4001, 'Session changed'); } catch { /* Closing socket. */ }
+    sendToRenderer('proxy:ws:close', { id, code: 4001, reason: 'Session changed' });
+  }
+  relaySockets.clear();
+  relaySendBuffers.clear();
+}
 
 // Per-socket CONNECTING-state send buffers.
 // Key: socket id  Value: string[] (frames queued while upstream readyState === CONNECTING)
@@ -2122,6 +2144,12 @@ ipcMain.handle('proxy:http', async (_evt, reqDesc) => {
  * once a sessionToken becomes available.
  */
 function openRelaySocket(id) {
+  const previous = relaySockets.get(id);
+  if (previous) {
+    localBridge.closed(id, previous);
+    try { previous.close(); } catch { /* Closing socket. */ }
+  }
+  const socketToken = sessionToken;
   const sock = new WebSocket(RELAY_WS, {
     headers: {
       'X-Auth-Token': sessionToken,
@@ -2133,21 +2161,30 @@ function openRelaySocket(id) {
   relaySockets.set(id, sock);
   relaySendBuffers.set(id, []);
   sock.on('open', () => {
+    if (relaySockets.get(id) !== sock || socketToken !== sessionToken || isQuitting) {
+      try { sock.close(); } catch { /* Closing socket. */ }
+      return;
+    }
+    localBridge.opened(id, sock, socketToken);
     // Flush any frames that arrived while the socket was CONNECTING.
     const buf = relaySendBuffers.get(id) || [];
     relaySendBuffers.delete(id);
     for (const frame of buf) {
-      try { sock.send(frame); } catch { /* socket closed between open and flush */ break; }
+      const routed = localBridge.outgoing(id, sock, frame);
+      if (routed === null) continue;
+      try { sock.send(routed); } catch { /* socket closed between open and flush */ break; }
     }
     sendToRenderer('proxy:ws:open', { id });
   });
   sock.on('message', (raw) => {
+    if (relaySockets.get(id) !== sock || socketToken !== sessionToken) return;
     const data = raw.toString();
     // Intercept app:update-available (sent by the backend on WS connect) to show a
     // passive OS notification when a newer version exists. The message is still
     // forwarded to the renderer as normal.
     try {
       const msg = JSON.parse(data);
+      if (!localBridge.incoming(id, sock, msg)) return;
       if (msg && msg.type === 'app:update-available' && msg.payload && typeof msg.payload.latestVersion === 'string') {
         const latestVersion = msg.payload.latestVersion;
         if (!updateNotifiedThisSession && overlayCore.cmpVersions(latestVersion, APP_VERSION) > 0) {
@@ -2161,6 +2198,8 @@ function openRelaySocket(id) {
     sendToRenderer('proxy:ws:message', { id, data });
   });
   sock.on('close', (code, reason) => {
+    localBridge.closed(id, sock);
+    if (relaySockets.get(id) !== sock) return;
     relaySockets.delete(id);
     relaySendBuffers.delete(id);
     // Golden-build lock: the dev backend rejected this build as outdated. This is
@@ -2174,7 +2213,11 @@ function openRelaySocket(id) {
     }
     sendToRenderer('proxy:ws:close', { id, code, reason: reason && reason.toString() });
   });
-  sock.on('error', (err) => sendToRenderer('proxy:ws:error', { id, message: err.message }));
+  sock.on('error', (err) => {
+    if (relaySockets.get(id) === sock && socketToken === sessionToken) {
+      sendToRenderer('proxy:ws:error', { id, message: err.message });
+    }
+  });
 }
 
 /**
@@ -2207,6 +2250,8 @@ ipcMain.on('proxy:ws:open', (_evt, id) => {
 ipcMain.on('proxy:ws:send', (_evt, { id, data }) => {
   const sock = relaySockets.get(id);
   if (!sock) return;
+  data = localBridge.outgoing(id, sock, data);
+  if (data === null) return;
   if (sock.readyState === WebSocket.OPEN) {
     sock.send(data);
   } else if (sock.readyState === WebSocket.CONNECTING) {
@@ -2229,6 +2274,7 @@ ipcMain.on('proxy:ws:close', (_evt, { id }) => {
   const idx = pendingWsOpens.indexOf(id);
   if (idx !== -1) pendingWsOpens.splice(idx, 1);
   const sock = relaySockets.get(id);
+  if (sock) localBridge.closed(id, sock);
   if (sock) try { sock.close(); } catch { /* ignore */ }
   relaySockets.delete(id);
   relaySendBuffers.delete(id);
@@ -2289,7 +2335,7 @@ ipcMain.handle('overlay:dev-login-as', async (_evt, persona) => {
           try {
             const json = JSON.parse(data);
             if (json?.data?.token) {
-              sessionToken = json.data.token;
+              setSessionToken(json.data.token);
               flushPendingWsOpens();
               saveState({ discordLinked: true, discordName: json.data.displayName || '', userRole: json.data.role || null });
               userRole = json.data.role || null;
@@ -2802,7 +2848,7 @@ function pollQaStatus(attempt = 0) {
         let d = {};
         try { d = (JSON.parse(data).data) || {}; } catch { /* ignore */ }
         if (d.authorized && d.token) {
-          sessionToken = d.token;
+          setSessionToken(d.token);
           flushPendingWsOpens();
           saveState({ discordLinked: true, displayName: d.displayName || '', userRole: d.role || null });
           userRole = d.role || null;
@@ -2911,7 +2957,7 @@ function refreshDiscordStatus(attempt = 0, oauthPoll = null) {
             if (clientKey && st2 && st2.installToken) {
               registerForToken(st2, clientKey).then((r) => {
                 if (requestGeneration !== authGeneration) return;
-                sessionToken = r.token;
+                setSessionToken(r.token);
                 providerLoginRequested = false;
                 flushPendingWsOpens();
                 saveState({ displayName: r.displayName || st2.displayName, discordLinked: !!r.discordLinked, discordName: r.discordName || discordName, steamLinked: !!r.steamLinked });
@@ -3025,7 +3071,7 @@ function finishProviderUnlink(provider) {
   const reason = label + ' account unlinked';
   authGeneration += 1;
   providerLoginRequested = false;
-  sessionToken = null;
+  setSessionToken(null);
   forceVisible = false;
 
   // Close renderer-proxied sockets before the renderer is moved to the login
@@ -3127,7 +3173,7 @@ function refreshSteamStatus(attempt = 0) {
             if (clientKey && st2 && st2.installToken) {
               registerForToken(st2, clientKey).then((r) => {
                 if (requestGeneration !== authGeneration) return;
-                sessionToken = r.token;
+                setSessionToken(r.token);
                 providerLoginRequested = false;
                 flushPendingWsOpens();
                 saveState({
@@ -3202,7 +3248,7 @@ ipcMain.handle('identity:set-name', async (_evt, rawName) => {
   try {
     const { token, userId: renamedUserId, displayName, discordLinked, discordName, discordUsername, discordDisplayName, discordAvatarUrl, steamLinked, steamDisplayName, username: savedUsername, userRole: renameRole, avatarUrl: renameAvatarUrl } =
       await registerForToken(renameState, clientKey);
-    sessionToken = token;
+    setSessionToken(token);
     flushPendingWsOpens();
     // Persist the new username + resolved display name so future launches use it.
     saveState({ username: name, displayName: displayName || name });
@@ -3356,7 +3402,7 @@ async function startRelay(retryCount = 0) {
   try {
     const { token, userId: regUserId, displayName, discordLinked, discordName, discordUsername, discordDisplayName, discordAvatarUrl, steamLinked, steamDisplayName, username: regUsername, userRole: role, avatarUrl: regAvatarUrl } = await registerForToken(loadState(), clientKey);
     if (requestGeneration !== authGeneration) return;
-    sessionToken = token;
+    setSessionToken(token);
     providerLoginRequested = false;
     flushPendingWsOpens();
     diag('[relay] registered OK — displayName=' + (displayName || '(none)') + ' discordLinked=' + !!discordLinked + ' steamLinked=' + !!steamLinked + ' role=' + (role || 'user'));
@@ -5118,6 +5164,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  localBridge.dispose();
   persistBounds();
   if (IS_LINUX) restorePanelHiding();
   // Hyprland's pin is a live attribute of the window object, not a persisted

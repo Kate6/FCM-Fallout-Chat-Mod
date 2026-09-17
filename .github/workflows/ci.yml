@@ -321,6 +321,16 @@ jobs:
             backend/tests/autoModEngineAi.test.js
             backend/tests/autoModRulesController.test.js
             backend/tests/wireSanitize.test.js
+            backend/src/services/relay/localExportBridge.ts
+            backend/src/services/relay/roomCoordinator.ts
+            backend/tests/localExportBridge.test.js
+            backend/tests/bridgeSocketAuthorization.test.js
+            cross-platform-overlay/local-bridge-files.js
+            cross-platform-overlay/local-bridge-paths.js
+            cross-platform-overlay/local-bridge-relay.js
+            game-mods/FCMBridge/hudmodloader-bridge/FcmBridgeStorage.hx
+            game-mods/FCMBridge/hudmodloader-bridge/FcmBridgeExport.hx
+            game-mods/FCMBridge/hudmodloader-bridge/test-export.hxml
             backend/src/utils/__tests__/oauthState.test.ts
             game-mods/EasyFishing/test-install.sh
             game-mods/FCMBridge/FCMBridge.hx
@@ -366,8 +376,9 @@ jobs:
         working-directory: game-mods/FCMBridge/hudmodloader-bridge
         run: |
           haxe test-state.hxml
+          haxe test-export.hxml
           python3 test_package.py
-      - name: Test shared HUD roster collector
+      - name: Test bridge roster adapter and copied observation freshness
         working-directory: game-mods/FCMBridge/hudmodloader-chat
         run: haxe test-roster-reader.hxml
       - name: Run HUD device-layout tests

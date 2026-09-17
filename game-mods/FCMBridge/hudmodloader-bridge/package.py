@@ -16,7 +16,7 @@ import zlib
 
 ROOT = Path(__file__).resolve().parent
 ENTRY = "Interface/FCMServerBridge.swf"
-VERSION = "0.1.6"
+VERSION = "0.2.3"
 
 
 def module(name: str, path: Path):
@@ -41,7 +41,8 @@ def validate_pair(swf: Path, archive: Path) -> dict:
         raise ValueError("Archive SWF differs from compiled SWF")
     payload = swf.read_bytes()
     for forbidden in [b"FCMChatWidget", b"flash.text.TextField", b"TextEdit", b"URLLoader", b"Socket",
-                      b"BridgeRosterScenario", b"BRIDGE-ROSTER", b"PackagedBridgeHost", b"IsolatedProvider"]:
+                      b"BridgeRosterScenario", b"BRIDGE-ROSTER", b"PackagedBridgeHost", b"IsolatedProvider",
+                      b"chat.v1.", b"chatInterface", b"LINK REQUIRED", b"FCMBRIDGE/1;", b"JsonParser"]:
         if forbidden in payload:
             raise ValueError(f"Background build unexpectedly contains {forbidden!r}")
     return info
@@ -71,8 +72,9 @@ def build(target: str, output: Path) -> dict:
             package.write(archive, "Data/FCMServerBridge.ba2")
             package.writestr("FCMServerBridge.hudmodloader.ini", "FCMServerBridge\n")
             package.writestr("Fallout76Custom.ini.example", "[Archive]\nsResourceArchive2List=HUDModLoader.ba2,FCMServerBridge.ba2\n")
-            package.writestr("examples/ZFE/FCMServerBridge.ini.example", f"[TextChat]\nEndpoint=wss://{host}/relay\nDefaultChannel=server\nAllowedChannels=server\nAutoConnect=false\n")
-            package.writestr("examples/xScal/xscal.ini.example", f"[Chat]\nenabled=true\nrelayEndpoint=wss://{host}/relay\n")
+            package.writestr("EXPORT.json", json.dumps({"schemaVersion": 1, "environment": target,
+                "zfe": f"Data/ZFE/Storage/FCMServerBridge/{target}-state.json",
+                "xscal": f"Data/modsdata/fcmserverbridge-{target}.json"}, indent=2) + "\n")
             package.writestr("BUILD.json", json.dumps(manifest, indent=2) + "\n")
             package.writestr("INSTALL.txt", instructions(host, target))
         print(f"Built {output} ({output.stat().st_size} bytes)")

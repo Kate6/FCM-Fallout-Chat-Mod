@@ -23,32 +23,42 @@ class BridgePackageTests(unittest.TestCase):
                         self.assertNotIn('Data/hudmodloader.ini', names)
                         self.assertEqual(archive.read('FCMServerBridge.hudmodloader.ini'), b'FCMServerBridge\n')
                         self.assertEqual(json.loads(archive.read('BUILD.json')), manifest)
-                        config = archive.read('examples/ZFE/FCMServerBridge.ini.example').decode()
-                        self.assertIn(f'Endpoint=wss://{host}/relay\n', config)
-                        self.assertIn('AllowedChannels=server\n', config)
-                        self.assertNotIn('OpenChatKey=', config)
-                        self.assertIn(f'https://{host}/link', archive.read('INSTALL.txt').decode())
+                        config = json.loads(archive.read('EXPORT.json'))
+                        self.assertEqual(config['environment'], target)
+                        self.assertIn(f'{target}-state.json', config['zfe'])
+                        self.assertIn(f'fcmserverbridge-{target}.json', config['xscal'])
+                        self.assertFalse(any('TextChat' in n or 'xscal.ini' in n for n in names))
+                        self.assertIn(f'https://{host}', archive.read('INSTALL.txt').decode())
                         ba2file = root / f'{target}.ba2'
                         ba2file.write_bytes(archive.read('Data/FCMServerBridge.ba2'))
                         data, _, _, records, entries = package.ba2._read(ba2file)
                         self.assertEqual(entries, [package.ENTRY])
                         swf = package.ba2._raw_blob(data, records[0])
-                        self.assertIn(host.encode() + b'/link', swf)
-                        if target == 'prod': self.assertNotIn(b'dev.falloutchatmod.com/link', swf)
+                        self.assertIn(target.encode(), swf)
+                        self.assertNotIn(b'/link', swf)
+                        self.assertIn(b'FcmJson', swf)
+                        self.assertNotIn(b'JsonParser', swf)
                         self.assertLess(len(swf), 100000)  # no widget/emoji/font bundle
                         swf_file = root / f'{target}.swf'; swf_file.write_bytes(swf)
                         package.validate_pair(swf_file, ba2file)
-                        swf_file.write_bytes(swf.replace(b'FCMBRIDGE/1;', b'FCMBRIDGE/9;'))
+                        swf_file.write_bytes(swf.replace(b'writeStorage', b'writeStoragX'))
                         with self.assertRaisesRegex(ValueError, 'differs'): package.validate_pair(swf_file, ba2file)
 
     def test_source_is_a_separate_child_with_no_chat_or_input_ui(self):
         source = (package.ROOT / 'FCMServerBridge.hx').read_text()
-        self.assertIn(f'VERSION:String = "{package.VERSION}"', source)
+        self.assertIn(f'VERSION:String = "{package.VERSION}"', (package.ROOT / 'FcmBridgeExport.hx').read_text())
+        self.assertIn('VERSION:String = FcmBridgeExport.VERSION', source)
         self.assertNotIn('FCMChatWidget()', source)
-        for text in ['TextField', 'TextEdit', 'URLLoader', 'Input.', 'startInput', 'registerPhysicalKey']:
+        for text in ['TextField', 'TextEdit', 'URLLoader', 'Input.', 'startInput', 'registerPhysicalKey',
+                     'chat.v1.', 'FcmNativeApi', 'getAuthState', 'pollEvents', 'Link code']:
             self.assertNotIn(text, source)
         self.assertIn('mouseEnabled = false', source)
         self.assertIn('mouseChildren = false', source)
+
+    def test_storage_responses_use_gfx_reader(self):
+        source = (package.ROOT / 'FcmBridgeStorage.hx').read_text()
+        self.assertNotIn('haxe.Json.parse', source)
+        self.assertIn('FcmJson.parse', source)
 
     def test_session_policy_does_not_decode_or_retain_native_payloads(self):
         state = (package.ROOT / 'FcmBridgeState.hx').read_text()
@@ -58,6 +68,16 @@ class BridgePackageTests(unittest.TestCase):
         self.assertNotIn('provider:Dynamic', state)
         self.assertNotIn('GetDataFromClient', state)
         self.assertNotIn('rows[i]', state)
+
+    def test_reader_uses_native_accepted_split_not_rejected_unified_decoder(self):
+        reader = (package.ROOT.parent / 'hudmodloader-chat/FcmHudRosterReader.hx').read_text()
+        payload = reader.split('public function payload(', 1)[1].split('function remember(', 1)[0]
+        self.assertIn('FcmRoster.readNames(key, data, localName)', payload)
+        self.assertIn('readAuxiliary(', payload)
+        self.assertNotIn('switch key', payload)
+        self.assertNotIn('FcmRoster.readNative(', reader)
+        self.assertNotIn('data:Dynamic, signature:', reader)
+        self.assertNotIn('previous.data', reader)
 
 
 if __name__ == '__main__': unittest.main()

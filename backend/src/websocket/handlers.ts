@@ -58,6 +58,7 @@ import env from '../config/environment';
 import { INSTANCE_ID } from '../config/instanceIdentity';
 import { notifyRelayLiveChatMessage } from '../services/relay/relayLiveFanout';
 import { BridgeConnection } from './bridgeConnection';
+import { LocalExportBridge } from '../services/relay/localExportBridge';
 import { SERVER_EVENTS_CHANNEL, type ServerEventEnvelope } from '../services/relay/serverChat';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -247,6 +248,8 @@ interface ClientEntry {
   // Defaults false. A user whose overlay is connected but whose game isn't
   // running is OFFLINE for presence purposes (party online counts, member dots).
   inGame: boolean;
+  /** Local bridge authority is per socket, unlike account-wide presence above. */
+  bridgeInGame?: boolean;
   // Effective moderation role, resolved at connect-time via getEffectiveRole().
   // Stored so party:send mod-observer fan-out can walk the clients map without
   // an async role lookup per message. Defaults to 'user' — fail-safe.
@@ -1639,12 +1642,16 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
     if (ws.readyState === WebSocket.OPEN && clients.get(token)?.ws === ws) {
       safeSend(ws, JSON.stringify(frame), `bridge:${user.id}`);
     }
-  }, () => clients.get(token)?.blockedIds ?? new Set<string>());
+  }, () => clients.get(token)?.blockedIds ?? new Set<string>(), undefined,
+  webTicketUserId ? undefined : new LocalExportBridge(user.id, token,
+    () => ws.readyState === WebSocket.OPEN && clients.get(token)?.ws === ws,
+    () => clients.get(token)?.ws === ws && clients.get(token)?.bridgeInGame === true));
   clients.set(token, {
     ws, userId: user.id, username: user.username, displayName, bridge: serverBridge,
     isMuted: user.isMuted,
     blockedIds: initialBlockedIds,
     inGame: false,
+    bridgeInGame: false,
     role: connectTimeRole,
   });
   logger.info({ userId: user.id, username: user.username, displayName }, 'WS client connected');
@@ -2131,11 +2138,28 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
       }
 
       case 'bridge:watch': {
-        if (await checkWsRateLimitBucket('bridge-watch', user.id, 4, 10)) await serverBridge.watch();
+        if (webTicketUserId || clients.get(token)?.ws !== ws) break;
+        if (await checkWsRateLimitBucket('bridge-watch', user.id, 4, 10)) await serverBridge.watch(frame.payload?.mode);
+        break;
+      }
+      case 'bridge:observe': {
+        const receivedAt = Date.now();
+        if (webTicketUserId || clients.get(token)?.ws !== ws || !clients.get(token)?.bridgeInGame) break;
+        const epoch = serverBridge.observationEpoch;
+        if (await checkWsRateLimitBucket('bridge-observe', user.id, 12, 10)
+          && epoch === serverBridge.observationEpoch && clients.get(token)?.ws === ws && clients.get(token)?.bridgeInGame) {
+          await serverBridge.observe(frame.payload, receivedAt);
+        }
+        break;
+      }
+      case 'bridge:leave': {
+        if (webTicketUserId || clients.get(token)?.ws !== ws) break;
+        await serverBridge.leave(); // Revocation fences in-flight work before any await.
         break;
       }
 
       case 'chat:send': {
+        const bridgeEpoch = serverBridge.observationEpoch;
         const client = clients.get(token);
         if (!client) return;
         logger.info({
@@ -2213,6 +2237,7 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
         content = emojifyShortcodes(content);
 
         if (typeof channelId === 'string' && channelId.startsWith('server:')) {
+          if (bridgeEpoch !== serverBridge.observationEpoch || clients.get(token)?.ws !== ws) return;
           await serverBridge.send(channelId, frame.payload?.bridgeBindingId, content);
           return;
         }
@@ -2546,6 +2571,11 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
           setFullscreenStatus(user.id, fullscreen);
         }
         if (typeof inGame === 'boolean') {
+          const ownClient = clients.get(token);
+          if (!webTicketUserId && ownClient?.ws === ws) {
+            ownClient.bridgeInGame = inGame;
+            if (!inGame) await serverBridge.leave();
+          }
           // Propagate to all open client entries for this user (multi-tab / multi-window).
           for (const c of clients.values()) {
             if (c.userId === user.id && c.ws.readyState === WebSocket.OPEN) {

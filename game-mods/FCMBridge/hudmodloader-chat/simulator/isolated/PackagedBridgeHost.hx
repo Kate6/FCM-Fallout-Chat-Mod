@@ -8,25 +8,34 @@ import flash.system.ApplicationDomain;
 import flash.system.LoaderContext;
 
 /** Deliberately has NO production class path/imports, @:access, or shared mocks.
- * Loads the decoded release-package child in a fresh domain. All transport is local fake data. */
+ * Loads the decoded release-package child in a fresh domain. Only local provider storage is faked; no backend confirmation is invented. */
 class PackagedBridgeHost extends Sprite {
     public var BSUIDataManager:Dynamic;
     public var __ZFE:Dynamic;
     public var __SFECodeObj:Dynamic;
     public var __SFCodeObj:Dynamic;
+    public var BRG_OBJ:Dynamic;
+    var storageCapability:Bool = true;
+    var runtimeProbes:Int = 0;
+    var probeFault:String = "";
+    var child:Dynamic = null;
+    var storageDiagnostic:String = "not loaded";
     var movie:Loader = new Loader();
     var providers:Array<{key:String, value:Dynamic}> = [];
     var listeners:Array<{key:String, callback:Dynamic}> = [];
-    var events:Array<Dynamic> = [];
-    var eventId:Int = 0;
+    var snapshot:Dynamic = null;
+    var writes:Int = 0;
+    var failed:Bool = false;
+    var registered:Bool = false;
+    var lastWrite:Float = -1000;
     var controls:Int = 0;
     var leaves:Int = 0;
     var polls:Int = 0;
-    var disconnects:Int = 0;
-    var connected:Bool = false;
-    var bound:Bool = false;
+    var reads:Int = 0;
+    var active:Bool = false;
     var isolated:Bool = false;
     var violation:Bool = false;
+    var violationReason:String = "";
     var request:String = "";
     var previousRequest:String = "";
     var rebound:Bool = false;
@@ -39,12 +48,24 @@ class PackagedBridgeHost extends Sprite {
     public function new() {
         super();
         source = flash.Lib.current.loaderInfo.parameters.provider == "zfe" ? "zfe" : "xscal";
+        var scenario = flash.Lib.current.loaderInfo.parameters.scenario;
+        if (scenario == "packaged-probe-throw") probeFault = "throw";
+        if (scenario == "packaged-probe-malformed") probeFault = "malformed";
+        if (scenario == "packaged-probe-oversized") probeFault = "oversized";
         BSUIDataManager = {
             GetDataFromClient:function(key:String):Dynamic {
+                reads++;
+                if (disposed) { violation = true; violationReason = "read after unload"; }
+                if (key == "MenuStackData") polls++;
+                if (!disposed && scenario == "packaged-unload-getter" && key == "MenuStackData") retire();
                 for (entry in providers) if (entry.key == key) return entry.value;
                 return null;
             },
-            Subscribe:function(key:String, callback:Dynamic):Void { listeners.push({key:key, callback:callback}); },
+            Subscribe:function(key:String, callback:Dynamic):Void {
+                if (disposed) { violation = true; violationReason = "subscribe after unload"; }
+                listeners.push({key:key, callback:callback});
+                if (!disposed && scenario == "packaged-unload-subscribe") retire();
+            },
             Unsubscribe:function(key:String, callback:Dynamic):Void {
                 for (entry in listeners.copy()) if (entry.key == key && entry.callback == callback) listeners.remove(entry);
             }
@@ -52,15 +73,16 @@ class PackagedBridgeHost extends Sprite {
         publish("MenuStackData", {menuStackA:[]});
         publish("AccountInfoData", {name:"HarnessSelf"});
         roster(["PeerA", "PeerB"], flash.Lib.current.loaderInfo.parameters.scenario != "packaged-unready");
-        if (source == "zfe") __ZFE = {call:dispatch};
+        if (source == "zfe") {
+            if (scenario == "packaged-legacy" || scenario == "packaged-legacy-unavailable") {
+                BRG_OBJ = {call:dispatch};
+                storageCapability = scenario != "packaged-legacy-unavailable";
+            } else __ZFE = {call:dispatch};
+        }
         else {
-            __SFCodeObj = {call:dispatch}; // Separate logger, never chat routing.
-            __SFECodeObj = {chatInterface:{
-                connect:function(args:Dynamic):Dynamic return connect(),
-                disconnect:function():Dynamic return disconnect(),
-                getConnectionState:function():Dynamic return {success:true,status:"authenticated"},
-                pollEvents:function(args:Dynamic):Dynamic return poll(args),
-                sendMessage:function(args:Dynamic):Dynamic return send(args)
+            __SFCodeObj = {version:{runtime:"xScal",value:"sim",platform:"sim"},modStorage:{
+                register:function(name:String):Bool { registered = name == "fcmserverbridge-dev"; return registered; },
+                save:save
             }};
         }
         if (ExternalInterface.available) ExternalInterface.addCallback("simPackaged", action);
@@ -73,6 +95,8 @@ class PackagedBridgeHost extends Sprite {
         movie.contentLoaderInfo.addEventListener(Event.COMPLETE, function(_:Event):Void {
             isolated = isolated && domain.hasDefinition("FCMServerBridge")
                 && !ApplicationDomain.currentDomain.hasDefinition("FCMServerBridge");
+            var container:Dynamic = movie.content;
+            child = container.getChildAt(0);
             emit("PACKAGED loaded provider=" + source + " isolated=" + isolated);
         });
         movie.contentLoaderInfo.addEventListener(IOErrorEvent.IO_ERROR, function(_:IOErrorEvent):Void { violation = true; emit("PACKAGED load failed"); });
@@ -80,51 +104,65 @@ class PackagedBridgeHost extends Sprite {
         movie.load(new URLRequest("/FCMServerBridge.swf"), new LoaderContext(false, domain));
     }
     function emit(value:String):Void { if (ExternalInterface.available) ExternalInterface.call("fcmSimLog", value); }
-    function connect():Dynamic { connected = true; return {success:true}; }
-    function disconnect():Dynamic { connected = false; disconnects++; return {success:true}; }
-    function poll(args:Dynamic):Dynamic {
-        polls++;
-        if (args.max != 16) violation = true;
-        var out = events.splice(0, 16);
-        return {success:true,events:out};
+    function retire():Void {
+        // Remove synchronously but keep the child code loaded so an in-progress
+        // native callback returns normally and exposes post-unload reentry bugs.
+        if (movie.parent == this) removeChild(movie);
+        disposed = true;
     }
-    function send(args:Dynamic):Dynamic {
-        if (args.channel != "server" || !StringTools.startsWith(args.targetUserId, "FCMBRIDGE/1;")) {
-            violation = true; return {success:false};
+    function save(document:String):Bool {
+        var now = flash.Lib.getTimer();
+        if (now - lastWrite < 1000 || disposed || document.length > 8192) {
+            violation = true; violationReason = "write-boundary elapsed=" + (now - lastWrite);
         }
-        var next:String = args.targetUserId.substr("FCMBRIDGE/1;".length);
-        if (args.body == "FCMCTL/1/LEAVE") { leaves++; bound = false; return {success:true}; }
-        if (!StringTools.startsWith(args.body, "FCMCTL/1/ROSTER:")) { violation = true; return {success:false}; }
-        controls++;
-        var names:String = args.body.substr("FCMCTL/1/ROSTER:".length);
-        acceptedNames = names == (phase == "hop" ? "NewPeer" : "PeerA|PeerB");
-        if (!acceptedNames) violation = true;
-        previousRequest = request; request = next;
-        rebound = previousRequest != "" && request != previousRequest;
-        events.push({id:++eventId,channel:"system",senderUserId:"system",
-            body:"FCMCTL/1/SERVER-READY:" + next + "|r:isolated"});
-        return {success:true};
+        lastWrite = now;
+        writes++;
+        if (failed) return false;
+        var data:Dynamic = haxe.Json.parse(document);
+        if (data.schemaVersion != 1 || data.environment != "dev" || data.provider != source
+            || data.sequence <= 0 || data.observationAgeMs < 0) violation = true;
+        for (key in ["token","password","code","room","accountId"]) if (Reflect.hasField(data,key)) violation = true;
+        if (snapshot != null && data.sequence <= snapshot.sequence) violation = true;
+        snapshot = data;
+        var nextActive = data.state == "active" || data.state == "holding";
+        if (active && !nextActive) leaves++;
+        active = nextActive;
+        if (active && data.worldGeneration != request) {
+            controls++;
+            previousRequest = request; request = data.worldGeneration;
+            rebound = previousRequest != "" && request != previousRequest;
+        }
+        if (data.state == "active") {
+            // A provider push is settled on the next production world-poll batch.
+            // Until then a heartbeat must retain BOTH the old roster and generation;
+            // new names with the old generation (or vice versa) is a regression.
+            acceptedNames = phase == "hop"
+                ? data.names.join("|") == (controls >= 2 ? "NewPeer" : "PeerA|PeerB")
+                : data.names.join("|") == "PeerA|PeerB";
+            if (!acceptedNames) { violation = true; violationReason = "unexpected-roster"; }
+        }
+        return true;
     }
     function dispatch(verb:String, payload:String):Dynamic {
-        if (verb == "log") {
-            var entry:Dynamic = haxe.Json.parse(payload);
-            var message:String = entry.message;
-            if (message.indexOf("bound=true") >= 0) bound = true;
-            else if (message.indexOf("bound=false") >= 0) bound = false;
-            return "";
-        }
         if (source != "zfe") { violation = true; return ""; }
-        var args:Dynamic = haxe.Json.parse(payload);
-        var result:Dynamic = switch verb {
-            case "chat.v1.getRuntimeInfo": {success:true,capabilities:["zfe-chat-online-v1","zfe-chat-async-control-v1"]};
-            case "chat.v1.connect": connect();
-            case "chat.v1.disconnect": disconnect();
-            case "chat.v1.getAuthState": {success:true,state:"authenticated"};
-            case "chat.v1.pollEvents": poll(args);
-            case "chat.v1.sendMessage": send(args);
-            default: violation = true; {success:false};
-        };
-        return haxe.Json.stringify(result);
+        if (verb == "getRuntimeInfo") {
+            runtimeProbes++;
+            if (probeFault == "throw") throw new flash.errors.Error("private native payload", 1014);
+            if (probeFault == "malformed") return "private malformed native payload";
+            if (probeFault == "oversized") return StringTools.rpad('{"success":true,"capabilities":["zfe-storage-v1"]}', " ", 262145);
+            // Exercise whitespace, nested extra data and escaped capability spelling.
+            return storageCapability ? ' { "success" : true, "capabilities" : ["other", "zfe-storage-v\\u0031"], "extra":{"version":1} } '
+                : '{"success":true,"capabilities":[]}';
+        }
+        if (verb == "writeStorage") {
+            var args:Dynamic = haxe.Json.parse(payload);
+            registered = args.vendor == "FCMServerBridge" && args.path == "dev-state.json";
+            if (!registered) { violation = true; return '{"success":false}'; }
+            var ok = save(args.text);
+            return haxe.Json.stringify({success:ok,status:ok ? "saved" : "failed"});
+        }
+        violation = true; // Any native chat/auth/network call is a regression.
+        return '{"success":false}';
     }
     function publish(key:String, data:Dynamic, ready:Bool = true):Void {
         var value = new IsolatedProvider(data, ready);
@@ -137,21 +175,24 @@ class PackagedBridgeHost extends Sprite {
         publish("MapMenuData", {MarkerData:[for (name in names) {markerType:"PlayerRemote",text:name}]}, ready);
     }
     function action(command:String):String {
+        if (!disposed && child != null) storageDiagnostic = child.storageDiagnostic();
         if (!disposed) switch command {
             case "loading": publish("MenuStackData", {menuStackA:[{menuName:"LoadingMenu"}]}); roster([]);
             case "resume": roster(["PeerB", "PeerA"]); publish("MenuStackData", {menuStackA:[]});
             case "hop": phase = "hop"; roster(["NewPeer"]);
             case "main-menu": publish("MenuStackData", {menuStackA:[{menuName:"MainMenu"}]});
             case "unload":
-                disposed = true;
-                removeChild(movie); // Production REMOVED_FROM_STAGE owns shutdown.
+                retire(); // Production REMOVED_FROM_STAGE owns shutdown.
                 movie.unloadAndStop(true);
+            case "storage-fail": failed = true;
+            case "storage-recover": failed = false;
+            case "storage-capability": storageCapability = true; probeFault = "";
             case "snapshot":
             default: violation = true;
         }
-        return haxe.Json.stringify({provider:source,isolated:isolated,connected:connected,bound:bound,
-            controls:controls,leaves:leaves,polls:polls,disconnects:disconnects,subscriptions:listeners.length,
-            acceptedNames:acceptedNames,rebound:rebound,violation:violation,disposed:disposed});
+        return haxe.Json.stringify({provider:source,isolated:isolated,registered:registered,active:active,storageDiagnostic:storageDiagnostic,
+            controls:controls,leaves:leaves,polls:polls,reads:reads,writes:writes,runtimeProbes:runtimeProbes,snapshot:snapshot,subscriptions:listeners.length,
+            acceptedNames:acceptedNames,rebound:rebound,violation:violation,violationReason:violationReason,disposed:disposed});
     }
 }
 

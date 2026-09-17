@@ -23,6 +23,28 @@ desktop Server membership. Hosted CI and release-owner publication approval rema
 The desktop overlay, its installer, and the default EULA-safe overlay path are not part of
 this release. The HUD is the separate, explicit opt-in HUDModLoader `.ba2` track.
 
+## Background-bridge follow-up — separate from this release
+
+The release owner subsequently reported the HUD build released with working Server chat.
+The native evidence here is also the implementation baseline for **FCMServerBridge 0.1.7**,
+not proof that the background bridge works or was part of that release. The historical
+publication/checklist fields below have not been independently reconciled in this bridge task.
+
+- 2.10.105 already ran the proposed synthetic probe: decoder method entry failed even on local
+  data. Repeating that diagnosis is not the first next step.
+- 2.10.106 restored native roster reads with split traversal; 2.10.107 restored pending-ZFE auth
+  refresh; 2.10.109 subsequently passed both-provider acceptance within the recorded limits.
+- The bridge's 0.1.7 candidate reuses the accepted map/public-team helper and separate auxiliary
+  traversal, without changing the released widget. It retains its provider readiness and session
+  gates; unchanged getter-wrapper identities cannot refresh copied observation timestamps.
+- The bridge already polls auth continuously and does not run the HUD history-resync loop.
+  Do not transplant those unrelated changes or weaken leases to compensate for failed reads.
+- 0.1.6's native bridge failure remains the last bridge result. 0.1.7 requires its own local
+  Ruffle/package gate and then native roster, room confirmation and Dev-overlay acceptance.
+
+See the [bridge contract](../../game-mods/FCMBridge/hudmodloader-bridge/README.md#restored-reader-candidate-017)
+and [native investigation](../testing/hud-xscal-acceptance-2026-09-15.md#210105-native-method-entry-failure-210106-restored-reader-candidate).
+
 ## Verified comparison baseline and scope (2026-09-16)
 
 - The [Nexus files page](https://www.nexusmods.com/fallout76/mods/4082?tab=files) lists

@@ -82,6 +82,9 @@
     "files": [
       "main.js",
       "overlay-core.js",
+      "local-bridge-files.js",
+      "local-bridge-paths.js",
+      "local-bridge-relay.js",
       "preload.js",
       "package.json",
       "dist-renderer/**/*",
