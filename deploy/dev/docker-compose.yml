@@ -86,7 +86,8 @@ services:
   # route on cloudflared-dev (Access service token gated).
   # ---------------------------------------------------------------------------
   minio-dev:
-    image: minio/minio:latest
+    # Same verified hosted-Dev image; avoid the unavailable Docker Hub latest tag.
+    image: quay.io/minio/minio@sha256:a1a8bd4ac40ad7881a245bab97323e18f971e4d4cba2c2007ec1bedd21cbaba2
     restart: unless-stopped
     command: server /data --address ":9700" --console-address ":9701"
     environment:

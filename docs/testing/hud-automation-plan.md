@@ -571,3 +571,13 @@ authoritative for new game builds, provider versions, real world hops, or Contro
 - HUDModLoader: <https://github.com/GitCrazy-wc/hudmodloader>
 - xScal: <https://github.com/DCHoaxer/xScal>
 - Ruffle: <https://github.com/ruffle-rs/ruffle>
+
+## Ultrawide positioning regression
+
+The compiled `ultrawide` scenario runs with both xScal and ZFE in the required
+`hud-ruffle` suite. It exercises production menu callbacks, all compact customization
+branches, repeated movement to x=-330, horizontal bounds, INI round-trip, editor
+alignment and position-only recovery. Pure config/layout tests and backend
+`hudLayoutService` tests cover matching relay validation and saved negative offsets.
+Actual 21:9/32:9 host transforms, clipping and F11 menu placement remain native-only:
+check both screen edges, open editor, resize, reload, and Reset position on each provider.

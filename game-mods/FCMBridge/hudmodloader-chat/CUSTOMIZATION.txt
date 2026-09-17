@@ -3,6 +3,17 @@ FCM HUD CUSTOMIZATION
 
 Open F11 -> FCM -> Customize. These settings affect your HUD, not other users.
 
+Customize groups controls into Position, Panel size, Text and input, Appearance,
+and Auto-hide submenus to avoid the old oversized menu.
+
+ULTRAWIDE POSITION
+- Position -> Move left/right can pass the centered 1920x1080 frame edges.
+- INI x accepts -960 through (2880-width); for example x=-330. Vertical
+  bounds remain 0 through (1080-height). No automatic monitor detection.
+- Move only as far as your visible screen allows. Position -> Reset position
+  restores x=10/y=10 without changing size, colors or other preferences.
+- The host/game determines visible edges; native ultrawide validation is pending.
+
 SIZE AND POSITION
 - Panel width +/- and height +/- are independent. Move up/down/left/right.
 - Input height +/- and input text size +/- adjust the actual editor displayed

@@ -11732,7 +11732,7 @@ export default function ChatOverlay() {
             <fieldset><legend>Visible channels</legend>
               {[...preferenceTabs.filter(t => tabKey(t.id) !== 'server'), { id: 'server:preference', name: 'Server' }].map(tab => {
                 const key = tabKey(tab.id);
-                return <label key={key} style={{ display: 'block' }}><input type="checkbox" checked={!tabLayout.prefs.hidden.includes(key)} onChange={e => {
+                return <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 32 }}><input type="checkbox" style={{ margin: 0, flexShrink: 0, width: 16, height: 16 }} checked={!tabLayout.prefs.hidden.includes(key)} onChange={e => {
                   tabLayout.update(e.target.checked ? { ...tabLayout.prefs, hidden: tabLayout.prefs.hidden.filter(k => k !== key) } : hideTab(tabLayout.prefs, tab, preferenceTabs));
                 }} />{tab.name}</label>;
               })}

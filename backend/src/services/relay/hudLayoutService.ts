@@ -10,7 +10,7 @@ export interface HudLayout extends HudColorSettings { bgAlpha?: number; x: numbe
 export function parseHudLayout(value: unknown): HudLayout | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const v = value as Record<string, unknown>;
-  const bounds = { x: [0, 1920], y: [0, 1080], width: [200, 1920], height: [120, 1080] };
+  const bounds = { x: [-960, 2880], y: [0, 1080], width: [200, 1920], height: [120, 1080] };
   const optionalBounds = { fontSize: [8, 47], inputHeight: [28, 120], inputFontSize: [8, 47], autoHideSec: [0, 600] } as const;
   if (Object.keys(v).some(k => !Object.prototype.hasOwnProperty.call(bounds, k)
     && !Object.prototype.hasOwnProperty.call(optionalBounds, k) && k !== 'autoHideEnabled' && k !== 'bgAlpha' && !HUD_COLOR_FIELDS.some(field => field === k))) return null;
@@ -43,7 +43,7 @@ export function parseHudLayout(value: unknown): HudLayout | null {
     if (typeof n !== 'number' || !Number.isInteger(n) || n < min || n > max) return null;
   }
   const layout = v as unknown as HudLayout;
-  if (layout.x + layout.width > 1920 || layout.y + layout.height > 1080) return null;
+  if (layout.x + layout.width > 2880 || layout.y + layout.height > 1080) return null;
   return { x: layout.x, y: layout.y, width: layout.width, height: layout.height, ...settings };
 }
 

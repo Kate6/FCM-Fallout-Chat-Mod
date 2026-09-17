@@ -15,6 +15,11 @@ afterEach(() => {
 });
 
 describe('portable layout', () => {
+  it('defaults portable builds to the same version as the desktop package', () => {
+    const script = fs.readFileSync(new URL('../scripts/build-portable-experimental.mjs', import.meta.url), 'utf8');
+    expect(script).toContain('const version = process.env.FCM_BUILD_VERSION || pkg.version;');
+    expect(script).not.toContain('-portable.${stamp}');
+  });
   it('leaves installed builds unchanged', () => {
     expect(core.resolvePortableLayout({ enabled: false })).toEqual({ enabled: false });
   });

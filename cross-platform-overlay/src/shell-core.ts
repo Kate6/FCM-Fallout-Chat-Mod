@@ -384,8 +384,8 @@ export interface WebMirrorSettings {
 }
 export function shellToWebSettings(s: WebMirrorInput): WebMirrorSettings {
   return {
-    alwaysShowOnlineStats: s.alwaysShowOnlineStats === true,
-    alwaysShowServerStats: s.alwaysShowServerStats === true,
+    alwaysShowOnlineStats: s.alwaysShowOnlineStats !== false,
+    alwaysShowServerStats: s.alwaysShowServerStats !== false,
     themeId: s.themeId,
     fontId: normalizeFontId(s.fontId),
     // Chrome opacity is applied via the --fcm-chrome-bg-alpha CSS variable, so the

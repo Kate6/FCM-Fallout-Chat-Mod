@@ -2595,15 +2595,16 @@ ipcMain.on('window:set-opacity', (_evt, v) => {
 // Only acts when the game is actually running ("if they came from the game") —
 // in standalone/no-game testing there's nothing to return to, so we no-op.
 //
-//   • Windows: blur() releases foreground; the OS hands focus to the window
-//     directly beneath (the game), and our always-on-top overlay stays visible.
+//   • Windows: keep foreground until the guarded helper activates the game.
+//     Blurring first can activate an unrelated window and cancel the handoff.
 //   • Linux (X11/Wayland): blurring an always-on-top window does NOT reliably
 //     transfer focus to the game, so we additionally ask the window manager to
 //     activate the FO76 window via wmctrl/xdotool (best-effort; silent if the
 //     tool isn't installed — blur is still applied as a fallback).
 let pendingGameFocusReturn = null;
-function cancelGameFocusReturn() {
+function cancelGameFocusReturn(reason = 'unspecified', ownerPid = null) {
   if (pendingGameFocusReturn) {
+    diag('[return-to-game] cancelling reason=' + reason + ' ownerPid=' + ownerPid + ' helperPid=' + pendingGameFocusReturn.pid);
     try { pendingGameFocusReturn.kill(); } catch { /* already exited */ }
     pendingGameFocusReturn = null;
   }
@@ -2615,16 +2616,18 @@ function returnFocusToGame() {
     diag('[return-to-game] skipped — game stopped or overlay no longer focused');
     return;
   }
-  cancelGameFocusReturn();
+  cancelGameFocusReturn('new-return-request');
   diag('[return-to-game] returning focus to FO76, clickThrough=' + clickThrough + ' platform=' + process.platform);
-  try { mainWindow.blur(); } catch { /* ignore */ }
+  if (process.platform !== 'win32') {
+    try { mainWindow.blur(); } catch { /* ignore */ }
+  }
   // Force the renderer to blur whichever DOM element currently has focus.
   // On Linux/XWayland, mainWindow.blur() does NOT reliably deliver a DOM blur
   // event to document.activeElement — the XWayland compositor (KWin) may never
   // send FocusOut to the Chromium Aura layer, leaving the chat input as
   // document.activeElement. tickIdle() then sees typing=true and permanently
-  // blocks idle-collapse. On Windows the async PowerShell helper means focus
-  // leaves after blur() returns, so the DOM element may also not blur in time.
+  // blocks idle-collapse. On Windows the async helper retains OS focus until
+  // activation, but the composer should stop accepting text immediately.
   // Sending overlay:blur-input forces the renderer to call .blur() on the active
   // element immediately, matching OS reality. (Pattern used by PoE/Exchange2.)
   sendToRenderer('overlay:blur-input');
@@ -2661,12 +2664,12 @@ function returnFocusToGame() {
     try {
       const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', ps], { windowsHide: true });
       pendingGameFocusReturn = child;
-      const timeout = setTimeout(() => { if (pendingGameFocusReturn === child) cancelGameFocusReturn(); }, 3000);
+      const timeout = setTimeout(() => { if (pendingGameFocusReturn === child) cancelGameFocusReturn('timeout'); }, 3000);
       timeout.unref?.();
-      child.on('exit', (code) => {
+      child.on('exit', (code, signal) => {
         clearTimeout(timeout);
         if (pendingGameFocusReturn === child) pendingGameFocusReturn = null;
-        diag('[return-to-game] win32 helper exited code=' + code);
+        diag('[return-to-game] win32 helper exited code=' + code + ' signal=' + signal);
       });
       child.on('error', (e) => diag('[return-to-game] win32 activate failed: ' + String(e && e.message || e)));
     } catch (e) { diag('[return-to-game] win32 spawn threw: ' + String(e && e.message || e)); }
@@ -3537,7 +3540,7 @@ function stopRepaintTimer() {
 
 function _doShow() {
   if (!mainWindow) return;
-  cancelGameFocusReturn();
+  cancelGameFocusReturn('show-window');
   if (mainWindow.isMinimized()) mainWindow.restore();
   try { mainWindow.setFocusable(true); } catch { /* not critical */ }
   mainWindow.show();
@@ -3671,7 +3674,7 @@ function dispatchFocusInput(reason) {
 
 function focusToChat() {
   if (!mainWindow) return;
-  cancelGameFocusReturn();
+  cancelGameFocusReturn('focus-chat');
   // Treat the window as hidden if it is not visible OR if it is hidden-to-tray
   // (userHidden=true means the user pressed Delete; the window should be hidden
   // but defend against edge cases where isVisible() is true yet tray-hidden).
@@ -4255,7 +4258,7 @@ function _runForegroundPoll(available, tried) {
           // "overlay won't stay above the game" diagnosable without a manual capture.
           vdiag('[foreground] active-window class changed: "' + lastForegroundProc + '" → "' + line +
             '" (isGame=' + isGameClass(line) + ' unknown=' + overlayCore.isUnknownForegroundClass(line) + ' gameRunning=' + gameRunning + ')');
-          if (!isGameClass(line) && !overlayCore.isOverlayClass(line) && !overlayCore.isUnknownForegroundClass(line)) cancelGameFocusReturn();
+          if (!isGameClass(line) && !overlayCore.isOverlayClass(line) && !overlayCore.isUnknownForegroundClass(line)) cancelGameFocusReturn('linux-other-foreground');
           lastForegroundProc = line;
           if (gameRunning) applyZOrder();
           applyFocusClickThrough();
@@ -4283,6 +4286,9 @@ function _runForegroundPoll(available, tried) {
 // lines stop again).
 function spawnWindowsForegroundPoller() {
   if (process.platform !== 'win32' || isQuitting) return;
+  // Match our window owner, not the executable/product name (portable builds
+  // have a different name). Otherwise the poller cancels our own focus handoff.
+  // Other processes keep their real names so switching apps still cancels it.
   const ps = `
 $sig = @'
 using System;
@@ -4298,8 +4304,10 @@ while ($true) {
     $h = [Fg]::GetForegroundWindow()
     $pid2 = 0
     [void][Fg]::GetWindowThreadProcessId($h, [ref]$pid2)
+    Write-Output ('FCM_OWNER_PID=' + $pid2)
     $p = Get-Process -Id $pid2 -ErrorAction SilentlyContinue
-    if ($p) { Write-Output $p.ProcessName } else { Write-Output '' }
+    if ($pid2 -eq ${process.pid}) { Write-Output 'fallout-chat-mod' }
+    elseif ($p) { Write-Output $p.ProcessName } else { Write-Output '' }
   } catch { Write-Output '' }
   Start-Sleep -Milliseconds 100
 }`;
@@ -4310,6 +4318,7 @@ while ($true) {
     zorderProc = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true });
     diag('[foreground] win32 poller started (pid=' + (zorderProc && zorderProc.pid) + ')');
     let buf = '';
+    let foregroundOwnerPid = null;
     zorderProc.stdout.on('data', (d) => {
       buf += d.toString();
       let nl;
@@ -4317,6 +4326,10 @@ while ($true) {
         const line = buf.slice(0, nl).trim();
         buf = buf.slice(nl + 1);
         if (!line) continue;
+        if (/^FCM_OWNER_PID=\d+$/.test(line)) {
+          foregroundOwnerPid = Number(line.slice('FCM_OWNER_PID='.length));
+          continue;
+        }
         // A line arrived → the poller is healthy. Stamp the watchdog clock, reset the
         // restart backoff, and clear any fail-closed state from a previous silence.
         lastForegroundAt = Date.now();
@@ -4324,7 +4337,7 @@ while ($true) {
         if (!pollerEverEmitted) { pollerEverEmitted = true; diag('[foreground] win32 poller: first line ("' + line.toLowerCase() + '")'); }
         if (fgFailClosed) { fgFailClosed = false; diag('[foreground] win32 poller recovered — re-evaluating hotkeys'); }
         const foreground = line.toLowerCase();
-        if (foreground && foreground !== 'explorer' && !isGameClass(foreground) && !overlayCore.isOverlayClass(foreground)) cancelGameFocusReturn();
+        if (foreground && foreground !== 'explorer' && !isGameClass(foreground) && !overlayCore.isOverlayClass(foreground)) cancelGameFocusReturn('windows-other-foreground', foregroundOwnerPid);
         lastForegroundProc = foreground;
         if (gameRunning) applyZOrder();
         applyFocusClickThrough();

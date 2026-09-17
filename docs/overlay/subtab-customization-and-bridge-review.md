@@ -15,7 +15,7 @@ Drag channel tabs within their parent, or right-click for Hide channel, Set as d
 Move left/right and Channel layout settings. Shift+F10 opens the menu from a focused
 tab. Escape cancels; a drop commits. Tab buttons are not window-drag handles.
 
-Settings → Keybinds → Filters → Channel layout and hidden channels opens visibility checkboxes and a
+Settings → Appearance → Channel layout and hidden channels opens visibility checkboxes and a
 default selector, including Server while unavailable. The sub-tab row's ellipsis
 opens the same panel. Selecting a hidden default explicitly makes it visible.
 Reset shows all channels, clears custom order, and restores General/first-visible

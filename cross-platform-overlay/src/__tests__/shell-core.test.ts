@@ -463,8 +463,10 @@ describe('shouldResetIdleOnVisibility', () => {
 });
 
 describe('shellToWebSettings (mirror)', () => {
-  it('defaults stats to hover and mirrors independent always-visible choices', () => {
-    expect(shellToWebSettings(input)).toMatchObject({ alwaysShowOnlineStats: false, alwaysShowServerStats: false });
+  it('defaults both stats to visible and preserves independent saved choices', () => {
+    expect(shellToWebSettings(input)).toMatchObject({ alwaysShowOnlineStats: true, alwaysShowServerStats: true });
+    expect(shellToWebSettings({ ...input, alwaysShowOnlineStats: false, alwaysShowServerStats: false }))
+      .toMatchObject({ alwaysShowOnlineStats: false, alwaysShowServerStats: false });
     expect(shellToWebSettings({ ...input, alwaysShowOnlineStats: true, alwaysShowServerStats: false }))
       .toMatchObject({ alwaysShowOnlineStats: true, alwaysShowServerStats: false });
     expect(shellToWebSettings({ ...input, alwaysShowServerStats: true }).alwaysShowServerStats).toBe(true);

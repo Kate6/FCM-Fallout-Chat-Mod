@@ -87,14 +87,19 @@ try {
   const headerConnections = connectionCount;
   const actions = page.getByRole('button', { name: 'Overlay actions', exact: true });
   for (let cycle = 0; cycle < 5; cycle++) {
-    await actions.click(); await expect(actions).toHaveText('▴');
+    await actions.click(); await expect(actions).toHaveAttribute('aria-expanded', 'true');
+    const settingsItem = page.getByRole('menuitem', { name: 'Settings', exact: true });
+    await settingsItem.hover();
+    await expect(settingsItem).not.toHaveCSS('box-shadow', 'none');
+    await settingsItem.focus();
+    await expect(settingsItem).not.toHaveCSS('box-shadow', 'none');
     await expect(page.getByRole('menuitem', { name: 'Settings', exact: true })).toBeVisible();
     assert.match(await page.getByRole('menu').evaluate(el => getComputedStyle(el).backgroundColor), /^rgb\(/, 'menu must be opaque, not rgba/transparent');
     if (cycle === 0) await page.screenshot({ path: `${artifacts}/header-actions.png` });
-    await page.keyboard.press('Escape'); await expect(actions).toHaveText('▾');
+    await page.keyboard.press('Escape'); await expect(actions).toHaveAttribute('aria-expanded', 'false');
   }
   await page.getByRole('button', { name: 'Live status', exact: true }).hover();
-  await expect(page.getByRole('tooltip')).toContainText('17 FCM online');
+  await expect(page.getByRole('tooltip')).toContainText('17 FCM Online');
   await page.mouse.move(1, 1);
   await page.locator('[data-fcm-main-tab-row]').getByText('PM', { exact: true }).click();
   await expect(page.locator('[data-fcm-main-divider="right"]')).toBeVisible();
@@ -203,12 +208,20 @@ try {
   await page.evaluate(() => { window.usabilityComposer = document.querySelector('[contenteditable="true"]'); });
   await command('settings:open');
   await page.locator('.ss-navbtn').filter({ hasText: /keybinds/i }).click();
-  await page.getByText('Always show FCM online count', { exact: true }).click();
-  await page.getByText('Always show observed server players', { exact: true }).click();
-  await expect(page.locator('[data-fcm-pinned-stats]')).toContainText('17 online');
+  await expect(page.locator('.ss-toggle').filter({ hasText: 'Always show FCM online count' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Channel layout and hidden channels', exact: true })).toHaveCount(0);
+  await page.locator('.ss-navbtn').filter({ hasText: /appearance/i }).click();
+  await expect(page.locator('[data-fcm-pinned-stats]')).toContainText('17 Online');
+  await page.locator('.ss-toggle').filter({ hasText: 'Always show FCM online count' }).click();
+  await page.locator('.ss-toggle').filter({ hasText: 'Always show observed server players' }).click();
+  await expect(page.locator('[data-fcm-pinned-stats]')).toHaveCount(0);
+  await page.locator('.ss-toggle').filter({ hasText: 'Always show FCM online count' }).click();
+  await page.locator('.ss-toggle').filter({ hasText: 'Always show observed server players' }).click();
+  await expect(page.locator('[data-fcm-pinned-stats]')).toContainText('17 Online');
   await page.getByRole('button', { name: 'Channel layout and hidden channels', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Channel layout' })).toBeVisible();
   await expect(page.getByRole('checkbox', { name: 'Raids', exact: true })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Raids', exact: true }).locator('..')).toHaveCSS('align-items', 'center');
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   await page.locator('.ss-navbtn').filter({ hasText: /appearance/i }).click();
   const fontButton = page.getByRole('button', { name: 'Chat font', exact: true });
@@ -305,7 +318,7 @@ try {
   await rm(`${profile}/Local Storage`, { recursive: true, force: true });
   await launch();
   await expect(composer()).toHaveCSS('font-family', /Verdana/);
-  await expect(page.locator('[data-fcm-pinned-stats]')).toContainText('17 online');
+  await expect(page.locator('[data-fcm-pinned-stats]')).toContainText('17 Online');
   console.log('PASS native preference persistence after restart and localStorage removal');
 
   for (const [size, width] of [[9, 320], [14, 520], [22, 800]]) {

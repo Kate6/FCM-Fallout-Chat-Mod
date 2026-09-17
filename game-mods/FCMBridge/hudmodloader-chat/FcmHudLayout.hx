@@ -48,8 +48,8 @@ class FcmHudLayout {
                     || !Math.isFinite(alpha) || alpha < 0 || alpha > 1) return false;
             }
             if (Reflect.hasField(data,'autoHideEnabled') && !Std.isOfType(data.autoHideEnabled,Bool)) return false;
-            if (data.x < 0 || data.y < 0 || data.width < 200 || data.height < 120
-                || data.x + data.width > FcmConfig.VIEW_W || data.y + data.height > FcmConfig.VIEW_H) return false;
+            if (data.x < FcmConfig.MIN_X || data.y < 0 || data.width < 200 || data.width > FcmConfig.VIEW_W || data.height < 120
+                || data.x + data.width > FcmConfig.RIGHT_X || data.y + data.height > FcmConfig.VIEW_H) return false;
         }
         if (loaded) { if (data != null) dirty = false; return false; }
         loaded = true;

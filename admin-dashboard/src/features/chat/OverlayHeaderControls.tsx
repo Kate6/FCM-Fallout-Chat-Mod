@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import './overlayHeaderControls.css';
 
 export interface OnlineStats { totalOnline: number; observedPlayers: number | null; bindingId: string | null }
 export function readOnlineStats(value: unknown): OnlineStats | null {
@@ -70,8 +71,8 @@ export function OverlayHeaderControls({ connected, socket, scope, bindingId, alw
     if (rect) setAnchor({ top: rect.bottom + 4, right: Math.max(4, window.innerWidth - rect.right) });
     setPopup(kind);
   };
-  const onlineText = connected && stats ? `${stats.totalOnline} FCM online` : 'FCM online: unavailable';
-  const serverText = connected && stats?.observedPlayers != null ? `${stats.observedPlayers} observed on server` : 'Server players: unavailable';
+  const onlineText = connected && stats ? `${stats.totalOnline} FCM Online` : 'FCM Online: unavailable';
+  const serverText = connected && stats?.observedPlayers != null ? `${stats.observedPlayers} observed on Server` : 'Server players: unavailable';
   const buttonStyle = { background: 'transparent', color, border: 0, padding: '0 4px', cursor: 'pointer', font: 'inherit', WebkitAppRegion: 'no-drag' } as React.CSSProperties;
   return <>
     <div data-fcm-header-controls="" style={{ display: 'flex', alignItems: 'center', flexShrink: 0, fontSize: '10px', color, WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
@@ -80,10 +81,14 @@ export function OverlayHeaderControls({ connected, socket, scope, bindingId, alw
         onFocus={() => open('stats')} onBlur={() => setPopup(p => p === 'stats' ? null : p)}
         onClick={() => open('stats')}>{connected ? '● Live' : '● Offline'}</button>
       {(alwaysOnline || (alwaysServer && bindingId)) && <span data-fcm-pinned-stats="" style={{ maxWidth: '32vw', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={[alwaysOnline && onlineText, alwaysServer && bindingId && serverText].filter(Boolean).join(' · ')}>
-        {[alwaysOnline && `${connected && stats ? stats.totalOnline : '—'} online`, alwaysServer && bindingId && `${connected && stats?.observedPlayers != null ? stats.observedPlayers : '—'} server`].filter(Boolean).join(' · ')}
+        {[alwaysOnline && `${connected && stats ? stats.totalOnline : '—'} Online`, alwaysServer && bindingId && `${connected && stats?.observedPlayers != null ? stats.observedPlayers : '—'} Server`].filter(Boolean).join(' · ')}
       </span>}
-      <button ref={arrow} type="button" aria-label="Overlay actions" aria-haspopup="menu" aria-expanded={popup === 'actions'} style={buttonStyle}
-        onClick={() => popup === 'actions' ? setPopup(null) : open('actions')}>{popup === 'actions' ? '▴' : '▾'}</button>
+      <button ref={arrow} type="button" aria-label="Overlay actions" title="Overlay actions" aria-haspopup="menu" aria-expanded={popup === 'actions'} style={{ ...buttonStyle, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 16, minWidth: 16, height: 16, minHeight: 0, padding: 0, marginLeft: 2, boxSizing: 'border-box', lineHeight: 1, border: 0 }}
+        onClick={() => popup === 'actions' ? setPopup(null) : open('actions')}>
+        <svg aria-hidden="true" width="12" height="12" viewBox="-8 -8 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points={popup === 'actions' ? '-4.5,2.25 0,-2.25 4.5,2.25' : '-4.5,-2.25 0,2.25 4.5,-2.25'} />
+        </svg>
+      </button>
     </div>
     {popup && createPortal(<div ref={panel} data-fcm-header-popup={popup} role={popup === 'actions' ? 'menu' : 'tooltip'}
       style={{ position: 'fixed', ...anchor, zIndex: 10000, maxWidth: 'calc(100vw - 8px)', padding: '8px', background, color, border: `1px solid ${color}`, fontSize: '12px', WebkitAppRegion: 'no-drag' } as React.CSSProperties}
@@ -95,7 +100,7 @@ export function OverlayHeaderControls({ connected, socket, scope, bindingId, alw
       }}>
       {popup === 'stats' ? <><div>{onlineText}</div>{bindingId && <div>{serverText}</div>}</>
         : ([['Refresh', onRefresh], ['Settings', onSettings], ['Minimize', onMinimize]] as const).filter(([, action]) => action).map(([label, action]) =>
-          <button key={label} type="button" role="menuitem" style={{ ...buttonStyle, display: 'block', padding: '6px 12px', width: '100%', textAlign: 'left' }}
+          <button key={label} className="fcm-header-menu-item" type="button" role="menuitem" style={{ ...buttonStyle, display: 'block', padding: '6px 12px', width: '100%', textAlign: 'left' }}
             onClick={() => { setPopup(null); action?.(); }}>{label}</button>)}
     </div>, document.body)}
   </>;

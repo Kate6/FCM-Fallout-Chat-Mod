@@ -235,7 +235,7 @@ Ordinary HTTP(S) URLs embedded in message text follow the same behavior, includi
 also contain bundled emoji; when several links exist, the action opens the first one. Link
 activation is accepted only while `openKey` owns a visible editor and a link row is selected;
 before OpenChat, the same physical key remains a normal Fallout control.
-The highlight color is independently configurable as `Selected message` in F11 → Customize →
+The highlight color is independently configurable as `Selected message` in F11 → Customize → Appearance →
 Colors or as `selectedRowColor` in `FCMChat.ini`; it persists through ZFE storage and the xScal
 device-scoped layout relay.
 Configured feed scrolling acts only while chat owns a visible input session. The blank newest and

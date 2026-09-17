@@ -160,8 +160,8 @@ export const DEFAULT_SHELL_SETTINGS: ShellSettings = {
   textOpacity: 1.0,
   fontSize: 14,
   showHints: true,
-  alwaysShowOnlineStats: false,
-  alwaysShowServerStats: false,
+  alwaysShowOnlineStats: true,
+  alwaysShowServerStats: true,
   backgroundOpacity: 0,
   // Low default: scanline divs are dark (see index.html), so 0.08 gives a faint
   // CRT texture rather than heavy bars.
@@ -1528,21 +1528,12 @@ function buildSettingsPanel() {
     });
     hint(s, 'Click a binding then press your desired key combo. Press Esc to clear it entirely. Unbound keys are hidden from the hint bar.');
 
-    heading(s, 'LIVE STATUS');
-    toggle(s, 'Always show FCM online count', () => currentSettings.alwaysShowOnlineStats, v => commit({ alwaysShowOnlineStats: v }));
-    toggle(s, 'Always show observed server players', () => currentSettings.alwaysShowServerStats, v => commit({ alwaysShowServerStats: v }));
-    hint(s, 'Otherwise hover or focus Live to see counts. Server counts require a confirmed bridge and reflect observed players, not a guaranteed full world roster.');
     heading(s, 'FILTERS');
     s.append(accountBlockField({
       label: 'Blocked users',
       placeholder: 'Search a user to block…',
     }));
     hint(s, 'Start typing to find an existing user, then pick them to block. Blocks sync to your account and hide them from chat + member lists everywhere. Click ✕ on a chip to unblock.');
-
-    const channelLayout = el('button', {}, 'Channel layout and hidden channels');
-    channelLayout.addEventListener('click', () => window.dispatchEvent(new Event('fcm-subtab-settings')));
-    s.append(channelLayout);
-    hint(s, 'Right-click a channel to hide it or make it the default. Restore hidden channels or reset the layout here.');
 
     s.append(chipField({
       label: 'Notify keywords',
@@ -1617,6 +1608,15 @@ function buildSettingsPanel() {
   {
     const s = makeSection();
     heading(s, 'APPEARANCE');
+    heading(s, 'LIVE STATUS');
+    toggle(s, 'Always show FCM online count', () => currentSettings.alwaysShowOnlineStats, v => commit({ alwaysShowOnlineStats: v }));
+    toggle(s, 'Always show observed server players', () => currentSettings.alwaysShowServerStats, v => commit({ alwaysShowServerStats: v }));
+    hint(s, 'Both counts are visible by default. Turn them off to use the Live popover instead. Server counts require a confirmed bridge and reflect observed players, not a guaranteed full world roster.');
+    heading(s, 'CHANNEL LAYOUT');
+    const channelLayout = el('button', {}, 'Channel layout and hidden channels');
+    channelLayout.addEventListener('click', () => window.dispatchEvent(new Event('fcm-subtab-settings')));
+    s.append(channelLayout);
+    hint(s, 'Right-click a channel to hide it or make it the default. Restore hidden channels or reset the layout here.');
     const themeRow = el('div', { className: 'ss-row' });
     themeRow.append(el('label', { className: 'ss-lbl' }, 'Theme'));
     // Native <select> popups don't render in frameless/transparent Electron windows — use a custom button + popover instead.

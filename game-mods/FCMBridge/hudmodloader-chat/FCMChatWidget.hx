@@ -1210,23 +1210,44 @@ class FCMChatWidget extends MovieClip {
                         FcmConfig.COLOR_NAMES[i], true, false, MENU_ACTION_TIMEOUT_MS]);
                 return;
             }
-            // Customize submenu (opened when the "customize" isMenu item is selected — HUDTools
-            // re-invokes this builder with parentItem = the submenu id).
+            // Keep each branch short: HUDTools stacks entries upward without scrolling.
             if (p == "customize") {
+                for (item in [
+                    {id:"position", label:"Position..."}, {id:"panel_size", label:"Panel size..."},
+                    {id:"text_size", label:"Text and input..."}, {id:"appearance", label:"Appearance..."},
+                    {id:"auto_hide", label:"Auto-hide..."}
+                ]) Reflect.callMethod(_hudTools, add, [item.id, item.label, true, true, MENU_ACTION_TIMEOUT_MS]);
+                Reflect.callMethod(_hudTools, add, ["cz_reset", "Reset all settings", true, false, MENU_ACTION_TIMEOUT_MS]);
+                return;
+            }
+            if (p == "position") {
+                for (item in [
+                    {id:"cz_up", label:"Move up"}, {id:"cz_down", label:"Move down"},
+                    {id:"cz_left", label:"Move left"}, {id:"cz_right", label:"Move right"},
+                    {id:"cz_position_reset", label:"Reset position"}
+                ]) Reflect.callMethod(_hudTools, add, [item.id, item.label, true, false, MENU_ACTION_TIMEOUT_MS]);
+                return;
+            }
+            if (p == "panel_size" || p == "text_size") {
+                for (item in _cfg.sizingMenu()) {
+                    var panel = item.id == "cz_width_up" || item.id == "cz_width_dn"
+                        || item.id == "cz_height_up" || item.id == "cz_height_dn";
+                    if (panel == (p == "panel_size"))
+                        Reflect.callMethod(_hudTools, add, [item.id, item.label, true, false, MENU_ACTION_TIMEOUT_MS]);
+                }
+                return;
+            }
+            if (p == "appearance") {
+                Reflect.callMethod(_hudTools, add, ["colors", "Colors...", true, true, MENU_ACTION_TIMEOUT_MS]);
+                Reflect.callMethod(_hudTools, add, ["cz_opac_up", "Opacity +", true, false, MENU_ACTION_TIMEOUT_MS]);
+                Reflect.callMethod(_hudTools, add, ["cz_opac_dn", "Opacity -", true, false, MENU_ACTION_TIMEOUT_MS]);
+                Reflect.callMethod(_hudTools, add, ["cz_theme", "Color theme >", true, false, MENU_ACTION_TIMEOUT_MS]);
+                return;
+            }
+            if (p == "auto_hide") {
                 Reflect.callMethod(_hudTools, add, ["autohide", (_cfg.autoHideActive() ? "Auto-hide: ON" : "Auto-hide: OFF"), true, false, MENU_ACTION_TIMEOUT_MS]);
                 Reflect.callMethod(_hudTools, add, ["cz_hide_delay_up", "Hide delay +5s (" + _cfg.autoHideSec + "s)", true, false, MENU_ACTION_TIMEOUT_MS]);
                 Reflect.callMethod(_hudTools, add, ["cz_hide_delay_dn", "Hide delay -5s (" + _cfg.autoHideSec + "s)", true, false, MENU_ACTION_TIMEOUT_MS]);
-                Reflect.callMethod(_hudTools, add, ["colors", "Colors...", true, true, MENU_ACTION_TIMEOUT_MS]);
-                for (item in _cfg.sizingMenu())
-                    Reflect.callMethod(_hudTools, add, [item.id, item.label, true, false, MENU_ACTION_TIMEOUT_MS]);
-                Reflect.callMethod(_hudTools, add, ["cz_up",      "Move up",       true, false, MENU_ACTION_TIMEOUT_MS]);
-                Reflect.callMethod(_hudTools, add, ["cz_down",    "Move down",     true, false, MENU_ACTION_TIMEOUT_MS]);
-                Reflect.callMethod(_hudTools, add, ["cz_left",    "Move left",     true, false, MENU_ACTION_TIMEOUT_MS]);
-                Reflect.callMethod(_hudTools, add, ["cz_right",   "Move right",    true, false, MENU_ACTION_TIMEOUT_MS]);
-                Reflect.callMethod(_hudTools, add, ["cz_opac_up", "Opacity +",     true, false, MENU_ACTION_TIMEOUT_MS]);
-                Reflect.callMethod(_hudTools, add, ["cz_opac_dn", "Opacity -",     true, false, MENU_ACTION_TIMEOUT_MS]);
-                Reflect.callMethod(_hudTools, add, ["cz_theme",   "Color theme >", true, false, MENU_ACTION_TIMEOUT_MS]);
-                Reflect.callMethod(_hudTools, add, ["cz_reset",   "Reset all settings", true, false, MENU_ACTION_TIMEOUT_MS]);
                 return;
             }
             // Top-level menu — channel entries in display order (SERVER included in-world).
@@ -2158,6 +2179,7 @@ class FCMChatWidget extends MovieClip {
             return;
         }
         switch (id) {
+            case "cz_position_reset": _cfg.x = 10; _cfg.y = 10;
             case "cz_up":      _cfg.y -= 20;
             case "cz_down":    _cfg.y += 20;
             case "cz_left":    _cfg.x -= 20;
@@ -2167,9 +2189,9 @@ class FCMChatWidget extends MovieClip {
             case "cz_theme":   cycleTheme();
             default: if (!_cfg.customizeSize(id) && !_cfg.customizeColor(id)) return;
         }
-        _cfg.clamp();   // keep size/position on-screen + alpha in range
+        _cfg.clamp();   // bound manual offsets, dimensions and alpha
         // Move is cheap (just reposition the container); size/opacity/theme need a redraw.
-        if (id == "cz_up" || id == "cz_down" || id == "cz_left" || id == "cz_right") { x = _cfg.x; y = _cfg.y; refreshSharedInputLayout(); }
+        if (id == "cz_up" || id == "cz_down" || id == "cz_left" || id == "cz_right" || id == "cz_position_reset") { x = _cfg.x; y = _cfg.y; refreshSharedInputLayout(); }
         else rebuildPanel();
         persistConfig();
     }

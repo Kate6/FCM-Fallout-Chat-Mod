@@ -10,16 +10,22 @@ accounts; see [community presence](../realtime/README.md#community-online-count)
   With a backend-confirmed bridge binding, it also shows **observed server players**.
   This includes observed game accounts, not just FCM users, but is not an
   authoritative world population. Duplicate own-name sightings count once.
-- Settings → Keybinds → Live status independently enables always-visible online
-  and server counts. Both default off (popover), persist in native settings, and
+- Settings → Appearance → Live status independently enables always-visible Online
+  and Server counts. Both default on; explicit saved choices are preserved. They persist in native settings and
   mirror into the renderer without reconnecting chat. No server count appears
   without a confirmed binding. Unknown values are unavailable/“—”, never zero.
-- A single down-arrow opens Refresh, Settings and Minimize. It points up while
+- Appearance also contains Channel layout and hidden channels; visibility rows center
+  each checkbox with its channel name.
+- A borderless down-arrow button opens Refresh, Settings and Minimize. Its
+  centered 16×16px target and 12×12px SVG match the close control's dimensions.
+  It points up while
   open. Escape/outside click closes it; arrow keys/Home/End navigate actions.
   Close and the Party member-panel button remain separate. Header controls do not
   drag the window; portals prevent main-row clipping.
   Popovers use the selected theme's background at full opacity, independent of
   the chat chrome transparency setting.
+  Action items highlight on hover and keyboard focus using the theme's text color
+  as a subtle tint; keyboard focus also has an inset outline.
 
 Website/dashboard and visible HUD controls are unchanged.
 

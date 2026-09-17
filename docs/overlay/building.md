@@ -94,6 +94,69 @@ overlay, and never terminates Fallout 76.
 
 electron-builder picks up: `main.js`, `preload.js`, `dist-renderer/**`, `assets/**`.
 
+Version policy: desktop and portable builds now share the package version (`1.4.0`).
+The production Windows portable flow uses the Windows workflow's `target=portable`
+input and `Packaging/package-portable.ps1`; see the
+[portable distribution runbook](../deployment/releasing-the-overlay.md#windows-portable-distribution-140-onward).
+The `dist:portable:experimental` command remains isolated QA/Dev and must not be
+substituted for a Prod portable build.
+Portable/experimental status remains separate metadata and product labeling, not a
+timestamp suffix. `FCM_BUILD_VERSION` remains an explicit build override. Previously
+installed artifacts and hosted Dev's QA-version approval are not changed by this
+source setting; rebuilding/distribution and updating the approval are separate steps.
+
+Windows local acceptance, 2026-09-17: commit `9aac2c11` was built natively with
+Node 24.18.0 as `1.4.0-portable.20260917` (QA/Dev, portable and experimental metadata).
+All 1,223 overlay unit tests passed; package inspection confirmed the bridge modules
+and passive update handler. The executable launched from the laptop's Downloads folder
+with adjacent `FCMData` and the Dev relay, reaching first-use Discord authorization.
+Artifact SHA-256: `7e5c9370d7e179668e06a3eb552efa83ea4facdfb0bc4a645159039f031ce7d1`.
+The prior unpacked Dev applications and launch-task definition were backed up, not erased;
+the installed profile and game/bridge files were left unchanged. This is an unsigned local
+test build, not a public release. Authenticated native Server-tab confirmation, restart
+identity persistence, and visible/clickable Windows update toasts remain manual acceptance
+items; unit tests and presence of packaged handlers do not establish full native parity.
+
+Windows foreground tracking identifies the overlay by its owning Electron PID and
+normalizes that process to the shared overlay identifier. Do not identify it by
+the installed/portable product name: doing so can cancel the post-send focus handoff
+while the overlay itself is foreground. Other applications still cancel pending
+handoffs. Regression coverage lives in `windows-foreground-poller.test.js`; verify
+send-to-game focus and switching to another app during the handoff on Windows.
+
+The laptop portable EXE was replaced with the PID-focus fix on 2026-09-17 after
+all 1,225 Windows overlay tests passed. This local rebuild retains the approved
+`1.4.0-portable.20260917` version; distinguish it by SHA-256
+`3f252663ebf8f15a11f91c9bf3c9e1513ec58ee7abe7b35a2c744df5698cc5d4`.
+Packaged `main.js` matched the fixed source byte-for-byte. The prior EXE is backed
+up under `FCM-overlay-backup-portable-20260917/pre-focus-fix`; settings and identity
+file hashes were unchanged by replacement. Native post-send focus acceptance is pending.
+
+Focus-handoff diagnostics log cancellation reason, foreground owner PID and helper PID
+only when a handoff is pending, plus the helper exit code/signal. Reasons distinguish
+timeout, show-window, focus-chat, new request and another foreground application.
+The Windows poller carries owner PID separately from its existing process classification;
+no window titles, chat text or credentials are logged by these diagnostics. A cancelled
+helper is not proof of an activation failure: inspect the cancellation reason first.
+
+The diagnostic rebuild installed on the laptop on 2026-09-17 retains the approved
+portable version and has SHA-256
+`0f4a5a7bedd5b7e3cea0e187fb657e2cb701664b2d352cb921ede11c7d68ac8d`.
+All 1,226 Windows tests passed; packaged main-process code matched the diagnostic
+source. This adds evidence collection, not a verified focus fix. The prior EXE is
+retained under `pre-focus-diagnostics` in the existing laptop backup directory.
+
+The subsequent Windows handoff revision keeps the overlay foreground until the
+guarded helper activates Fallout 76, rather than calling `BrowserWindow.blur()`
+first. Native diagnostics showed that pre-activation blur selected Wispr Flow and
+triggered the intentional-other-app cancellation guard while the user typed normally.
+Composer DOM blur remains immediate; Linux behavior and cancellation safeguards remain
+unchanged. Native retesting is required before declaring the focus issue resolved.
+This activation-order rebuild was installed with unchanged settings/identity files
+after 1,227 Windows tests passed. Its SHA-256 is
+`54ee247a8db815892725cee86cfad6175d4479a48f6e3f5ec3141bfd7da583d3`;
+the replaced diagnostic EXE is retained in the `pre-activation-order` backup.
+
 ---
 
 ## Platform constraints

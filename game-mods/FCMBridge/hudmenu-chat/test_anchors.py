@@ -912,7 +912,7 @@ if widget_src:
           "FCMChatWidget does not synthesize child-domain ControlMap events")
     check("startTypeMirror" not in widget_src,
           "FCMChatWidget does not overlap the HUDTools entry with a duplicate typing mirror")
-    check('["cz_reset",   "Reset all settings"' in widget_src,
+    check(re.search(r'\["cz_reset",\s*"Reset all settings"', widget_src) is not None,
           "FCMChatWidget exposes Reset all settings in the Customize submenu")
     check("_cfg = FcmConfig.resetToDefaults(_cfg);" in widget_src
           and 'if (id == "cz_reset")' in widget_src,

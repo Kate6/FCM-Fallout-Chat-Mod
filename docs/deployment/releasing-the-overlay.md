@@ -244,6 +244,44 @@ Note: `latest.yml`, `latest-linux.yml`, and `app-update.yml` are not generated (
 
 ### Step 2 — Build download ZIPs
 
+### Windows portable distribution (1.4.0 onward)
+
+The Windows workflow accepts `target=installer`, `portable`, or `both`. Portable
+is built separately with `fcmPortable=true`, stable/Prod metadata and the same
+version as the installer; merely requesting electron-builder's portable target
+does not enable FCM's portable storage. Use `target=portable` for a portable-only run:
+
+```bash
+gh workflow run build-windows.yml --ref prod -f version=1.4.0 -f target=portable -f publish=false
+```
+
+After the required Haxe/source/package and complete Ruffle gates, build the optional
+bridge with `hudmodloader-bridge/package.py --target prod --output <bridge.zip>`.
+Package the downloaded Windows artifact using PowerShell (Windows or Linux):
+
+```powershell
+./Packaging/package-portable.ps1 -Version 1.4.0 -PortableExe "Fallout Chat Mod Portable 1.4.0.exe" -BridgeZip "bridge-prod.zip" -OutputDir "portable-output"
+```
+
+This creates a folder and ZIP containing the portable EXE, README.txt, SHA256SUMS.txt,
+and `Optional FCM Bridge/` with the BA2, config snippets, provider setup instructions
+and Prod export/build manifests. It rejects Dev bridges, mismatched BA2 hashes and
+existing output paths. No profiles/credentials are copied. The bridge is explicitly
+optional/manual: bundling these files never authorizes the overlay to install mods.
+The installer remains a separate EXE and does not gain bridge installation behavior.
+
+The README source is `Packaging/windows/README-PORTABLE.txt`. Extenders and
+HUDModLoader remain separate downloads. No native chat endpoint or bridge account
+linking is required; the Prod-stamped bridge exports only to the authenticated Prod
+overlay. Preserve the entire FCMData directory beside the EXE when upgrading.
+
+This is an **artifact-only packaging path**. The existing release orchestrator and
+website registry do not yet publish a separate portable link automatically. Do not
+claim publication by running this helper. A future portable publication must run
+smoke tests on the exact portable EXE and VirusTotal on that EXE (not substitute the
+NSIS result), complete native acceptance, and explicitly add its download metadata.
+No Nexus/website publishing, release announcement or install is part of packaging.
+
 `Packaging/package-downloads.ps1` wraps each raw artifact into a human-download ZIP alongside `INSTALL-*.txt` (and `.kwinrule` for Linux), and invokes the repeatable HUD package helper:
 
 ```powershell
