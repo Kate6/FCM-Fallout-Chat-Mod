@@ -159,6 +159,7 @@ for (const provider of ['xscal', 'zfe']) {
     await expect(page.locator('#log')).toContainText(/ROSTER-SCENARIO (PASS|FAIL)/, { timeout: 25_000 });
     const log = await page.locator('#log').textContent();
     expect(log).toContain(`ROSTER-SCENARIO PASS ${provider}`);
+    expect(log).toContain('RETAINED-HISTORY PASS authorized=once stale=rejected unmarked=rejected id=preserved');
     expect(log).toContain('RESTORED-READER PASS sources=6 cached-pull=stale fresh-push=accepted damaged=rejected');
     expect(log).not.toContain('ROSTER-SCENARIO FAIL');
     expect(log).toContain('ROSTER-DIAGNOSTICS PASS probes=local-only repeated-error=throttled evidence=unchanged');

@@ -16,12 +16,15 @@ type Row = { id: string; channelId: string; timestamp?: string };
 /** Main General and Server render this same collection; never copy messages into
  * the General channel or collapse different IDs with matching text. */
 export function mergeBridgeRows<T extends Row>(previous: T[], incoming: T[], state: BridgeState,
-  frame: { bindingId?: unknown; channelId?: unknown }, cap: number): T[] {
+  frame: { bindingId?: unknown; channelId?: unknown; historyReplay?: unknown }, cap: number): T[] {
   if (state.status !== 'ready' || state.bindingId !== frame.bindingId || state.channelId !== frame.channelId) return previous;
   const seen = new Set(previous.map(row => row.id));
   const fresh = incoming.filter(row => {
-    if (row.channelId !== state.channelId || !row.id.startsWith(`${state.channelId}:`)
-      || !/^[1-9][0-9]*$/.test(row.id.slice(state.channelId.length + 1)) || seen.has(row.id)) return false;
+    const currentId = row.id.startsWith(`${state.channelId}:`)
+      && /^[1-9][0-9]*$/.test(row.id.slice(state.channelId.length + 1));
+    const retainedId = frame.historyReplay === true
+      && /^server:r:[0-9a-f-]{36}:[1-9][0-9]*$/.test(row.id);
+    if (row.channelId !== state.channelId || (!currentId && !retainedId) || seen.has(row.id)) return false;
     seen.add(row.id);
     return true;
   });

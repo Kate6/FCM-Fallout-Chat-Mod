@@ -4724,7 +4724,7 @@ class FCMChatWidget extends MovieClip {
             var messageId:String    = extractJsonString(obj, "messageId");
             var transportMessageId:String = FcmConfig.hudTransportMessageId(hudTransport);
             if (transportMessageId.length > 0) messageId = transportMessageId;
-            if (channel == "server" && !_serverSession.acceptsMessage(messageId)) {
+            if (channel == "server" && !_serverSession.acceptsMessage(messageId, FcmConfig.hudTransportValue(hudTransport, "h"))) {
                 if (allowServerDeferral) _serverSession.defer(obj);
                 updateCursorFromEvent(obj);
                 if (!allowServerDeferral) zfeLog("info", "world", "discarded server row outside confirmed room");

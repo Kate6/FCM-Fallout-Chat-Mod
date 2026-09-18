@@ -56,7 +56,52 @@ and expiry, desktop replay, future-message isolation and generation boundaries.
 messages. Existing backend CI runs these Jest suites without a new workflow.
 Native two-client acceptance remains pending deployment/manual testing.
 
-Local delayed-departure verification (2026-09-18): backend TypeScript build,
+### Client replay validation (follow-up candidate)
+
+The Redis copy alone is insufficient: both clients historically required each
+message ID to embed the current room, rejecting carried history from the prior
+room. Desktop `bridge:history` payloads now carry `historyReplay: true`; the shared
+renderer still requires the current binding and row channel, then accepts a
+well-formed inherited canonical ID for marked history only. Live messages retain
+their current-room check. Repeated history keeps original IDs for deduplication.
+
+For the visible HUD, the relay projects its internal history-read provenance into
+`h=<URL-encoded current room>` in the existing negotiated `FCMHUD/1;` targetUserId
+carrier. This survives ZFE/xScal's native field filtering. The widget accepts an
+inherited ID only when `h` matches its confirmed room; unmarked/stale-room rows
+are rejected. Readiness, world-exit clearing and authentication stay unchanged.
+No background bridge change is needed. Deploy the compatible backend, update the
+portable overlay, and install the tested visible HUD only on machines using that
+track (never coinstall it with the background bridge). Older clients fail closed
+by hiding inherited rows until updated.
+
+Backend integration tests now serialize replay frames and run them through the
+actual shared renderer helper. Both Ruffle provider scenarios exercise marked,
+unmarked, stale-room and duplicate rows through the widget/native adapter, plus
+world-exit cleanup. Native acceptance still requires a fresh two-client test.
+
+Client replay candidate verification (2026-09-18): all 228 affected backend Jest
+tests, 456 backend TypeScript unit tests, 1,241 overlay units, 435 dashboard
+units, and all 54 Ruffle scenarios passed. Backend/dashboard/renderer builds,
+all chat Haxe tests, native API/auth checks, bridge state/export/package checks,
+and SWF/source/archive/package checks passed. The rebuilt HUD archive was
+extracted and compared byte-for-byte with the tested SWF. The Electron
+interaction suite passed (including reconnects, retained drafts/history and
+account changes); its owned processes and temporary profile were removed.
+Ruffle's port 41739 was closed after completion. These results do not establish
+native game acceptance or hosted deployment. The candidate retains the existing
+private build version; it is not a new published release.
+
+The Windows x64 portable candidate also built successfully on the native laptop
+runner (1.4.0, 91,121,909 bytes). Its packaged renderer SHA-256 matches the tested
+local renderer. The temporary build task was removed. It remains in build
+staging, not installed; packaged runtime smoke, release gates and two-client
+native acceptance remain pending. The HUD candidate is 2.10.110; its rebuilt BA2
+SHA-256 is `21103a134fcd845a39912a1674ab86e1dce0c9e5a6f39a2aa4e6fb44b9cb9e0e`.
+
+### Previous backend-only candidate verification
+
+Local delayed-departure verification (2026-09-18, before the client replay fix): backend TypeScript build,
 98 targeted room/bridge tests, 130 native relay tests, 455 backend TS units,
 1,241 overlay units and 434 dashboard units passed. All chat Haxe tests,
 bridge state/export/package checks, source/BA2/SWF/package checks and all 54

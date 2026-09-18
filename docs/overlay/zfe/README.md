@@ -413,3 +413,11 @@ separate from the **active** `FCMHUD/1;...` metadata envelope in native-chat `ta
 
 Keep dated observations as history. New behavior belongs in the maintained guides and must
 state separately what is in source, built locally, tested in-game, installed, and published.
+
+## Retained Server history compatibility
+
+The current candidate accepts authorized carried Server history through the
+existing `FCMHUD/1;` metadata carrier, with the confirmed room in `h`. Both ZFE and
+xScal use the same validation; authentication and world-exit gates are unchanged.
+See [Server room continuity](../../realtime/server-room-continuity.md) for the
+backend/overlay/HUD rollout order, tests and native-acceptance limitation.

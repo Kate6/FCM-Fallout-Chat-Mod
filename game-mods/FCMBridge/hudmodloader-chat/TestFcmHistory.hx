@@ -91,6 +91,11 @@ class TestFcmHistory {
             check(provider + " deferred native queue is bounded", buffered.length == 64 && buffered[0] == "6");
             check(provider + " current room message accepted", session.acceptsMessage("server:r:two:42"));
             check(provider + " queued old room message rejected", !session.acceptsMessage("server:r:one:43"));
+            var retained = "server:r:00000000-0000-4000-8000-000000000001:43";
+            check(provider + " inherited history requires room marker", !session.acceptsMessage(retained));
+            check(provider + " authorized inherited history accepted", session.acceptsMessage(retained, "r:two"));
+            check(provider + " stale inherited history rejected", !session.acceptsMessage(retained, "r:one"));
+            check(provider + " malformed inherited history rejected", !session.acceptsMessage("global:43", "r:two"));
             check(provider + " unscoped server message rejected", !session.acceptsMessage("unknown"));
             check(provider + " confirmation expires", session.fresh(59999) && !session.fresh(60000));
             check(provider + " supports retained-subscriber recovery",

@@ -33,6 +33,22 @@ class MockXscal {
             body:"Retained through same-server fast travel", targetUserId:""});
     }
 
+    public static function enqueueServerReady(requestId:String, room:String):Void {
+        if (scenarioEvents == null) scenarioEvents = [];
+        scenarioEvents.push({kind:"chat.message", id:scenarioEvents.length + 1,
+            messageId:"sim-retained-ready", channel:"system", senderUserId:"system", senderDisplayName:"FCM",
+            body:"FCMCTL/1/SERVER-READY:" + requestId + "|" + room, targetUserId:""});
+    }
+
+    public static function enqueueRetainedHistory(marker:String, id:Int):Void {
+        if (scenarioEvents == null) scenarioEvents = [];
+        var messageId = "server:r:00000000-0000-4000-8000-000000000001:" + id;
+        scenarioEvents.push({kind:"chat.message", id:scenarioEvents.length + 1,
+            messageId:messageId, channel:"server", senderUserId:"sim-peer", senderDisplayName:"HarnessPeer",
+            body:"Authorized retained history", targetUserId:"FCMHUD/1;m=" + StringTools.urlEncode(messageId)
+                + (marker.length > 0 ? ";h=" + StringTools.urlEncode(marker) : "")});
+    }
+
     public static function loadScenario(url:String):Void {
         var loader = new URLLoader();
         loader.addEventListener(Event.COMPLETE, function(_:Event):Void {
