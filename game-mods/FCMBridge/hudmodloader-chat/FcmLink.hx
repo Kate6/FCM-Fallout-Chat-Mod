@@ -8,7 +8,7 @@ class FcmLink {
     }
 
     public static function validHttpUrl(value:String):Bool {
-        if (value == null || value.length == 0 || value.length > 1024) return false;
+        if (value == null || value.length == 0 || haxe.io.Bytes.ofString(value).length > 4096) return false;
         return ~/^https?:\/\/[^\s<>"']+$/i.match(value);
     }
 

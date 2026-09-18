@@ -37,6 +37,10 @@ jest.mock('../src/config/prisma', () => ({
 
 // ── Other heavy dependency mocks ──────────────────────────────────────────────
 
+jest.mock('../src/config/redis', () => ({
+  getRedisClient: jest.fn().mockResolvedValue({ isReady: false }),
+}));
+
 jest.mock('discord.js', () => ({
   Client: jest.fn().mockImplementation(() => ({
     on: jest.fn(), login: jest.fn(), destroy: jest.fn(),
@@ -59,6 +63,7 @@ jest.mock('../src/config/environment', () => ({
 }));
 
 jest.mock('../src/config/logger', () => ({
+  __esModule: true,
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 
@@ -70,7 +75,23 @@ jest.mock('../src/services/autoModEngine', () => ({ engineEvaluate: jest.fn().mo
 
 // ── Load the module once — cache is reset via invalidateRelayMappingsCache() ──
 
+const intervalSpy = jest.spyOn(global, 'setInterval');
 const svc = require('../src/services/discordService');
+afterAll(() => {
+  for (const result of intervalSpy.mock.results) {
+    if (result.type === 'return') clearInterval(result.value);
+  }
+  intervalSpy.mockRestore();
+});
+
+test('presence storage failure uses the logger mock without leaking a rejection', async () => {
+  const presence = require('../src/services/onlinePresenceService');
+  await expect(presence.flushLocalPresenceToRedis()).resolves.toBeUndefined();
+  expect(require('../src/config/logger').default.warn).toHaveBeenCalledWith(
+    expect.objectContaining({ err: expect.any(Error) }),
+    '[onlinePresenceService] failed to flush local online users',
+  );
+});
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

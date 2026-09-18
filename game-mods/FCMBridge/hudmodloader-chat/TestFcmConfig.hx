@@ -449,6 +449,9 @@ class TestFcmConfig {
         eqs("htmlEscape null",   FcmConfig.htmlEscape(null), "");
         eqs("htmlEscape empty",  FcmConfig.htmlEscape(""),   "");
 
+        eqs("regular server label unchanged", FcmConfig.chanLabel("server"), "Server");
+        eqs("staff own server label", FcmConfig.chanLabel("server", true), "Your server");
+        eqs("staff regular channel unchanged", FcmConfig.chanLabel("trade", true), "Trading");
         if (failures > 0) { Sys.println(failures + " FAILURE(S)"); Sys.exit(1); }
         Sys.println("ALL PASS");
     }

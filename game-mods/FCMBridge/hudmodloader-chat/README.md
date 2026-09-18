@@ -55,15 +55,11 @@ Up/Down selects a visible message row while chat owns
 the editor. The selected row has a configurable outline and translucent fill; users can change
 `Selected message` under F11 → Customize → Colors, or set `selectedRowColor` in `FCMChat.ini`.
 `activateLinkKey` (Enter by default) opens that row's
-first HTTP(S) link through a user-initiated activation. Ruffle verifies selection and activation,
-but Fallout's GFx host has not opened the operating-system browser through `getURL`; a sanctioned
-native extender URL-opening capability is still required. No desktop overlay or
-relay round trip is required. URLs are
-shown as a bounded `host/...` label while the full validated target is retained. Discord channel
-mentions and scheduled-event cards receive their native Discord URL through the existing HUD
-transport. Ordinary HTTP(S) links posted in message text use the same selection, abbreviation, and
-empty-Enter behavior, including rows that also contain emoji. The BA2 does not open a browser or
-perform networking itself.
+first HTTP(S) link through ZFE's capability-gated browser-v1 service. Full URLs remain literal
+and selectable. ZFE validates HTTPS, owns consent and opens the system browser; absent capability
+or current xScal retains readable links. No Flash `getURL`, relay or desktop fallback is used.
+See [browser links and site allowances](../../../docs/overlay/zfe/browser-links.md) for the
+configuration fragment, lifecycle, test coverage and native acceptance requirements.
 
 For stability, automatic Server-room roster/leave controls use a capability gate. Current ZFE
 builds advertise `zfe-chat-async-control-v1` and bind through that non-blocking path; older ZFE

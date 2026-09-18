@@ -16,6 +16,9 @@ class TestFcmLink {
             == "example.com/... and falloutchatmod.com/...");
         check("link next to emoji stays discoverable", FcmLink.firstUrl(
             ":vaultboy: https://example.com/path") == "https://example.com/path");
+        var longUrl = "https://example.org/" + StringTools.lpad("", "a", 3000) + "?x=1#Build";
+        check("long valid links preserved", FcmLink.validHttpUrl(longUrl) && FcmLink.firstUrl(longUrl) == longUrl);
+        check("UTF-8 byte limit", !FcmLink.validHttpUrl("https://example.org/" + StringTools.lpad("", "é", 2100)));
         trace("TestFcmLink OK");
     }
 }

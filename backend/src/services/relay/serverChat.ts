@@ -14,6 +14,7 @@
 
 import { getRedisClient } from '../../config/redis';
 import logger from '../../config/logger';
+import { noteModerationRoom } from './serverModeration';
 
 /** Redis pub/sub channel carrying server-room events across backend instances. */
 export const SERVER_EVENTS_CHANNEL = 'relay:server:events';
@@ -39,6 +40,7 @@ export async function copySplitRoomHistory(source: string, destination: string):
   if (source === destination) throw new Error('Split history requires a new room');
   const redis = await getRedisClient();
   await redis.copy(historyKey(source), historyKey(destination));
+  await noteModerationRoom(destination).catch(() => {});
 }
 
 /** A chat.message event as delivered to the ZFE client over the subscribe stream. */
@@ -84,6 +86,10 @@ export async function publishServerMessage(
     await redis.lPush(key, JSON.stringify(event));
     await redis.lTrim(key, 0, HISTORY_MAX - 1);
     await redis.expire(key, HISTORY_TTL_S);
+    // Indexing is independent from delivery: failure must not suppress normal chat.
+    await noteModerationRoom(worldId).catch(err => {
+      logger.warn({ err }, '[serverChat] moderation index unavailable');
+    });
     const envelope: ServerEventEnvelope = { kind: 'msg', worldId, cursor, event };
     await redis.publish(SERVER_EVENTS_CHANNEL, JSON.stringify(envelope));
   } catch (err) {

@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('relayBridge', {
 
   // Position presets: capture live bounds (SET POS) + snap to a saved rect.
   getBounds: (forPreset = false) => ipcRenderer.invoke('window:get-bounds', forPreset === true),
+  applySize: (size) => ipcRenderer.invoke('window:apply-size', size),
   setBounds: (bounds) => ipcRenderer.send('window:set-bounds', bounds),
   // In-app edge resize from shell.ts resize zones. Sends the computed new bounds
   // (after pointer-drag math) to main which clamps + applies via setBounds.

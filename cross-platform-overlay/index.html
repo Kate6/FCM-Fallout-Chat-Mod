@@ -120,12 +120,26 @@
          to the sub-tab row's BOTTOM edge, so the collapsed overlay = exactly the
          two tab rows. We do NOT re-layout the tab rows (no height/padding/align
          overrides) so they don't visibly resize on collapse.
-         NOTE: class alone (no #root.collapsed parent selector) so the class
-         keeps hiding content during the 240ms expand animation — shell.ts removes
-         #root.collapsed first (to start the layout reflow) then delays class
-         removal until the window has fully expanded. */
+         Retain layout while fading, instead of display:none resetting the feed.
+         The class itself controls visibility so interrupted transitions can
+         remove it independently of the root's native-collapse state. */
+      #shell-overlay-host [data-fcm-subtab-row] ~ * {
+        transition: opacity 240ms ease, visibility 240ms;
+      }
       .fcm-collapsed-hidden {
-        display: none !important;
+        opacity: 0 !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
+      /* Composite all pixels together, including body pseudo-elements. Keep
+         layout intact so hiding cannot reset the message viewport to the top. */
+      body { clip-path: inset(0); transition: opacity 240ms ease, clip-path 240ms ease; }
+      html.fcm-full-auto-fading body { opacity: 0 !important; }
+      html.fcm-subtabs-auto-clipped body {
+        clip-path: inset(0 0 max(0px, calc(100% - var(--fcm-idle-height, 62px))) 0);
+      }
+      #shell-overlay-host > div > div {
+        transition: background-color 240ms ease, border-color 240ms ease;
       }
 
       /* Full auto-hide keeps the native window and relay alive at a one-pixel
@@ -144,6 +158,12 @@
          mouse movement over it can wake the overlay. */
       html.fcm-full-auto-hidden #shell-bg-dim,
       html.fcm-full-auto-hidden #shell-scanline { visibility: hidden !important; }
+      /* Shared dashboard CSS paints body pseudo-elements, not DOM children.
+         Neither body * nor hiding shell-scanline covers these full-window effects. */
+      body:has(#root.collapsed)::before,
+      body:has(#root.collapsed)::after,
+      html.fcm-full-auto-hidden body::before,
+      html.fcm-full-auto-hidden body::after { visibility: hidden !important; }
 
       /* Prototype-managed visual layers the web component doesn't expose as
          settings: an adjustable scanline overlay (above the settings modal so it

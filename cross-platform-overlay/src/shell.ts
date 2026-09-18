@@ -357,6 +357,18 @@ let msgObserver: MutationObserver | null = null;
 // Walking the sub-tab row's following siblings is structure-independent; the old
 // nth-child rule was brittle and could hide the sub-tab row itself.
 let collapsedHidden: HTMLElement[] = [];
+// One owned, cancellable completion; a wake must never let an older hide win.
+let collapseCompletion: ReturnType<typeof setTimeout> | null = null;
+let collapsePaintFrame: number | null = null;
+const HIDE_FADE_MS = 240;
+function afterHidePaint(finish: () => void) {
+  // Start the deadline at the first paint opportunity, not the input handler.
+  // A busy Windows compositor can defer that first frame past 240 ms.
+  collapsePaintFrame = requestAnimationFrame(() => {
+    collapsePaintFrame = null;
+    collapseCompletion = setTimeout(finish, HIDE_FADE_MS);
+  });
+}
 // Timestamp of last collapse/expand. The main process animates the window height
 // over ~240ms, emitting resize events that must NOT re-clamp the scale mid-animation
 // (tabs would visibly shrink and snap back). Suppress applyScale during settlement.
@@ -478,10 +490,22 @@ function emitCollapseState(isCollapsed: boolean): void {
 
 function setCollapsed(next: boolean, focusInput = false) {
   if (collapsed === next) return;
+  if (collapsePaintFrame !== null) cancelAnimationFrame(collapsePaintFrame);
+  collapsePaintFrame = null;
+  if (collapseCompletion !== null) clearTimeout(collapseCompletion);
+  collapseCompletion = null;
   lastTransitionMs = Date.now();
   const root = document.getElementById('root');
   if (next) {
+    // A new collapse may supersede a pending expansion. Retain/reconcile the
+    // owned hidden elements rather than leaving classes in a cancelled closure.
+    revealCollapsedElements(root, collapsedHidden);
+    collapsedHidden = [];
     const fullAutoHide = currentSettings.autoHideMode === 'full';
+    if (!fullAutoHide) {
+      root?.classList.remove('fcm-full-auto-hidden');
+      document.documentElement.classList.remove('fcm-full-auto-hidden', 'fcm-full-auto-fading');
+    }
     // Measure the strip height BEFORE applying the 'collapsed' class so the
     // sub-tab row is still in its normal position when we read its offset.
     // Full mode does not need the measurement: it hides the complete renderer
@@ -489,14 +513,32 @@ function setCollapsed(next: boolean, focusInput = false) {
     const h = fullAutoHide ? FULL_AUTO_HIDE_HEIGHT : headerStripHeight();
     if (fullAutoHide) {
       collapsedHidden = [];
-      root?.classList.add('fcm-full-auto-hidden');
-      document.documentElement.classList.add('fcm-full-auto-hidden');
+      document.documentElement.classList.remove('fcm-subtabs-auto-clipped');
+      // Fade the complete composited body (including pseudo-elements) BEFORE
+      // shrinking the native window. Never clip a still-visible full-hide fade.
+      document.documentElement.classList.add('fcm-full-auto-fading');
     } else {
       applyCollapsedHidden();
+      document.documentElement.style.setProperty('--fcm-idle-height', `${h}px`);
+      document.documentElement.classList.add('fcm-subtabs-auto-clipped');
     }
     collapsed = true;
-    root?.classList.add('collapsed');
-    window.relayBridge.collapse(h, fullAutoHide);
+    if (fullAutoHide) {
+      afterHidePaint(() => {
+        collapseCompletion = null;
+        root?.classList.add('collapsed', 'fcm-full-auto-hidden');
+        document.documentElement.classList.add('fcm-full-auto-hidden');
+        window.relayBridge.collapse(h, true);
+      });
+    } else {
+      root?.classList.add('collapsed');
+      // Windows can stall rendering during SetWindowPos. Animate the visible
+      // clip on the compositor first, then shrink the already-clipped window.
+      afterHidePaint(() => {
+        collapseCompletion = null;
+        window.relayBridge.collapse(h, false);
+      });
+    }
     // Notify the React overlay that it idle-collapsed so it can close any
     // absolutely-positioned floating UI (e.g. the party member panel) that
     // would otherwise hang over the collapsed header strip.
@@ -507,7 +549,7 @@ function setCollapsed(next: boolean, focusInput = false) {
     // would start closing panels when the user comes back.
     emitCollapseState(true);
   } else {
-    const wasFullAutoHide = root?.classList.contains('fcm-full-auto-hidden') ?? false;
+    const wasFullAutoHide = document.documentElement.classList.contains('fcm-full-auto-fading');
     collapsed = false;
     emitCollapseState(false);
     // Keep 'collapsed' on root through the 240ms expand animation — removing it
@@ -515,17 +557,23 @@ function setCollapsed(next: boolean, focusInput = false) {
     // is still at header height. Strip it only after the window is full-size.
     window.relayBridge.expand(focusInput);
     const hiddenEls = collapsedHidden.slice();
-    collapsedHidden = [];
     // 260ms > 240ms animation — reveal content once fully expanded.
-    setTimeout(() => {
+    const reveal = () => {
+      collapseCompletion = null;
       if (collapsed) return;
+      collapsedHidden = [];
       if (wasFullAutoHide) root?.classList.remove('fcm-full-auto-hidden');
       if (wasFullAutoHide) document.documentElement.classList.remove('fcm-full-auto-hidden');
+      document.documentElement.classList.remove('fcm-full-auto-fading');
+      document.documentElement.classList.remove('fcm-subtabs-auto-clipped');
       revealCollapsedElements(root, hiddenEls);
-      // Jump the feed to the latest message so the user sees the most recent
-      // chat after expanding. Defer a frame so the body has laid out first.
-      scrollMessagesToBottomDeferred();
-    }, 260);
+      // Passive wakes preserve a reader's position. Only explicit activation
+      // requests latest chat; bottom-follow is maintained by the list observer.
+      if (focusInput) scrollMessagesToBottomDeferred();
+    };
+    // Sub-tab content fades back while the window grows; full-hide waits for
+    // native geometry, then fades in without a clipped/sliding header.
+    collapseCompletion = setTimeout(reveal, 260);
   }
 }
 
@@ -556,6 +604,7 @@ function scrollMessagesToBottomDeferred() {
 // jump-to-input. Only runs while collapsed.
 function reassertCollapsed() {
   if (!collapsed) return;
+  if (collapseCompletion !== null || collapsePaintFrame !== null) return;
   const fullAutoHide = currentSettings.autoHideMode === 'full';
   const root = document.getElementById('root');
   if (fullAutoHide) {
@@ -1608,6 +1657,40 @@ function buildSettingsPanel() {
   {
     const s = makeSection();
     heading(s, 'APPEARANCE');
+    heading(s, 'WINDOW SIZE');
+    const sizeRow = el('div', { className: 'ss-row' });
+    sizeRow.style.flexWrap = 'wrap';
+    const widthInput = el('input', { type: 'number', min: '1', step: '1', ariaLabel: 'Overlay width in pixels' }) as HTMLInputElement;
+    const heightInput = el('input', { type: 'number', min: '1', step: '1', ariaLabel: 'Overlay height in pixels' }) as HTMLInputElement;
+    for (const [label, input] of [['Width (px)', widthInput], ['Height (px)', heightInput]] as const) {
+      input.style.width = '80px';
+      const wrapper = el('label', { className: 'ss-lbl' }, label);
+      wrapper.append(input); sizeRow.append(wrapper);
+    }
+    const sizeStatus = el('span', { role: 'status' });
+    sizeStatus.dataset.fcmSizeStatus = 'true';
+    const showSize = (bounds: { width: number; height: number } | null | undefined) => {
+      if (!bounds) return;
+      widthInput.value = String(bounds.width); heightInput.value = String(bounds.height);
+    };
+    void window.relayBridge.getBounds?.(true).then(showSize);
+    const applySize = el('button', { className: 'ss-fbtn', type: 'button' }, 'Apply size') as HTMLButtonElement;
+    applySize.addEventListener('click', async () => {
+      const width = Number(widthInput.value), height = Number(heightInput.value);
+      if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) {
+        sizeStatus.textContent = 'Enter positive whole-pixel dimensions.'; return;
+      }
+      applySize.disabled = true;
+      sizeStatus.textContent = 'Applying size…';
+      try {
+        const actual = await window.relayBridge.applySize?.({ width, height });
+        showSize(actual);
+        sizeStatus.textContent = actual ? `Applied ${actual.width}×${actual.height}` : 'Could not resize the window.';
+      } catch { sizeStatus.textContent = 'Could not resize the window.'; }
+      finally { applySize.disabled = false; }
+    });
+    sizeRow.append(applySize); s.append(sizeRow, sizeStatus);
+    hint(s, 'Dimensions use desktop logical pixels. Apply is clamped to the monitor and minimum size. Use SET POS in Keybinds to save this size and position to a preset.');
     heading(s, 'LIVE STATUS');
     toggle(s, 'Always show FCM online count', () => currentSettings.alwaysShowOnlineStats, v => commit({ alwaysShowOnlineStats: v }));
     toggle(s, 'Always show observed server players', () => currentSettings.alwaysShowServerStats, v => commit({ alwaysShowServerStats: v }));
@@ -2207,8 +2290,19 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
     // Cancel any pending debounced message-activity expand to prevent thrash.
     if (msgActivityTimeout) { clearTimeout(msgActivityTimeout); msgActivityTimeout = null; }
     const root = document.getElementById('root');
+    if (collapsePaintFrame !== null) cancelAnimationFrame(collapsePaintFrame);
+    collapsePaintFrame = null;
+    if (collapseCompletion !== null) clearTimeout(collapseCompletion);
+    collapseCompletion = null;
+    document.documentElement.classList.remove('fcm-full-auto-fading');
+    document.documentElement.classList.remove('fcm-subtabs-auto-clipped');
     root?.classList.remove('fcm-full-auto-hidden');
     document.documentElement.classList.remove('fcm-full-auto-hidden');
+    // Also reconcile a force-expand that interrupts an already-started expand:
+    // collapsed is false then, but its delayed reveal has just been cancelled.
+    const hiddenEls = collapsedHidden.slice();
+    collapsedHidden = [];
+    revealCollapsedElements(root, hiddenEls);
     if (collapsed) {
       collapsed = false;
       emitCollapseState(false);
@@ -2218,9 +2312,6 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
       // keydown→setCollapsed(false) path (which then no-op'd on its guard), the
       // overlay expanded but showed nothing but the top bar. Funnel through the
       // same reveal as setCollapsed so the two paths can't diverge.
-      const hiddenEls = collapsedHidden.slice();
-      collapsedHidden = [];
-      revealCollapsedElements(root, hiddenEls);
       scrollMessagesToBottomDeferred();
     }
   });

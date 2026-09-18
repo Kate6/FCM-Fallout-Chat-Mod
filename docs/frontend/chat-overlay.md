@@ -98,6 +98,61 @@ the asset from `cdn.discordapp.com`, retries `media.discordapp.net` if that
 edge fails, and finally shows the readable `:name:` label instead of a broken
 image icon. Animated tokens keep Discord's animated WebP form on both hosts.
 
+The message tokenizer must preserve both asset URLs through to the renderer;
+regression tests exercise static/animated tokens and image-error fallback in the
+actual chat feed. Unicode picker cells (including Recent) use a dedicated color
+emoji font stack instead of the selected decorative chat font. Picker labels and
+the chat font remain unchanged. Unicode coverage still depends on installed OS
+emoji fonts; font-stack tests do not prove every glyph renders on every OS.
+
+The Electron `test:interaction` suite also exercises custom image success,
+primary-host failure, both-host failure, picker insertion into an existing draft,
+and sending through an isolated relay. Image responses are controlled fixtures,
+not a Discord CDN availability test. Linux Electron UI verification passed on
+2026-09-18; the picker screenshot showed colored glyphs in the visible grid.
+The isolated native Windows packaged interaction run also passed picker/insertion,
+custom-image fallback and send checks on 2026-09-18.
+
+## Desktop Server moderation and unread indicators
+
+The desktop overlay explicitly opts staff (owner/admin/moderator) into the
+read-only `server:moderation:*` stream. The combined General view merges canonical
+message IDs from ordinary membership and moderation without reposting messages.
+Staff see `[Your server]` for their backend-confirmed room and `[Server · N]` for
+other rooms, using backend-assigned temporary numeric display IDs. Regular users
+still see `[Server]` and receive no cross-room stream. Website/public views do not
+opt in. HUD labels follow the same own-room role rule, but cross-room visibility
+and muting are desktop-only; HUD authentication and membership are unchanged.
+
+Right-click a Server message tag or the current Server sub-tab to mute that room
+in the combined feed. Channel layout settings restore muted rooms. Mutes and their
+numeric labels are bounded and stored locally per account/backend environment;
+canonical IDs, not display numbers, identify the muted room. Muting does not leave
+the room, delete messages, or grant/revoke backend authority.
+
+History loads in bounded pages of up to ten rooms (50 retained messages per room).
+**Next Server rooms** replaces the current history page; up to 500 recent live
+moderation messages are retained separately, so live traffic cannot evict an older
+page under review. **Refresh Server history** starts again without reconnecting
+ordinary chat. An unavailable/overflowed stream displays an explicit retry control.
+Privileged buffers clear on denial, account/role change and connection replacement.
+See the protocol document for authorization checks, rate bounds and the existing
+Discord-to-backend role-sync delay; this does not guarantee immediate Discord-role
+revocation or tamper-proof game membership.
+
+Desktop channel tabs show a 6px theme-primary dot, 3px left of the label, for live
+messages not currently viewed. Clicking clears it; repeated/history/self messages
+do not badge. The combined feed counts its visible channels as viewed. Hidden or
+collapsed overlay content is not considered viewed. Reduced-motion preferences
+disable the opacity pulse. Existing mention badges and Party/PM controls remain.
+
+Regression coverage: `serverModeration.test.ts`, `overlayStability.test.tsx`, backend
+authorization/connection/wiring/Redis suites, and the isolated Electron interaction
+runner (labels, mute/unmute, unread pulse/clear/reduced motion). Renderer-only own
+room fixtures are explicitly injected after the native confirmation boundary;
+they do not bypass or establish provider-export authorization in the live app.
+See [candidate verification and security limits](../testing/server-moderation-overlay.md).
+
 ## Public Mode Lockdown Rules
 
 Server enforcement is primary; these client-side checks are a backstop.
@@ -266,7 +321,11 @@ No `#XXXX` discriminator is ever appended.
   Ambiguous empty replies leave the lock to expire after five seconds instead of
   falsely marking a channel complete. Disconnect/tab changes invalidate pending
   scroll restoration; reconnect preserves cached-channel pagination baselines.
-- Scrolling up cancels deferred bottom-pin callbacks and initial pinning. Recovery
+- Wheel, scrollbar/touch, list navigation keys and explicit mention navigation
+  establish reading intent and cancel deferred bottom-pin callbacks and initial
+  pinning. Browser layout-generated scroll events do not disable bottom-follow.
+  Event-driven resize/content/load observation coalesces repairs into one frame;
+  teardown removes listeners, disconnects observers and cancels queued work. Recovery
   merges retain the reader's message anchor, draft and selected conversation.
 
 ## Fonts and live settings

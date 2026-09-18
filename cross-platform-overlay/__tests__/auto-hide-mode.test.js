@@ -25,11 +25,12 @@ describe('full auto-hide wiring', () => {
     const preload = here('preload.js');
     const main = here('main.js');
 
-    expect(shell).toContain("window.relayBridge.collapse(h, fullAutoHide)");
+    expect(shell).toContain("window.relayBridge.collapse(h, true)");
+    expect(shell).toContain("window.relayBridge.collapse(h, false)");
     expect(preload).toContain('collapse: (headerHeight, fullAutoHide = false)');
     expect(main).toContain("ipcMain.on('overlay:collapse', (_evt, { headerHeight, fullAutoHide }) => {");
     expect(main).toContain('collapseToHeader(headerHeight, !!fullAutoHide);');
-    expect(main).toContain('shouldSuppressIdleCollapse({ portable: IS_PORTABLE, gameRunning })');
+    expect(main).not.toContain('shouldSuppressIdleCollapse');
     expect(main).toContain('const target = fullAutoHide ? FULL_AUTO_HIDE_HEIGHT : Math.max(24, Math.round(headerH));');
     expect(main).toContain('const FULL_AUTO_HIDE_HEIGHT = 1;');
   });
@@ -59,6 +60,10 @@ describe('Appearance auto-hide mode controls', () => {
     expect(html).toContain('html.fcm-full-auto-hidden body *');
     expect(html).toContain('body:has(#root.collapsed) #shell-bg-dim');
     expect(html).toContain('body:has(#root.collapsed) #shell-scanline');
+    expect(html).toContain('body:has(#root.collapsed)::before');
+    expect(html).toContain('body:has(#root.collapsed)::after');
+    expect(html).toContain('html.fcm-full-auto-hidden body::before');
+    expect(html).toContain('html.fcm-full-auto-hidden body::after');
   });
   it('renders both mutually exclusive mode choices and persists the setting', () => {
     const shell = here('src/shell.ts');

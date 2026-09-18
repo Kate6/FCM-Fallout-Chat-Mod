@@ -33,7 +33,7 @@ class FCMHarness extends Sprite {
         else __SFECodeObj = MockXscal.root();
         if (scenario == "bridge-fast-travel" && provider == "xscal") __SFCodeObj = MockBridgeStorage.root();
         // Deterministic regressions must never load a user's hosted snapshot or send live chat.
-        if (scenario != "fast-travel" && scenario != "bridge-fast-travel" && scenario != "delayed-auth" && scenario != "queue-loss" && scenario != "typing-renewal")
+        if (scenario != "browser-links" && scenario != "fast-travel" && scenario != "bridge-fast-travel" && scenario != "delayed-auth" && scenario != "queue-loss" && scenario != "typing-renewal")
             MockXscal.loadScenario("/hosted-dev-snapshot.json");
         BSUIDataManager = scenario == "bridge-fast-travel" ? MockBridgeGameData.manager() : MockGameData.manager();
         // Keep the class linked so the production getDefinitionByName path resolves it.
@@ -65,6 +65,7 @@ class FCMHarness extends Sprite {
             widget = new FCMChatWidget();
             addChild(widget);
             flash.Lib.trace("HARNESS widget constructed provider=" + provider + " scenario=" + scenario);
+            if (scenario == "browser-links") BrowserScenario.start(widget, provider);
             if (scenario == "fast-travel") RosterScenario.start(widget, provider);
             if (scenario == "delayed-auth") DelayedAuthScenario.start(widget, provider);
             if (scenario == "queue-loss") QueueLossScenario.start(widget, provider);

@@ -2419,13 +2419,8 @@ ipcMain.on('overlay:set-modal', (_evt, open) => {
 // { collapsed: true, headerHeight, fullAutoHide } → shrink to idle target (top anchored).
 // { collapsed: false, focusInput? } → grow back downward (top anchored).
 ipcMain.on('overlay:collapse', (_evt, { headerHeight, fullAutoHide }) => {
-  if (overlayCore.shouldSuppressIdleCollapse({ portable: IS_PORTABLE, gameRunning })) {
-    diag('[collapse] portable in-game collapse suppressed');
-    // The renderer already hid its content before sending this request. Reject
-    // both halves of the collapse, without focusing or resizing the window.
-    sendToRenderer('overlay:force-expand', true);
-    return;
-  }
+  // The renderer owns the user's opt-in idle setting. Portable game gating
+  // must not undo it after the content is hidden (a repeating hide/wake loop).
   collapseToHeader(headerHeight, !!fullAutoHide);
 });
 ipcMain.on('overlay:expand', (_evt, { focusInput }) => expandFromHeader(!!focusInput));
@@ -2472,6 +2467,24 @@ ipcMain.on('window:set-bounds', (_evt, b) => {
   modalFitLastGoodSize = null;
   const wa = clampToWorkArea({ x: b.x, y: b.y, width: b.width, height: b.height });
   try { setWindowBoundsGuarded(wa); } catch { /* ignore */ }
+});
+
+// Numeric Appearance sizing returns the clamped result, so the UI and SET POS
+// capture the same geometry even while settings temporarily enlarged the window.
+ipcMain.handle('window:apply-size', async (_evt, size) => {
+  if (!mainWindow || mainWindow.isDestroyed() || !size
+      || !Number.isSafeInteger(size.width) || !Number.isSafeInteger(size.height)
+      || size.width <= 0 || size.height <= 0) return null;
+  const bounds = clampToWorkArea({ ...mainWindow.getBounds(), width: size.width, height: size.height });
+  modalFitPrevBounds = null;
+  modalFitLastGoodSize = null;
+  setWindowBoundsGuarded(bounds);
+  // X11/compositors can acknowledge setBounds asynchronously. Do not report or
+  // persist the previous geometry while the native resize is still queued.
+  await new Promise(resolve => setTimeout(resolve, 250));
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  persistBounds();
+  return mainWindow.getBounds();
 });
 
 // In-app edge resize from the renderer's resize zones (shell.ts). Receives the
@@ -4620,9 +4633,14 @@ function collapseToHeader(headerH, fullAutoHide = false) {
   //      so the live renderer can receive a message and request expansion.
   try {
     mainWindow.setMinimumSize(MIN_WIDTH, target);
-    mainWindow.setMaximumSize(b.width, target);
+    mainWindow.setMaximumSize(b.width, Math.max(b.height, target));
   } catch { /* ignore */ }
-  animateHeightTo(target);
+  // Pin the final native limits only AFTER the easing. Setting maxHeight to
+  // target first makes Windows clamp immediately, eliminating every frame.
+  animateHeightTo(target, () => {
+    if (!collapsed || !mainWindow || mainWindow.isDestroyed()) return;
+    try { mainWindow.setMaximumSize(mainWindow.getBounds().width, target); } catch { /* ignore */ }
+  });
 }
 
 function expandFromHeader(focusInput) {
@@ -4634,12 +4652,13 @@ function expandFromHeader(focusInput) {
     clearInterval(collapseAnim);
     collapseAnim = null;
   }
+  collapseAnimTarget = null;
   collapsed = false;
   // Restore the normal minimum height + the resize border (Aero Snap) before
   // growing back, so the window is fully resizable/snappable again.
   try {
     mainWindow.setMaximumSize(100000, 100000);
-    mainWindow.setMinimumSize(MIN_WIDTH, MIN_HEIGHT);
+    mainWindow.setMinimumSize(MIN_WIDTH, Math.min(mainWindow.getBounds().height, MIN_HEIGHT));
   } catch { /* ignore */ }
   // ONLY the HEIGHT is restored. The window's x/y/WIDTH are left exactly as they
   // are right now — collapse never changed them, and the user may have moved or
@@ -4650,6 +4669,8 @@ function expandFromHeader(focusInput) {
     : (expandedBounds && expandedBounds.height >= MIN_HEIGHT ? expandedBounds.height : DEFAULT_HEIGHT);
   expandedBounds = null; // clear so a manual resize while expanded isn't accidentally restored
   animateHeightTo(targetH, () => {
+    if (collapsed || !mainWindow || mainWindow.isDestroyed()) return;
+    try { mainWindow.setMinimumSize(MIN_WIDTH, MIN_HEIGHT); } catch { /* ignore */ }
     if (focusInput) { mainWindow.focus(); dispatchFocusInput('expandFromHeader:post-animation'); }
   });
 }

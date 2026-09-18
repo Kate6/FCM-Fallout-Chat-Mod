@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import configparser
 import importlib.util
 import re
 import tempfile
@@ -118,9 +119,22 @@ def main() -> None:
     assert "scheduleHistoryResyncFallback" in source_hx and "HISTORY_RESYNC_FALLBACK_MS" in source_hx, (
         "Shared RESYNC must be delayed until an empty or dropped initial poll"
     )
-    assert "flash.Lib.getURL(new URLRequest(url), \"_blank\")" in source_hx and "OPEN_URL_PREFIX" not in source_hx, (
-        "Selected links must open directly through GFx instead of synchronously blocking on the relay/desktop overlay"
-    )
+    assert "flash.Lib.getURL" not in source_hx and "OPEN_URL_PREFIX" not in source_hx
+    assert "new FcmBrowser" in source_hx and "stopBrowser();" in source_hx
+    browser_config = configparser.ConfigParser(interpolation=None, delimiters=("=",))
+    browser_config.read_string(source_widget)
+    assert dict(browser_config["BrowserLinks.Sites"]) == {
+        origin: "allow" for origin in (
+            "https://discord.com", "https://discord.gg", "https://www.falloutbuilds.com",
+            "https://falloutbuilds.com", "https://fallout.wiki", "https://nukacrypt.com",
+            "https://steamcommunity.com", "https://store.steampowered.com",
+        )
+    }
+    assert len(source_widget.encode("utf-8")) <= 16 * 1024
+    assert "BrowserLinks" not in browser_config  # mode is player-owned
+    for target in ("dev", "prod"):
+        _, stamped = package.stamp_configs(target, source_chat, source_widget)
+        assert stamped.split("[BrowserLinks.Sites]", 1)[1] == source_widget.split("[BrowserLinks.Sites]", 1)[1]
     assert "_history.authenticationChanged()" in source_hx, (
         "A completed account link must re-arm history recovery after a pre-auth permission denial"
     )

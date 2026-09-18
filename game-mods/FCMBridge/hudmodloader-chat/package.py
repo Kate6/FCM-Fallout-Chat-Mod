@@ -238,6 +238,12 @@ The shipped Data/FCMChat.ini [FCMChat] key map is:
 Insert opens the input; Enter sends; Escape cancels; Page Up/Page Down switch channels.
 activateLinkKey opens a selected HTTP(S) row only while that input session is active; Enter is
 the default and a custom value does not become a global gameplay hotkey.
+Browser launch requires ZFE's zfe-browser-v1 capability and its HTTPS validation/consent.
+Current xScal and older ZFE keep URLs readable; there is no fallback launcher.
+ZFE site allowances are configurable in [BrowserLinks.Sites] of FCMChatWidget.ini.
+Bundled exact sites cover Discord/invites, Fallout Builds, Fallout Wiki (fallout.wiki),
+NukaCrypt and Steam community/store. The fragment lists every origin and purpose.
+Player rules override mod defaults; unlisted sites may prompt rather than being blocked.
 If the host editor loses its final callback, FCM recovers an Enter send once or cancels the stale
 session so Insert can open chat again.
 scrollUpKey=Up and scrollDownKey=Down (Arrow Up / Down) scroll after Insert opens the input.
@@ -372,6 +378,7 @@ def build_package(
             "are the defaults). scrollBottomKey is blank by default; set it in\n"
             "Data/FCMChat.ini to Home, End, F12, or a forwarded action if desired.\n"
             "activateLinkKey=ENTER opens the selected link only while OpenChat owns input.\n"
+            "Browser opening needs ZFE browser-v1; unsupported providers keep readable URLs.\n"
             "hideKey=DELETE hides while idle and edits text while input is open.\n"
             "Before Insert, configured feed keys remain game controls. FCM -> Scroll\n"
             "to newest is always available from the F11 menu. Type /g, /t, /e, /i,\n"

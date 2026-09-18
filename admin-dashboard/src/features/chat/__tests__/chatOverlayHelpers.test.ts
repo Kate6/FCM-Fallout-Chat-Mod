@@ -475,8 +475,10 @@ describe('splitParts', () => {
     expect(emojis).toHaveLength(2);
     expect(emojis[0].emojiName).toBe('smile');
     expect(emojis[0].url).toBe('https://cdn.discordapp.com/emojis/1234567890123456.png');
+    expect(emojis[0].fallbackUrl).toBe('https://media.discordapp.net/emojis/1234567890123456.png');
     expect(emojis[1].emojiName).toBe('wave');
     expect(emojis[1].url).toBe('https://cdn.discordapp.com/emojis/6543210987654321.webp?animated=true');
+    expect(emojis[1].fallbackUrl).toBe('https://media.discordapp.net/emojis/6543210987654321.webp?animated=true');
   });
 
   it('orders multiple spans by start position', () => {

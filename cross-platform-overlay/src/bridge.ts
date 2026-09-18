@@ -61,6 +61,7 @@ interface RelayBridge {
   onKeybinds?(cb: (kb: Record<string, string>) => void): void;
   // Position presets + provider OAuth.
   getBounds?(forPreset?: boolean): Promise<{ x: number; y: number; width: number; height: number } | null>;
+  applySize?(size: { width: number; height: number }): Promise<{ x: number; y: number; width: number; height: number } | null>;
   setBounds?(bounds: { x: number; y: number; width: number; height: number }): void;
   resizeBounds?(bounds: { x: number; y: number; width: number; height: number }): void;
   /** WM-independent pointer-drag MOVE (ticket #104). Sends the desired window
