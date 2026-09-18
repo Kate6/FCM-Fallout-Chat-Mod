@@ -347,6 +347,7 @@ export function revealCollapsedElements(
 // component never reads a stale mirror after a reload. Pure + DOM-free so the
 // "mirror carries every component-facing field" invariant is unit-tested.
 export interface WebMirrorInput {
+  showUnreadDots?: boolean;
   alwaysShowOnlineStats?: boolean;
   alwaysShowServerStats?: boolean;
   themeId: string;
@@ -364,6 +365,7 @@ export interface WebMirrorInput {
   notifySoundVolume: number;
 }
 export interface WebMirrorSettings {
+  showUnreadDots: boolean;
   alwaysShowOnlineStats: boolean;
   alwaysShowServerStats: boolean;
   themeId: string;
@@ -384,6 +386,7 @@ export interface WebMirrorSettings {
 }
 export function shellToWebSettings(s: WebMirrorInput): WebMirrorSettings {
   return {
+    showUnreadDots: s.showUnreadDots !== false,
     alwaysShowOnlineStats: s.alwaysShowOnlineStats !== false,
     alwaysShowServerStats: s.alwaysShowServerStats !== false,
     themeId: s.themeId,

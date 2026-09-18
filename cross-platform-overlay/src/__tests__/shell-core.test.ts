@@ -463,6 +463,10 @@ describe('shouldResetIdleOnVisibility', () => {
 });
 
 describe('shellToWebSettings (mirror)', () => {
+  it('defaults unread dots on and preserves the saved off choice', () => {
+    expect(shellToWebSettings(input).showUnreadDots).toBe(true);
+    expect(shellToWebSettings({ ...input, showUnreadDots: false }).showUnreadDots).toBe(false);
+  });
   it('defaults both stats to visible and preserves independent saved choices', () => {
     expect(shellToWebSettings(input)).toMatchObject({ alwaysShowOnlineStats: true, alwaysShowServerStats: true });
     expect(shellToWebSettings({ ...input, alwaysShowOnlineStats: false, alwaysShowServerStats: false }))

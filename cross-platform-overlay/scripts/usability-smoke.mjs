@@ -36,11 +36,30 @@ const server = createServer((request, response) => {
 const relay = new WebSocketServer({ server });
 let connectionCount = 0;
 let sentMessages = 0;
+let moderationHistoryFixture = false;
+let moderationSubscriptions = 0;
+let moderationHistoryRequests = 0;
+const moderationPage = (second = false) => ({ type: 'server:moderation:messages', payload: {
+  historyReplay: true, hasMore: !second, nextCursor: second ? null : 'r:auto-a', messages: [{
+    id: second ? 'auto-second' : 'auto-first', channelId: second ? 'server:r:auto-b' : 'server:r:auto-a',
+    serverDisplayId: second ? '902' : '901', username: 'Fixture', source: 'server',
+    timestamp: new Date().toISOString(), content: second ? 'Automatic second Server room' : 'Automatic first Server room',
+  }],
+} });
 relay.on('connection', socket => {
   connectionCount++;
   socket.on('message', raw => {
     const frame = JSON.parse(raw.toString());
     if (frame.type === 'server:moderation:subscribe') socket.send(JSON.stringify({ type: 'server:moderation:state', payload: { status: frame.payload.enabled ? 'ready' : 'inactive' } }));
+    if (frame.type === 'server:moderation:subscribe' && frame.payload.enabled) {
+      moderationSubscriptions++;
+      if (moderationHistoryFixture) socket.send(JSON.stringify(moderationPage()));
+    }
+    if (frame.type === 'server:moderation:history' && moderationHistoryFixture) {
+      moderationHistoryRequests++;
+      assert.equal(frame.payload.cursor, 'r:auto-a');
+      socket.send(JSON.stringify(moderationPage(true)));
+    }
     if (frame.type === 'chat:send') {
       sentMessages++;
       socket.send(JSON.stringify({ type: 'chat:message', payload: {
@@ -522,6 +541,11 @@ try {
   }
   console.log('PASS font scales 9/14/22 at narrow/default/wide bounds retain a visible composer');
 
+  // Focusing overflow tabs can scroll the tab strip; explicitly select the
+  // fixture's destination before asserting message rows in the hidden view.
+  await page.getByRole('button', { name: 'General channel', exact: true }).click();
+  await expect(page).toHaveTitle(/General/);
+
   // Simulated active game keeps the real transport gate open while hidden. No
   // game process or game input is involved. Exercise the native visibility IPC.
   await app.evaluate(({ BrowserWindow, ipcMain }) => {
@@ -567,6 +591,40 @@ try {
   await channelTab('Events').click();
   await expect(unreadDot).toHaveCount(0);
   await channelTab('General').click();
+  const emitUnread = (id, channelId) => {
+    for (const socket of relay.clients) socket.send(JSON.stringify({ type: 'chat:message', payload: {
+      id, channelId, userId: 'bob', username: 'Bob', content: id, source: 'game', createdAt: new Date().toISOString(),
+    } }));
+  };
+  emitUnread('unread-general-selected', 'general');
+  emitUnread('unread-general-other', 'events');
+  await expect(page.getByRole('img', { name: 'Unread messages in General' })).toHaveCount(0);
+  await expect(unreadDot).toBeVisible();
+  await command('channel:next');
+  await command('channel:next');
+  await expect(unreadDot).toHaveCount(0);
+  emitUnread('unread-events-selected', 'events');
+  await expect(page.getByText('unread-events-selected', { exact: true })).toBeVisible();
+  await expect(unreadDot).toHaveCount(0);
+  await channelTab('General').click();
+  emitUnread('unread-before-disable', 'events');
+  await expect(unreadDot).toBeVisible();
+  await command('settings:open');
+  await page.locator('.ss-navbtn').filter({ hasText: /appearance/i }).click();
+  const dotToggle = page.locator('.ss-toggle').filter({ hasText: 'Show unread channel dots' });
+  await dotToggle.click();
+  await expect.poll(async () => JSON.parse(await readFile(`${profile}/overlay-state.json`, 'utf8')).settings.showUnreadDots).toBe(false);
+  emitUnread('unread-disabled', 'events');
+  await expect(unreadDot).toHaveCount(0);
+  await dotToggle.click();
+  await page.keyboard.press('Escape');
+  await expect(unreadDot).toHaveCount(0);
+  emitUnread('unread-reenabled', 'events');
+  await expect(unreadDot).toBeVisible();
+  await channelTab('Events').click();
+  await expect(unreadDot).toHaveCount(0);
+  await channelTab('General').click();
+  console.log('PASS selected channel exemption, keyboard clearing, and saved Appearance unread toggle');
 
   // Privileged stream remains a view over canonical room/message IDs.
   const ownRoom = 'server:r:own-fixture';
@@ -597,6 +655,17 @@ try {
   await page.getByRole('button', { name: 'Unmute', exact: true }).click();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.getByText('Other room moderation fixture', { exact: true })).toBeVisible();
+  await page.getByText('[Server · 102]', { exact: true }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Mute this server', exact: true }).click();
+  for (const socket of relay.clients) socket.send(JSON.stringify({ type: 'server:moderation:expired', payload: { channelIds: ['server:r:other-fixture'] } }));
+  await page.evaluate(() => window.dispatchEvent(new Event('fcm-subtab-settings')));
+  await expect(page.getByText('Muted Server rooms', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect.poll(async () => {
+    const values = await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('fcm-server-mutes:')).map(key => JSON.parse(localStorage.getItem(key))));
+    return values.some(value => value.ids.includes('server:r:other-fixture'));
+  }).toBe(false);
+  console.log('PASS backend-confirmed room expiry removes persisted Unmute entry');
   await page.screenshot({ path: `${artifacts}/server-moderation.png` });
   for (const socket of relay.clients) socket.send(JSON.stringify({ type: 'server:moderation:state', payload: { status: 'denied' } }));
   await expect(page.getByText('Other room moderation fixture', { exact: true })).toHaveCount(0);
@@ -666,6 +735,24 @@ try {
   await expect(page.getByText('Emoji draft 😀', { exact: true })).toBeVisible();
   await page.screenshot({ path: `${artifacts}/emoji-message.png` });
   console.log('PASS custom emoji image/retry/label paths, native picker font, insertion and send');
+
+  moderationHistoryFixture = true;
+  for (const socket of relay.clients) {
+    socket.send(JSON.stringify({ type: 'server:moderation:state', payload: { status: 'ready' } }));
+    socket.send(JSON.stringify(moderationPage()));
+  }
+  await channelTab('General').click();
+  await expect(page.getByText('Automatic first Server room', { exact: true })).toBeVisible();
+  await expect(page.getByText('Automatic second Server room', { exact: true })).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole('button', { name: /Next Server rooms|Refresh Server history/ })).toHaveCount(0);
+  assert.equal(moderationHistoryRequests, 1);
+  const subscriptionsBeforeRefresh = moderationSubscriptions;
+  await page.getByRole('button', { name: 'Overlay actions', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Refresh', exact: true }).click();
+  await expect.poll(() => moderationSubscriptions).toBeGreaterThan(subscriptionsBeforeRefresh);
+  await expect(page.getByText('Automatic first Server room', { exact: true })).toBeVisible();
+  await expect(page.getByText('Automatic second Server room', { exact: true })).toBeVisible({ timeout: 10000 });
+  console.log('PASS automatic multi-room General history and normal dropdown Refresh');
 
   // The real account boundary still discards the old component and its draft.
   await composer().fill('private draft from Alice');

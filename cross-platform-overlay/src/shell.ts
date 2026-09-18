@@ -74,6 +74,7 @@ export interface ShellSettings {
   fontSize: number;         // px
   showHints: boolean;
   alwaysShowOnlineStats: boolean;
+  showUnreadDots: boolean;
   alwaysShowServerStats: boolean;
   // Shell-managed (no native component support → applied as CSS layers):
   backgroundOpacity: number; // 0..1 extra background dim
@@ -161,6 +162,7 @@ export const DEFAULT_SHELL_SETTINGS: ShellSettings = {
   fontSize: 14,
   showHints: true,
   alwaysShowOnlineStats: true,
+  showUnreadDots: true,
   alwaysShowServerStats: true,
   backgroundOpacity: 0,
   // Low default: scanline divs are dark (see index.html), so 0.08 gives a faint
@@ -1696,6 +1698,7 @@ function buildSettingsPanel() {
     toggle(s, 'Always show observed server players', () => currentSettings.alwaysShowServerStats, v => commit({ alwaysShowServerStats: v }));
     hint(s, 'Both counts are visible by default. Turn them off to use the Live popover instead. Server counts require a confirmed bridge and reflect observed players, not a guaranteed full world roster.');
     heading(s, 'CHANNEL LAYOUT');
+    toggle(s, 'Show unread channel dots', () => currentSettings.showUnreadDots !== false, v => commit({ showUnreadDots: v }));
     const channelLayout = el('button', {}, 'Channel layout and hidden channels');
     channelLayout.addEventListener('click', () => window.dispatchEvent(new Event('fcm-subtab-settings')));
     s.append(channelLayout);

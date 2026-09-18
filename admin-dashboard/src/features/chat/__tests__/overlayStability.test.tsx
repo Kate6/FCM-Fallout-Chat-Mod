@@ -11,6 +11,7 @@ vi.mock('../GifPicker', () => ({ default: () => null }));
 vi.mock('../components/ChatEmbedCard', () => ({ ChatEmbedCard: () => null }));
 import ChatOverlay, { resetRememberedChatSelection } from '../ChatOverlay';
 import { OVERLAY_SETTINGS_EVENT } from '../overlayFonts';
+import { tabPreferenceScope } from '../subtabPreferences';
 
 type Frame = { type: string; payload: Record<string, unknown> };
 const sockets: TestSocket[] = [];
@@ -87,6 +88,60 @@ function history(socket: TestSocket, id = 'message-1', content = 'Existing chat 
 }
 
 describe('overlay lifecycle and navigation', () => {
+  it('removes only confirmed expired room mutes and persists cleanup', async () => {
+    await mount('admin');
+    act(() => sockets[0].open());
+    act(() => {
+      sockets[0].emit({ type: 'server:moderation:state', payload: { status: 'ready' } });
+      sockets[0].emit({ type: 'server:moderation:messages', payload: { historyReplay: false, messages: ['gone', 'quiet'].map((id, i) => ({
+        id, channelId: `server:r:${id}`, serverDisplayId: String(i + 1), username: 'Bob', source: 'server', timestamp: '2026-09-18T12:00:00Z', content: id,
+      })) } });
+    });
+    for (const id of ['1', '2']) {
+      fireEvent.contextMenu(screen.getByText(`[Server · ${id}]`));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Mute this server' }));
+    }
+    const key = `fcm-server-mutes:${tabPreferenceScope('http://localhost', 'alice')}`;
+    expect(JSON.parse(localStorage.getItem(key)!).ids).toHaveLength(2);
+    act(() => sockets[0].emit({ type: 'server:moderation:expired', payload: { channelIds: ['server:r:gone'] } }));
+    expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ ids: ['server:r:quiet'], labels: { 'server:r:quiet': '2' } });
+    expect(screen.queryByText('gone')).toBeNull();
+    act(() => sockets[0].emit({ type: 'server:moderation:state', payload: { status: 'unavailable' } }));
+    act(() => sockets[0].emit({ type: 'server:moderation:expired', payload: { channelIds: ['server:r:quiet'] } }));
+    expect(JSON.parse(localStorage.getItem(key)!).ids).toEqual(['server:r:quiet']);
+  });
+  it('exempts only the selected tab, clears on keyboard navigation, and supports disabling dots', async () => {
+    await mount();
+    act(() => sockets[0].open());
+    const send = (id: string, channelId: string) => act(() => sockets[0].emit({ type: 'chat:message', payload: {
+      id, channelId, userId: 'bob', username: 'Bob', content: id, source: 'game',
+    } }));
+    fireEvent.click(screen.getByRole('button', { name: 'General channel' }));
+    send('general-open', 'general');
+    send('trading-unseen', 'trading');
+    expect(screen.queryByRole('img', { name: 'Unread messages in General' })).toBeNull();
+    expect(screen.getByRole('img', { name: 'Unread messages in Trading' })).toBeTruthy();
+    act(() => command('channel:next'));
+    expect(screen.queryByRole('img', { name: 'Unread messages in Trading' })).toBeNull();
+    act(() => { gameState(true); visibility(false); });
+    send('trading-hidden-selected', 'trading');
+    expect(screen.queryByRole('img', { name: 'Unread messages in Trading' })).toBeNull();
+    send('events-unseen', 'events');
+    expect(screen.getByRole('img', { name: 'Unread messages in Events' })).toBeTruthy();
+    const setDots = (showUnreadDots: boolean) => act(() => {
+      localStorage.setItem('fcm_web_overlay_settings', JSON.stringify({ showUnreadDots }));
+      window.dispatchEvent(new Event(OVERLAY_SETTINGS_EVENT));
+    });
+    setDots(false);
+    expect(screen.queryByRole('img', { name: 'Unread messages in Events' })).toBeNull();
+    send('events-disabled', 'events');
+    setDots(true);
+    expect(screen.queryByRole('img', { name: 'Unread messages in Events' })).toBeNull();
+    send('events-enabled', 'events');
+    expect(screen.getByRole('img', { name: 'Unread messages in Events' })).toBeTruthy();
+    act(() => command('channel:next'));
+    expect(screen.queryByRole('img', { name: 'Unread messages in Events' })).toBeNull();
+  });
   it('shows a nearby unread dot for new unseen messages and clears it on click', async () => {
     await mount();
     act(() => sockets[0].open());
@@ -144,7 +199,40 @@ describe('overlay lifecycle and navigation', () => {
       }] } });
     });
     expect(await screen.findByText('Older room page is visible')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Refresh Server history' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Refresh Server history' })).toBeNull();
+  });
+
+  it('automatically merges Server history pages and cancels paging on denial', async () => {
+    await mount('admin');
+    act(() => sockets[0].open());
+    vi.useFakeTimers();
+    try {
+      const page = (id: string, nextCursor: string | null) => act(() => sockets[0].emit({
+        type: 'server:moderation:messages', payload: { historyReplay: true, hasMore: !!nextCursor, nextCursor,
+          messages: [{ id, channelId: `server:r:${id}`, serverDisplayId: '2', username: 'Bob', source: 'server', timestamp: '2026-09-18T12:00:00Z', content: `Room ${id}` }] },
+      }));
+      const requests = () => sockets[0].sent.filter(frame => frame.type === 'server:moderation:history');
+      act(() => sockets[0].emit({ type: 'server:moderation:state', payload: { status: 'ready' } }));
+      page('first', 'r:a');
+      expect(screen.queryByRole('button', { name: 'Next Server rooms' })).toBeNull();
+      act(() => vi.advanceTimersByTime(5499));
+      expect(requests()).toHaveLength(0);
+      act(() => vi.advanceTimersByTime(1));
+      expect(requests()).toHaveLength(1);
+      page('second', 'r:b');
+      expect(screen.getByText('Room first')).toBeTruthy();
+      expect(screen.getByText('Room second')).toBeTruthy();
+      act(() => vi.advanceTimersByTime(5500));
+      expect(requests()).toHaveLength(2);
+      page('second', 'r:a'); // Repeated/regressing cursors must not loop.
+      act(() => vi.advanceTimersByTime(5500));
+      expect(requests()).toHaveLength(2);
+      page('third', 'r:c');
+      act(() => sockets[0].emit({ type: 'server:moderation:state', payload: { status: 'denied' } }));
+      act(() => vi.advanceTimersByTime(5500));
+      expect(requests()).toHaveLength(2);
+      expect(screen.queryByText('Room first')).toBeNull();
+    } finally { vi.useRealTimers(); }
   });
 
   it('renders Discord emojis and retries the media host before a readable label', async () => {

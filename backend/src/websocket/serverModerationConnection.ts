@@ -4,6 +4,7 @@ export interface ModerationPage { messages: ModerationRow[]; nextCursor: string 
 export interface ServerModerationDependencies {
   authorize(): Promise<boolean>;
   history(cursor: string | null): Promise<ModerationPage>;
+  expiredRooms?(channelIds: string[]): Promise<string[]>;
 }
 /** Read-only, bounded per-socket observation. Never participates in membership/send. */
 export class ServerModerationConnection {
@@ -70,6 +71,17 @@ export class ServerModerationConnection {
     });
   }
   validate(): Promise<void> { return this.queue(async epoch => { await this.authorized(epoch); }); }
+  pruneMutes(value: unknown): Promise<void> {
+    if (!Array.isArray(value) || !value.length || value.length > 500
+      || !value.every(id => typeof id === 'string' && /^server:r:[a-z0-9-]{1,64}$/.test(id))) return Promise.resolve();
+    const ids = [...new Set<string>(value)];
+    return this.queue(async epoch => {
+      if (!this.deps.expiredRooms || !(await this.authorized(epoch))) return;
+      const expired = await this.deps.expiredRooms(ids);
+      if (!(await this.authorized(epoch))) return;
+      this.emit({ type: 'server:moderation:expired', payload: { channelIds: expired.filter(id => ids.includes(id)) } });
+    });
+  }
   receive(load: () => Promise<ModerationRow | null>): Promise<void> {
     return this.queue(async epoch => {
       if (!(await this.authorized(epoch))) return;

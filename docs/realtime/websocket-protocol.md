@@ -902,12 +902,23 @@ only the cursor issued to that socket is accepted, at most six requests/30 secon
 Every page repeats the same authorization checks. A stable lexical room keyset means
 keepalives cannot reorder rooms during traversal. New rooms preceding the cursor
 appear on a fresh subscription; their live messages are delivered immediately.
-The UI must offer load-more rather than silently auto-fetch unbounded history. Live delivery then
+The overlay traverses pages automatically at 5.5-second intervals, retaining a
+bounded 500-message history buffer separately from 500 recent live rows. Normal
+header Refresh restarts traversal; there are no standalone paging controls. Live delivery then
 uses the existing Server publication channel. The subscription serializes snapshot
 and live events and deduplicates them; clients must additionally deduplicate by
 canonical message ID against their ordinary own-room bridge delivery. Display IDs
 are labels only: moderators see `[Your server]` for their current room and
 `[Server · 123]` elsewhere; regular users continue to see `[Server]`.
+
+`server:moderation:prune-mutes { channelIds }` accepts 1–500 valid canonical Server
+IDs on the current authenticated desktop staff subscription (two requests/30s).
+It checks the activity index atomically and returns
+`server:moderation:expired { channelIds }` containing only requested expired IDs.
+An absent activity entry or one at least an hour old is expired; membership
+keepalives preserve quiet occupied rooms. Authorization is checked before and
+after the read. Redis failures do not produce an expiry response. This is
+cosmetic preference cleanup, not room deletion, membership or history authority.
 
 Display numbers are allocated atomically using Redis INCR, shared across backend
 instances, never used as authority. Their room mapping lasts two hours after last
