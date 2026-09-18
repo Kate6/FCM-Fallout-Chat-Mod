@@ -83,6 +83,33 @@ try {
   const command = value => app.evaluate(({ BrowserWindow }, cmd) => BrowserWindow.getAllWindows()[0].webContents.send('overlay:command', cmd), value);
   const composer = () => page.locator('[contenteditable="true"]').first();
   await launch();
+  // Exercise real renderer collapse layout and native size IPC, not just source
+  // contracts. This does not send input to any game process.
+  for (const mode of ['subtabs', 'full']) {
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await page.evaluate(mode => {
+        window.__ovTest.setAutoHideMode(mode);
+        window.__ovTest.collapse();
+      }, mode);
+      if (mode === 'subtabs') {
+        await expect(page.locator('[data-fcm-main-tab-row]')).toBeVisible();
+        await expect(page.locator('[data-fcm-subtab-row="channels"]')).toBeVisible();
+      } else {
+        await expect(page.locator('[data-fcm-main-tab-row]')).toBeHidden();
+      }
+      await expect(composer()).toBeHidden();
+      for (const selector of ['#shell-bg-dim', '#shell-scanline']) {
+        await expect(page.locator(selector)).toBeHidden();
+      }
+      await page.evaluate(() => window.__ovTest.expand());
+      await expect(composer()).toBeVisible();
+      await composer().fill(`collapse recovery ${cycle}`);
+      await expect(composer()).toHaveText(`collapse recovery ${cycle}`);
+    }
+  }
+  await composer().fill('');
+  await page.evaluate(() => window.__ovTest.setAutoHideMode('subtabs'));
+  console.log('PASS repeated sub-tab/full collapse visibility, effect-layer hiding and composer recovery');
   // Real header interactions: portals must escape row clipping and not drag the window.
   const headerConnections = connectionCount;
   const actions = page.getByRole('button', { name: 'Overlay actions', exact: true });

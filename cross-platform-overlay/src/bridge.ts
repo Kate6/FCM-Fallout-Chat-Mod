@@ -60,7 +60,7 @@ interface RelayBridge {
   // Live keybind map pushed from main on (re)register — for the footer help text.
   onKeybinds?(cb: (kb: Record<string, string>) => void): void;
   // Position presets + provider OAuth.
-  getBounds?(): Promise<{ x: number; y: number; width: number; height: number } | null>;
+  getBounds?(forPreset?: boolean): Promise<{ x: number; y: number; width: number; height: number } | null>;
   setBounds?(bounds: { x: number; y: number; width: number; height: number }): void;
   resizeBounds?(bounds: { x: number; y: number; width: number; height: number }): void;
   /** WM-independent pointer-drag MOVE (ticket #104). Sends the desired window

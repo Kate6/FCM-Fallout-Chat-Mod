@@ -449,6 +449,7 @@ class FCMChatWidget extends MovieClip {
     var _hudTools:Dynamic        = null;
     var _hudToolsRegistered:Bool = false;
     var _hudEventStage:Dynamic   = null;
+    var _menuViewport:FcmMenuViewport = new FcmMenuViewport();
     var _configLoader:URLLoader  = null;
     var _configTimer:Timer       = null;
     var _sendTimers:Array<Timer> = [];
@@ -634,6 +635,8 @@ class FCMChatWidget extends MovieClip {
         }
 
         if (_hudEventStage != null) {
+            try { _hudEventStage.removeEventListener(Event.ENTER_FRAME, keepMenuInFrame); } catch (_:Dynamic) {}
+            _menuViewport.clear();
             try { _hudEventStage.removeEventListener("HUDMod::UserEvent", onUserEventSafe); }
             catch (e:Dynamic) {}
             _hudEventStage = null;
@@ -1085,6 +1088,7 @@ class FCMChatWidget extends MovieClip {
             _hudEventStage = stage;
             if (_hudEventStage != null) {
                 _hudEventStage.addEventListener("HUDMod::UserEvent", onUserEventSafe);
+                _hudEventStage.addEventListener(Event.ENTER_FRAME, keepMenuInFrame);
                 _hudEventListenerAttached = true;
             } else {
                 _hudEventListenerAttached = false;
@@ -1215,7 +1219,7 @@ class FCMChatWidget extends MovieClip {
                 for (item in [
                     {id:"position", label:"Position..."}, {id:"panel_size", label:"Panel size..."},
                     {id:"text_size", label:"Text and input..."}, {id:"appearance", label:"Appearance..."},
-                    {id:"auto_hide", label:"Auto-hide..."}
+                    {id:"auto_hide", label:"Auto-hide..."}, {id:"colors", label:"Colors..."}
                 ]) Reflect.callMethod(_hudTools, add, [item.id, item.label, true, true, MENU_ACTION_TIMEOUT_MS]);
                 Reflect.callMethod(_hudTools, add, ["cz_reset", "Reset all settings", true, false, MENU_ACTION_TIMEOUT_MS]);
                 return;
@@ -1238,7 +1242,6 @@ class FCMChatWidget extends MovieClip {
                 return;
             }
             if (p == "appearance") {
-                Reflect.callMethod(_hudTools, add, ["colors", "Colors...", true, true, MENU_ACTION_TIMEOUT_MS]);
                 Reflect.callMethod(_hudTools, add, ["cz_opac_up", "Opacity +", true, false, MENU_ACTION_TIMEOUT_MS]);
                 Reflect.callMethod(_hudTools, add, ["cz_opac_dn", "Opacity -", true, false, MENU_ACTION_TIMEOUT_MS]);
                 Reflect.callMethod(_hudTools, add, ["cz_theme", "Color theme >", true, false, MENU_ACTION_TIMEOUT_MS]);
@@ -1269,6 +1272,17 @@ class FCMChatWidget extends MovieClip {
         } catch (e:Dynamic) {
             zfeLog("warn", "menu", "AddMenuItem threw: " + Std.string(e));
         }
+    }
+
+    function keepMenuInFrame(_:Event):Void {
+        if (_disposed || stage == null) return;
+        try {
+            if (_inputOpen || _hudTools == null || Reflect.field(_hudTools, "isActive") != true) {
+                _menuViewport.clear();
+                return;
+            }
+            _menuViewport.update(stage, stage.stageWidth, stage.stageHeight, VENDOR);
+        } catch (_:Dynamic) { _menuViewport.clear(); }
     }
 
     function onBuildMenuSafe(parentItem:Dynamic):Void {
@@ -5375,8 +5389,8 @@ class FCMChatWidget extends MovieClip {
                 return;
             }
             var hasSentRoster:Bool = _lastRosterSentAt > 0;
-            if (FcmCommand.shouldSendRoster(true, _inputOpen, _serverSessionReady,
-                    now - _lastRosterSentAt, hasSentRoster, namesField != _lastRosterSent)) {
+            if (FcmCommand.shouldSendRoster(true, _serverSessionReady,
+                    now - _lastRosterSentAt, hasSentRoster)) {
                 _lastRosterSentAt = now;
                 _lastRosterSent = namesField;
                 var body:String = WORLD_ROSTER_PREFIX + namesField;

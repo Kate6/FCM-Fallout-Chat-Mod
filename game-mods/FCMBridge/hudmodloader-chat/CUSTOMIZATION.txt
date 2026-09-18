@@ -4,7 +4,9 @@ FCM HUD CUSTOMIZATION
 Open F11 -> FCM -> Customize. These settings affect your HUD, not other users.
 
 Customize groups controls into Position, Panel size, Text and input, Appearance,
-and Auto-hide submenus to avoid the old oversized menu.
+Auto-hide, and Colors submenus to avoid the old oversized menu.
+FCM keeps its visible menu columns inside the frame, independently of chat position.
+On very small frames an oversized column is reduced to fit.
 
 ULTRAWIDE POSITION
 - Position -> Move left/right can pass the centered 1920x1080 frame edges.

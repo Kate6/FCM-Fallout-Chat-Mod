@@ -78,8 +78,8 @@ export interface ShellSettings {
   // Shell-managed (no native component support → applied as CSS layers):
   backgroundOpacity: number; // 0..1 extra background dim
   scanlineIntensity: number; // 0..1 (default 0.08)
-  fadeWhenIdle: boolean;     // default true
-  autoHideMode: AutoHideMode; // 'full' (default) or 'subtabs'
+  fadeWhenIdle: boolean;     // default false; existing saved choices are preserved
+  autoHideMode: AutoHideMode; // 'subtabs' (default) or 'full'
   showTypingWhenCollapsed: boolean; // default FALSE — opt in; see issue #420
   notifySoundEnabled: boolean;      // default FALSE — opt in; see issue #437
   notifySoundVolume: number;        // 0..1
@@ -166,7 +166,7 @@ export const DEFAULT_SHELL_SETTINGS: ShellSettings = {
   // Low default: scanline divs are dark (see index.html), so 0.08 gives a faint
   // CRT texture rather than heavy bars.
   scanlineIntensity: 0.08,
-  fadeWhenIdle: true,
+  fadeWhenIdle: false,
   autoHideMode: AUTO_HIDE_MODE_DEFAULT,
   showTypingWhenCollapsed: false,
   notifySoundEnabled: false,
@@ -1591,7 +1591,7 @@ function buildSettingsPanel() {
 
       const setBtn = el('button', { className: 'ss-fbtn ss-preset-set' }, 'SET POS');
       setBtn.addEventListener('click', async () => {
-        const b = await window.relayBridge.getBounds?.();
+        const b = await window.relayBridge.getBounds?.(true);
         if (!b) return;
         const next = currentSettings.presets.map((p, j) => j === idx ? { ...p, x: b.x, y: b.y, w: b.width, h: b.height } : p);
         commit({ presets: next });
@@ -1660,7 +1660,7 @@ function buildSettingsPanel() {
     slider(s, 'Scale (font size)', 9, 22, 1, () => currentSettings.fontSize, v => applyLive({ fontSize: v }), v => `${v}pt`, true);
 
     toggle(s, 'Show footer hints (keybind bar at the bottom)', () => currentSettings.showHints, v => commit({ showHints: v }));
-    toggle(s, 'Auto-hide chat when idle (collapse to header)', () => currentSettings.fadeWhenIdle, v => commit({ fadeWhenIdle: v }));
+    toggle(s, 'Auto-hide chat when idle', () => currentSettings.fadeWhenIdle, v => commit({ fadeWhenIdle: v }));
     const autoHideModeRow = el('div', { className: 'ss-row' });
     autoHideModeRow.append(el('label', { className: 'ss-lbl' }, 'Auto-hide mode'));
     const autoHideModeWrap = el('div', { className: 'ss-seg' });
@@ -2211,6 +2211,7 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
     document.documentElement.classList.remove('fcm-full-auto-hidden');
     if (collapsed) {
       collapsed = false;
+      emitCollapseState(false);
       // #327: fully reveal — not just the root 'collapsed' class. Previously this
       // path left the body/input/footer carrying 'fcm-collapsed-hidden', so when
       // the Insert hotkey's force-expand won the race against the local

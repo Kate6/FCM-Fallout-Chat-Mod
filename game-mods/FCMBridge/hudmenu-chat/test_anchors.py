@@ -849,8 +849,8 @@ if widget_src:
           "FCMChatWidget refreshes effective world rosters and waits through transient empties")
     check('if (_needsLink || _authState != "authenticated") return;' in widget_src
           and 'if (!_api.supportsNonBlockingControl()) return;' in widget_src
-          and 'FcmCommand.shouldSendRoster(true, _inputOpen' in widget_src,
-          "FCMChatWidget suppresses blocking providers and editor-owned roster sends")
+          and 'FcmCommand.shouldSendRoster(true, _serverSessionReady' in widget_src,
+          "FCMChatWidget gates nonblocking authenticated renewal independently of editor ownership")
     check('NUL:String      = ctrlChar(0)' in widget_src
           and 'UNIT_SEP:String = ctrlChar(31)' in widget_src,
           "FCMChatWidget builds compatibility control bytes at runtime, not in the SWF string pool")

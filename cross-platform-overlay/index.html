@@ -131,9 +131,14 @@
       /* Full auto-hide keeps the native window and relay alive at a one-pixel
          height so a new message can wake the overlay. Hide every renderer pixel
          without using display:none, which would disturb the expand measurement. */
-      #root.fcm-full-auto-hidden {
+      #root.fcm-full-auto-hidden,
+      html.fcm-full-auto-hidden body * {
         visibility: hidden !important;
       }
+      /* Effects span the entire native window, whose minimum height can exceed
+         the collapsed header. Do not paint a residual rectangle below tabs. */
+      body:has(#root.collapsed) #shell-bg-dim,
+      body:has(#root.collapsed) #shell-scanline { visibility: hidden !important; }
       /* Visual-effect layers are siblings of #root, so hiding only #root left a
          dim rectangle behind. Keep the one-pixel document hit target alive so
          mouse movement over it can wake the overlay. */

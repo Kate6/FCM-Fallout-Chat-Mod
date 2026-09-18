@@ -2421,6 +2421,9 @@ ipcMain.on('overlay:set-modal', (_evt, open) => {
 ipcMain.on('overlay:collapse', (_evt, { headerHeight, fullAutoHide }) => {
   if (overlayCore.shouldSuppressIdleCollapse({ portable: IS_PORTABLE, gameRunning })) {
     diag('[collapse] portable in-game collapse suppressed');
+    // The renderer already hid its content before sending this request. Reject
+    // both halves of the collapse, without focusing or resizing the window.
+    sendToRenderer('overlay:force-expand', true);
     return;
   }
   collapseToHeader(headerHeight, !!fullAutoHide);
@@ -2448,7 +2451,15 @@ ipcMain.on('overlay:show-for-mention', () => {
 // ─── Position presets (SET POS capture + snap-to-preset hotkeys) ──────────────
 // The renderer's "SET POS" reads the live window bounds; a preset hotkey
 // (Shift+F1..F8) snaps the window back to a saved rect. Get/set go through main.
-ipcMain.handle('window:get-bounds', () => (mainWindow && !mainWindow.isDestroyed()) ? mainWindow.getBounds() : null);
+ipcMain.handle('window:get-bounds', (_evt, forPreset) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  const live = mainWindow.getBounds();
+  // Resize gestures need live geometry; SET POS needs the user's chat size,
+  // not the temporary settings/onboarding enlargement.
+  if (forPreset !== true) return live;
+  const size = modalFitPrevBounds || live;
+  return { ...live, width: size.width, height: collapsed ? (expandedHeight || size.height) : size.height };
+});
 ipcMain.on('window:set-bounds', (_evt, b) => {
   if (!mainWindow || mainWindow.isDestroyed() || !b) return;
   // Preset hotkeys are global, so they still fire while a modal is open (unlike
@@ -3669,6 +3680,9 @@ function _stealForegroundWin32() {
 
 function dispatchFocusInput(reason) {
   diag('[focusToChat] dispatch overlay:focus-input reason=' + reason);
+  // Renderer idle state can differ from native window state (e.g. a rejected
+  // portable collapse). Reveal first; never gate this on native `collapsed`.
+  sendToRenderer('overlay:force-expand', true);
   sendToRenderer('overlay:focus-input', true);
 }
 

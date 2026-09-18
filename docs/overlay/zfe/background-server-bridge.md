@@ -49,6 +49,10 @@ chat remains independent of extenders.
 
 ## Shared room contract
 
+Peer departure preserves the survivor's canonical room and history while its
+roster session remains live and unsplit. See [room continuity](../../realtime/server-room-continuity.md)
+for generation, expiry and split boundaries.
+
 Native HUD ROSTER controls and authenticated desktop `bridge:observe` enter one
 room coordinator and the same `worldRosterService`. Provider and UI type are not
 room namespaces. Account names are normalized identically for roster evidence;

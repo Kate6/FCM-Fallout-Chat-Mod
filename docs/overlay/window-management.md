@@ -193,7 +193,8 @@ If a move or scroll-to-bottom command arrives while collapsed, the main process 
 The "Auto-hide chat when idle" setting (`ShellSettings.fadeWhenIdle`, default `true`) toggles this behavior and maps to `OverlayConfig.FadeWhenIdle` in the WinForms desktop overlay.
 
 **Auto-hide mode.** The Electron Appearance panel stores `ShellSettings.autoHideMode` as
-`full` (the default) or `subtabs`. `subtabs` keeps the existing two-row navigation strip
+`full` or `subtabs` (the default). Auto-hide itself defaults off for new profiles;
+saved user choices are preserved. `subtabs` keeps the existing two-row navigation strip
 visible. `full` adds `fcm-full-auto-hidden` to the renderer and asks the main process to
 animate the native window to the guarded `FULL_AUTO_HIDE_HEIGHT` of 1 DIP. It does not call
 the user-hidden/tray path: the renderer and relay remain alive, so `markActivity()` can

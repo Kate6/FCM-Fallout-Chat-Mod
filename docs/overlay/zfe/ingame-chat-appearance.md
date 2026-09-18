@@ -29,9 +29,18 @@ generation. Emoji fallback is not evidence of artwork corruption without diagnos
 Open **F11 → FCM → Customize**. Settings apply to this HUD, not other players.
 
 Customize now groups controls into **Position**, **Panel size**, **Text and input**,
-**Appearance**, and **Auto-hide**, with Reset all settings at the Customize root.
-These branches contain at most seven entries, avoiding the previous tall control list.
-Colors and its palettes retain their existing submenus under Appearance.
+**Appearance**, **Auto-hide**, and **Colors**, with Reset all settings at the Customize root.
+Customize and the position, sizing, appearance and auto-hide branches contain at most seven
+entries, avoiding the previous tall control list. Colors and its palettes retain their existing
+options and depth (the host supports four submenu levels).
+While the loader menu is active, FCM measures the visible columns of its selected subtree,
+clamps them inside the stage viewport with eight units of padding, and fits an oversized column
+to a very small viewport. It converts displacement through parent transforms and excludes hidden
+submenus from measurements. Menu placement is independent of the chat panel's ultrawide offset;
+other mods' menu columns and the loader root are untouched. The frame listener is removed on unload.
+This uses the public display-tree contract of [HUDToolsMenu](https://github.com/GitCrazy-wc/hudmodloader/blob/71e2fde134933323777980b5e0fd0c6036c2408f/HUDTools/scripts/HUDToolsMenu.as)
+(`getSelectedModName`, `HUDToolsMenu`/`HUDButton` classes). Different host implementations need
+native verification; the guard does not patch or replace HUDModLoader assets.
 
 Position accepts manual horizontal offsets from `-960` to `2880 - width` in the
 centered 1920×1080 authored coordinate system. For example, `x=-330` is preserved

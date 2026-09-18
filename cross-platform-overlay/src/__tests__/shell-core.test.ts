@@ -440,13 +440,13 @@ describe('normalizeAutoHideMode', () => {
   });
   it('accepts the explicit sub-tabs collapse mode', () => {
     expect(normalizeAutoHideMode('subtabs')).toBe('subtabs');
-    expect(AUTO_HIDE_MODE_DEFAULT).toBe('full');
+    expect(AUTO_HIDE_MODE_DEFAULT).toBe('subtabs');
   });
-  it('uses full auto-hide for missing or corrupted settings', () => {
-    expect(normalizeAutoHideMode(undefined)).toBe('full');
-    expect(normalizeAutoHideMode(null)).toBe('full');
-    expect(normalizeAutoHideMode('header')).toBe('full');
-    expect(normalizeAutoHideMode({})).toBe('full');
+  it('keeps headers via sub-tabs mode for missing or corrupted settings', () => {
+    expect(normalizeAutoHideMode(undefined)).toBe('subtabs');
+    expect(normalizeAutoHideMode(null)).toBe('subtabs');
+    expect(normalizeAutoHideMode('header')).toBe('subtabs');
+    expect(normalizeAutoHideMode({})).toBe('subtabs');
   });
   it('uses a native one-pixel target for full auto-hide', () => {
     expect(FULL_AUTO_HIDE_HEIGHT).toBe(1);
