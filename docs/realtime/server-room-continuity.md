@@ -56,6 +56,42 @@ and expiry, desktop replay, future-message isolation and generation boundaries.
 messages. Existing backend CI runs these Jest suites without a new workflow.
 Native two-client acceptance remains pending deployment/manual testing.
 
+### Rejoin room selection
+
+Previously, mutual discovery selected the lexicographically first eligible room
+UUID. A returning player's provisional empty room could therefore replace the
+continuously occupied room and make both feeds appear empty, even though the old
+Redis history still existed.
+
+Roster records now carry a backend-owned `sessionStartedAt`. Observations within
+the same request/generation retain it; leave, expiry or a new generation starts
+a new age. Eligible rooms are ranked by their oldest still-active member session,
+then UUID for deterministic equal-age ties. Split-room exclusion still runs first.
+No history is unioned/copied on a join, and no history TTL is extended. The returner
+receives the selected occupied room's ordinary authorized replay; history from its
+provisional room is not imported. Neither client protocol nor authentication changes.
+
+During rollout, an active legacy roster without this field ranks as age zero
+(older than new sessions), preserved on subsequent observations. Malformed ages
+are rejected. No migration or client reinstall is required; existing active rooms
+cannot recover an already-displaced selection merely from this deployment.
+
+This remains roster-based inference, not an authoritative world identity. If two
+long-lived disconnected components discover each other, the oldest active session
+chooses the canonical room; we cannot prove which component represents the physical
+world. Equal-age legacy rooms retain the deterministic UUID tie-breaker. We do not
+merge their histories to hide this ambiguity. Freshness, mutual sightings and
+per-session authorization remain required.
+
+Regression coverage includes both UUID orders, legacy records, age validation,
+generation reset, deterministic ties, and three leave/rejoin cycles for all four
+HUD/provider-to-bridge/provider pairings plus HUD-to-HUD and bridge-to-bridge.
+The shared backend tests assert stable survivor room/history and TTL, isolated
+provisional messages, delayed mutual discovery, rendered desktop replay and unique
+message IDs from both senders. Native provider labels exercise the common native
+coordinator contract here, not separate extender binaries. Existing native/Ruffle
+acceptance still applies; a fresh two-client game test is required after deployment.
+
 ### Client replay validation (follow-up candidate)
 
 The Redis copy alone is insufficient: both clients historically required each

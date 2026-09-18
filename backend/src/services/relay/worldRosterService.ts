@@ -30,6 +30,8 @@ export interface RosterEntry {
   requestId: string;
   /** Last coordinated room for this observation session; never client-supplied. */
   roomKey?: string;
+  /** Server-owned start of this observation session; never renewed by updates. */
+  sessionStartedAt?: number;
   /** Desktop exports expire at the original observation deadline, not heartbeat. */
   expiresAt?: number;
 }
@@ -47,7 +49,9 @@ export async function setRoster(relayUserId: string, ownName: string, seenNames:
     const previous = await readRoster(relayUserId);
     const session = previous && previous.requestId === requestId ? previous.session : randomUUID();
     const roomKey = previous?.session === session ? previous.roomKey : undefined;
-    const value = JSON.stringify({ name, seen, session, requestId, ...(roomKey ? { roomKey } : {}), ...(expiresAt === undefined ? {} : { expiresAt }) });
+    // Missing age belongs to a pre-upgrade active session, older than new ones.
+    const sessionStartedAt = previous?.session === session ? previous.sessionStartedAt ?? 0 : Date.now();
+    const value = JSON.stringify({ name, seen, session, requestId, sessionStartedAt, ...(roomKey ? { roomKey } : {}), ...(expiresAt === undefined ? {} : { expiresAt }) });
     await redis.set(`${KEY_PREFIX}${relayUserId}`, value, expiresAt === undefined
       ? { EX: TTL_SECONDS } : { PX: Math.max(1, Math.ceil(expiresAt - Date.now())) });
   } catch (err) {
@@ -118,6 +122,8 @@ function isRosterPayload(value: unknown): value is Omit<RosterEntry, 'userId'> {
     && 'session' in value && typeof value.session === 'string' && value.session.length > 0
     && 'requestId' in value && typeof value.requestId === 'string'
     && (!('roomKey' in value) || (typeof value.roomKey === 'string' && /^r:[0-9a-f-]{36}$/.test(value.roomKey)))
+    && (!('sessionStartedAt' in value) || (typeof value.sessionStartedAt === 'number'
+      && Number.isSafeInteger(value.sessionStartedAt) && value.sessionStartedAt >= 0))
     && (!('expiresAt' in value) || (typeof value.expiresAt === 'number' && Number.isFinite(value.expiresAt)))
     && Array.isArray(value.seen)
     && value.seen.every((name) => typeof name === 'string');
@@ -181,8 +187,16 @@ export async function computeRooms(assertCurrent: () => Promise<void> = async ()
   const rooms = new Map<string, string>();
   const redis = await getRedisClient();
   for (const [root, members] of groups) {
+    // Keep the oldest continuously present session's eligible room when mutual
+    // discovery joins components. A returning user's provisional UUID must not
+    // displace the survivor merely by sorting first. No histories are merged.
+    const ages = new Map<string, number>();
+    for (const member of members) if (member.roomKey) {
+      ages.set(member.roomKey, Math.min(ages.get(member.roomKey) ?? Infinity, member.sessionStartedAt ?? 0));
+    }
     const candidates = [...new Set(members.map(m => m.roomKey).filter((key): key is string => !!key))]
-      .filter(key => owners.get(key)?.size === 1).sort();
+      .filter(key => owners.get(key)?.size === 1)
+      .sort((a, b) => ages.get(a)! - ages.get(b)! || a.localeCompare(b));
     const initial = `r:${members.find(m => m.userId === root)!.session}`;
     // Never resurrect a split room through its original root session UUID.
     const roomKey = candidates[0] ?? (members.some(m => m.roomKey) ? `r:${randomUUID()}` : initial);

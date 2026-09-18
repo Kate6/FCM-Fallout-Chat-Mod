@@ -137,6 +137,67 @@ test('backend queue and auth latency consume observation freshness rather than r
   expect(a.frames.some(frame => frame.payload.status === 'ready')).toBe(false);
 });
 
+test.each([
+  ['bridge', 'zfe', 'native', 'zfe'], ['bridge', 'xscal', 'native', 'zfe'],
+  ['bridge', 'zfe', 'native', 'xscal'], ['bridge', 'xscal', 'native', 'xscal'],
+  ['bridge', 'zfe', 'bridge', 'xscal'], ['native', 'zfe', 'native', 'xscal'],
+])('repeated leave/rejoin retains history: %s/%s survivor and %s/%s returner', async (aKind, aProvider, bKind, bProvider) => {
+  function actor(kind, provider, name, account) {
+    const client = kind === 'bridge' ? desktop(account, `session-${account}`) : null;
+    const id = client?.local.actorId ?? `user_${account}`;
+    let sequence = 0;
+    return { id, client,
+      observe: (names, generation) => client
+        ? client.local.observe(snapshot({ provider, ownName: name, names, worldGeneration: generation,
+          sequence: ++sequence, observationSequence: sequence }))
+        : observeNativeRoster(id, name, names, generation),
+      leave: () => client ? client.local.leave() : coordinateRooms(check => clearRoomMembership(id, check)),
+    };
+  }
+  const a = actor(aKind, aProvider, 'Alice', 'a'), b = actor(bKind, bProvider, 'Bob', 'b');
+  await a.observe(['Bob'], 'stay');
+  await b.observe(['Alice'], 'first');
+  let expected = [];
+  const initial = await getWorldId(a.id);
+  const first = await sendServerMessage({ accountId: 'a', relayUserId: a.id, displayName: 'Alice' }, initial, 'retained');
+  expected.push(first.messageId);
+  for (let cycle = 1; cycle <= 3; cycle++) {
+    Date.now.mockReturnValue(100_000 + cycle * 2000);
+    // Reproduce delayed leave: first lose the mutual sighting, then retire peer.
+    await a.observe([], 'stay');
+    await b.leave();
+    const survivor = await getWorldId(a.id);
+    expect((await getServerHistory(survivor, 0, 50)).map(row => row.messageId).sort()).toEqual([...expected].sort());
+    const deadline = expiries.get(`relay:serverchat:${survivor}`);
+    await b.observe([], `return-${cycle}`); // provisional empty room
+    const provisional = await getWorldId(b.id);
+    expect(provisional).not.toBe(survivor);
+    const privateRow = await sendServerMessage({ accountId: 'b', relayUserId: b.id, displayName: 'Bob' }, provisional, 'not imported');
+    await a.observe(['Bob'], 'stay'); // one-sided must not merge
+    expect(await getWorldId(b.id)).toBe(provisional);
+    await b.observe(['Alice'], `return-${cycle}`);
+    expect(await getWorldId(a.id)).toBe(survivor);
+    expect(await getWorldId(b.id)).toBe(survivor);
+    expect(expiries.get(`relay:serverchat:${survivor}`)).toBe(deadline);
+    const history = await getServerHistory(survivor, 0, 50);
+    expect(history.map(row => row.messageId).sort()).toEqual([...expected].sort());
+    expect(history.some(row => row.messageId === privateRow.messageId)).toBe(false);
+    if (a.client) {
+      await a.client.connection.watch('local-export');
+      const replay = a.client.frames.filter(frame => frame.type === 'bridge:history').at(-1).payload;
+      const state = readBridgeState({ ...replay, status: 'ready' }, true);
+      expect(mergeBridgeRows([], replay.messages, state, replay, 50).map(row => row.id).sort()).toEqual([...expected].sort());
+    }
+    for (const [who, account] of [[a, 'a'], [b, 'b']]) {
+      const row = await sendServerMessage({ accountId: account, relayUserId: who.id, displayName: account }, survivor, `cycle ${cycle} ${account}`);
+      expected.push(row.messageId);
+    }
+    const ids = (await getServerHistory(survivor, 0, 50)).map(row => row.messageId);
+    expect(new Set(ids).size).toBe(expected.length);
+    expect(ids.sort()).toEqual([...expected].sort());
+  }
+});
+
 test.each([['zfe', 'zfe'], ['zfe', 'xscal'], ['xscal', 'zfe'], ['xscal', 'xscal']])('delayed HUD %s departure preserves bridge %s history but isolates future messages', async (_hudProvider, provider) => {
   const a = desktop();
   await a.local.observe(snapshot({ provider }));
