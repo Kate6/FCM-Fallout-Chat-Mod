@@ -577,7 +577,87 @@ authoritative for new game builds, provider versions, real world hops, or Contro
 The compiled `ultrawide` scenario runs with both xScal and ZFE in the required
 `hud-ruffle` suite. It exercises production menu callbacks, all compact customization
 branches, repeated movement to x=-330, horizontal bounds, INI round-trip, editor
-alignment and position-only recovery. Pure config/layout tests and backend
+alignment and position-only recovery. Display-tree fixtures exercise all 18 customization
+branches, the host's four-level nesting limit, upward/downward menus, off-frame positions,
+scaled parents and 16:9/21:9/32:9/small viewport bounds. Hidden and other-mod columns must
+remain unchanged. These fixtures represent the pinned host's public tree contract; they
+are not a loaded copy of HUDModLoader. Pure config/layout tests and backend
 `hudLayoutService` tests cover matching relay validation and saved negative offsets.
 Actual 21:9/32:9 host transforms, clipping and F11 menu placement remain native-only:
 check both screen edges, open editor, resize, reload, and Reset position on each provider.
+
+Local verification, 2026-09-17: all 52 Playwright cases, 21 pure Haxe suites,
+seven backend layout tests, backend typecheck, Haxe compiler diagnostics (only standard-library
+warnings), source/package/BA2/SWF and embedded emoji checks passed. Port 41739 was rebound
+successfully after Playwright teardown. Rebuilt the local one-entry BTDX v1 GNRL widget
+archive while preserving entry metadata; its decoded SWF equals the tested production SWF.
+
+- SWF SHA-256: `d46443ccb42fa62658cc339d6ad9d1cfb90daa56afe8cdca6374f699161f767e`
+- BA2 SHA-256: `c98ec17956e6edb330597fa9a7669c055b1567d61675f81deccc201d47dcdb04`
+
+This is an unreleased local candidate retaining the existing version marker. No game install,
+backend deployment, hosted CI pass or native ultrawide acceptance is claimed.
+
+Authorized desktop test installation, 2026-09-17 23:24 UTC: with Fallout76 closed,
+installed the exact BA2 above to the existing Steam/Proton installation at
+`/mnt/ExtraStorage/SteamLibrary/steamapps/common/Fallout76/Data/FCMChatWidget.ba2`.
+Removed the background bridge BA2, loader/archive registrations, installed manifest/guide
+and cached export; the loader now contains only `FCMChatWidget` and the archive list is
+`HUDModLoader.ba2,FCMChatWidget.ba2`. Kept the existing xScal DLL, DEV relay configuration,
+native credentials and HUD values. Updated the geometry comment to describe negative X.
+The installed decoded SWF equals the tested source artifact. Recoverable original files
+and exact-path restore manifest are under
+`.extender-backups/before-ultrawide-hud-yy312z1c/` in that game installation.
+The game was not launched; native acceptance and relay deployment remain pending.
+
+Authorized local target switch, 2026-09-17 23:36 UTC: with the game closed, changed
+only `[Chat] relayEndpoint` in the installed `xscal.ini` to
+`wss://falloutchatmod.com/relay` and `[FCMChat] linkUrl` in `Data/FCMChat.ini` to
+`falloutchatmod.com/link`. The tested BA2, other settings and native credentials
+were preserved. Original configs and exact-path restore manifest are under
+`.extender-backups/before-ultrawide-prod-_a6j20lh/`. The local candidate now targets
+production; this configuration change did not deploy the backend or launch the game.
+
+## Typing and Server membership renewal
+
+The `typing-renewal` compiled scenario runs against both xScal and ZFE adapters in
+`hud-ruffle`. It opens the actual mock SharedHUDTools editor, keeps a draft and selection,
+then makes four renewals due using test-owned timestamps. Each send must occur while the
+editor is open, retain room/nonce/selected Server tab/history, and refresh the lease only
+after the production poll path receives `SERVER-READY`. A repeated immediate tick must
+remain throttled. These are deterministic deadline tests, not a real-time native soak.
+
+The same scenario rejects unlinked controls and ZFE without async-control capability,
+requires missing confirmations to expire at 60 seconds, and requires expired roster
+observations to send LEAVE even during typing. Pure `test-command.hxml` covers 29,999/30,000
+and 9,999/10,000 millisecond scheduling boundaries and unsafe transports. Existing world-hop,
+stale-confirmation, roster and packaged-bridge suites remain required.
+
+Native acceptance: stay in the same populated world with fresh roster observations, keep
+editing for more than 90 seconds, verify Server remains selected with common history and no
+input disruption, then verify editor close, actual travel/world changes and real expiry still
+follow their normal behavior. Do not extend observation freshness or lease TTLs to hide a failure.
+
+### Server renewal candidate verification (2026-09-17 local)
+
+The rebuilt 2.10.110 private candidate passed the complete 54-case Ruffle suite,
+21 pure Haxe suites, source/package/SWF/BA2/emoji checks, 45 targeted backend
+shared-server tests, 6 dashboard bridge-feed tests, and 1,230 overlay unit tests.
+Simulator teardown released port 41739. Hosted CI and native acceptance remain pending.
+
+The tested SWF was repacked with the existing BA2 entry metadata preserved.
+After confirming Fallout 76 was closed, only the installed widget BA2 was replaced;
+production endpoints, provider credentials and UI settings were preserved. The
+background bridge remains uninstalled. The previous archive is backed up under
+`/mnt/ExtraStorage/SteamLibrary/steamapps/common/Fallout76/.extender-backups/before-typing-renewal-eklofezh`.
+
+- SWF SHA-256: `a98240dbdc0ad5f26f2ba4f5b2c8d8bd857cb6a32f83e22364d1d7ff7d760e69`
+- BA2 SHA-256: `e8d47dc8be08fca77115f863e574b28e90e9122a3b0b9d905926a7e5d549c91b`
+- Private package: `/home/devotek/Downloads/FCM-HUD-2.10.110-Ultrawide-Server-Renewal-Test-2026-09-17.zip`
+- ZIP SHA-256: `f3a4672e55aea513ffc2a4836057b5a80a465e7358321bc7c2302dcae6328137`
+
+The ZIP contains the exact installed archive and production configuration examples.
+It is an unreleased test candidate, not a public release. Native testing must still
+keep the editor open for more than 90 seconds and verify membership, history, draft
+and selection preservation. The separate relay layout-validator deployment is
+still needed for persisted extended horizontal offsets through xScal.

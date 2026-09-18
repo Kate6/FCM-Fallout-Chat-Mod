@@ -146,6 +146,17 @@ BSUIDataManager-to-`SERVER-READY` observation remains bounded in-game acceptance
 0.6 does not expose the movie callbacks or Fallout's cross-domain manager boundary needed to
 drive and inspect that private state.
 
+The current unreleased typing-renewal candidate keeps automatic membership controls running
+while the chat editor is open. Confirmed rooms renew at the existing 30-second interval;
+unconfirmed attempts retain the 10-second retry interval. Editor ownership no longer suppresses
+these capability-gated nonblocking calls. Authentication, fresh roster evidence, world-generation
+checks and the 60-second relay-confirmation timeout remain unchanged. A native send receipt
+cannot renew the confirmation, and unchanged cached observations cannot become fresh merely
+because a renewal was attempted. The draft, caret/selection and editor focus stay owned by chat.
+This corrects the local xScal capture where repeated typing postponed renewal until the room
+confirmation expired, then the same room was restored five seconds later. Native acceptance of
+the correction remains pending; see the [regression coverage](../../testing/hud-automation-plan.md#typing-and-server-membership-renewal).
+
 From widget 2.10.94, ordinary ZFE sends require the runtime capability
 `zfe-chat-async-send-v1`. A ZFE build without it gets an update-required message instead of a
 potentially blocking native call. The gate uses the advertised capability, not a version string.
@@ -235,7 +246,7 @@ Ordinary HTTP(S) URLs embedded in message text follow the same behavior, includi
 also contain bundled emoji; when several links exist, the action opens the first one. Link
 activation is accepted only while `openKey` owns a visible editor and a link row is selected;
 before OpenChat, the same physical key remains a normal Fallout control.
-The highlight color is independently configurable as `Selected message` in F11 → Customize → Appearance →
+The highlight color is independently configurable as `Selected message` in F11 → Customize →
 Colors or as `selectedRowColor` in `FCMChat.ini`; it persists through ZFE storage and the xScal
 device-scoped layout relay.
 Configured feed scrolling acts only while chat owns a visible input session. The blank newest and

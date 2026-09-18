@@ -11,7 +11,7 @@ class SharedHUDTools {
     var submit:Dynamic;
     var menuSelect:Dynamic;
     var menuPrepare:Dynamic;
-    var menuItems:Array<{id:String, label:String, enabled:Bool}> = [];
+    var menuItems:Array<{id:String, label:String, enabled:Bool, isMenu:Bool}> = [];
     var editor:TextField;
     var x:Float = 0;
     var y:Float = 0;
@@ -23,7 +23,7 @@ class SharedHUDTools {
     public function new(_:String, __:String) { active = this; }
     public function Register(_:Dynamic):Bool return true;
     public function RegisterMenu(prepare:Dynamic, select:Dynamic):Bool { menuPrepare = prepare; menuSelect = select; return true; }
-    public static function inspectMenu(parent:String = ""):Array<{id:String, label:String, enabled:Bool}> {
+    public static function inspectMenu(parent:String = ""):Array<{id:String, label:String, enabled:Bool, isMenu:Bool}> {
         if (active == null || active.menuPrepare == null) return [];
         active.menuItems = [];
         active.menuPrepare(parent);
@@ -33,8 +33,8 @@ class SharedHUDTools {
         if (active != null && active.menuSelect != null) active.menuSelect(item);
     }
     public function FormatMenu(_:Dynamic, __:Dynamic, ___:Dynamic):Void {}
-    public function AddMenuItem(id:Dynamic, label:Dynamic, enabled:Dynamic = true, _:Dynamic = false, __:Dynamic = 250):Void {
-        menuItems.push({id:Std.string(id), label:Std.string(label), enabled:enabled == true});
+    public function AddMenuItem(id:Dynamic, label:Dynamic, enabled:Dynamic = true, isMenu:Dynamic = false, __:Dynamic = 250):Void {
+        menuItems.push({id:Std.string(id), label:Std.string(label), enabled:enabled == true, isMenu:isMenu == true});
     }
     public function ShowMenu():Void { isActive = true; }
     public function CloseMenu():Void { isActive = false; }

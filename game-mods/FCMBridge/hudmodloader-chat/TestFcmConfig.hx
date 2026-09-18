@@ -28,6 +28,10 @@ class TestFcmConfig {
     }
 
     static function main():Void {
+        check("menu above frame shifts down", FcmMenuPlacement.shift(-100, 210, 1080) == 108);
+        check("menu below frame shifts up", FcmMenuPlacement.shift(1000, 210, 1080) == -138);
+        check("menu inside frame stays put", FcmMenuPlacement.shift(300, 210, 1080) == 0);
+        check("menu right overflow", FcmMenuPlacement.shift(1850, 150, 1920) == -88);
         var wide = FcmConfig.parse("[FCMChat]\nx=-330\nwidth=600");
         eqi("negative INI x survives", wide.x, -330);
         eqi("negative x round trip", FcmConfig.parse(wide.toIni()).x, -330);

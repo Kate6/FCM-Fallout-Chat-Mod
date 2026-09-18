@@ -39,7 +39,7 @@ export async function coordinateRooms<T>(work: (assertCurrent: () => Promise<voi
 /** Caller holds coordinateRooms. This is the single room assignment path for
  * both transports; native subscriber replay retains its existing resync barrier. */
 export async function applyRoomAssignments(requester: string, assertCurrent: () => Promise<void>): Promise<void> {
-  const rooms = await computeRooms();
+  const rooms = await computeRooms(assertCurrent);
   if (requester && !rooms.has(requester)) throw new Error('Current roster could not be assigned');
   for (const [userId, roomKey] of rooms) {
     const roster = await readRoster(userId);

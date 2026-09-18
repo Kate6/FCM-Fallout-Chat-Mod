@@ -7,7 +7,8 @@
  *
  * Redis relay:roster:<relayUserId> stores the account name, observed names, a
  * server-generated session UUID and the current HUD request ID, expiring in 120s.
- * Room keys use the root session UUID; a solo leave/rejoin cannot reuse old history.
+ * Initial room keys use a root session UUID. Coordinated room affinity survives
+ * peer departure, but not a new observation session, expiry or component split.
  */
 
 import { getRedisClient } from '../../config/redis';
@@ -26,6 +27,8 @@ export interface RosterEntry {
   seen: string[]; // observed HUD player names (lowercased)
   session: string;
   requestId: string;
+  /** Last coordinated room for this observation session; never client-supplied. */
+  roomKey?: string;
   /** Desktop exports expire at the original observation deadline, not heartbeat. */
   expiresAt?: number;
 }
@@ -42,7 +45,8 @@ export async function setRoster(relayUserId: string, ownName: string, seenNames:
     const name = normalizeRosterName(ownName || '');
     const previous = await readRoster(relayUserId);
     const session = previous && previous.requestId === requestId ? previous.session : randomUUID();
-    const value = JSON.stringify({ name, seen, session, requestId, ...(expiresAt === undefined ? {} : { expiresAt }) });
+    const roomKey = previous?.session === session ? previous.roomKey : undefined;
+    const value = JSON.stringify({ name, seen, session, requestId, ...(roomKey ? { roomKey } : {}), ...(expiresAt === undefined ? {} : { expiresAt }) });
     await redis.set(`${KEY_PREFIX}${relayUserId}`, value, expiresAt === undefined
       ? { EX: TTL_SECONDS } : { PX: Math.max(1, Math.ceil(expiresAt - Date.now())) });
   } catch (err) {
@@ -112,6 +116,7 @@ function isRosterPayload(value: unknown): value is Omit<RosterEntry, 'userId'> {
   return typeof value.name === 'string'
     && 'session' in value && typeof value.session === 'string' && value.session.length > 0
     && 'requestId' in value && typeof value.requestId === 'string'
+    && (!('roomKey' in value) || (typeof value.roomKey === 'string' && /^r:[0-9a-f-]{36}$/.test(value.roomKey)))
     && (!('expiresAt' in value) || (typeof value.expiresAt === 'number' && Number.isFinite(value.expiresAt)))
     && Array.isArray(value.seen)
     && value.seen.every((name) => typeof name === 'string');
@@ -122,7 +127,7 @@ function isRosterPayload(value: unknown): value is Omit<RosterEntry, 'userId'> {
  * roomKey. A user with no edges gets a solo room keyed on their session UUID —
  * server chat still works when alone on a world.
  */
-export async function computeRooms(): Promise<Map<string, string>> {
+export async function computeRooms(assertCurrent: () => Promise<void> = async () => {}): Promise<Map<string, string>> {
   const startedAt = Date.now();
   const rosters = await getAllRosters();
   const parent = new Map<string, string>();
@@ -159,9 +164,37 @@ export async function computeRooms(): Promise<Map<string, string>> {
     }
   }
 
+  const groups = new Map<string, RosterEntry[]>();
+  for (const roster of rosters) {
+    const root = find(roster.userId);
+    groups.set(root, [...(groups.get(root) ?? []), roster]);
+  }
+  // An old room may continue only in ONE connected component. A split must not
+  // give disconnected worlds shared history or publication authority.
+  const owners = new Map<string, Set<string>>();
+  for (const [root, members] of groups) for (const member of members) {
+    if (!member.roomKey) continue;
+    const roots = owners.get(member.roomKey) ?? new Set<string>();
+    roots.add(root); owners.set(member.roomKey, roots);
+  }
   const rooms = new Map<string, string>();
-  const sessions = new Map(rosters.map((r) => [r.userId, r.session]));
-  for (const r of rosters) rooms.set(r.userId, `r:${sessions.get(find(r.userId))}`);
+  const redis = await getRedisClient();
+  for (const [root, members] of groups) {
+    const candidates = [...new Set(members.map(m => m.roomKey).filter((key): key is string => !!key))]
+      .filter(key => owners.get(key)?.size === 1).sort();
+    const initial = `r:${members.find(m => m.userId === root)!.session}`;
+    // Never resurrect a split room through its original root session UUID.
+    const roomKey = candidates[0] ?? (members.some(m => m.roomKey) ? `r:${randomUUID()}` : initial);
+    for (const member of members) {
+      rooms.set(member.userId, roomKey);
+      if (member.roomKey === roomKey) continue;
+      const { userId, ...payload } = member;
+      // Caller holds the shared coordinator lock. XX/KEEPTTL cannot recreate an
+      // expired observation or turn a heartbeat into fresh roster evidence.
+      await assertCurrent();
+      await redis.set(`${KEY_PREFIX}${userId}`, JSON.stringify({ ...payload, roomKey }), { XX: true, KEEPTTL: true });
+    }
+  }
   logger.debug({ rosterCount: rosters.length, elapsedMs: Date.now() - startedAt }, '[worldRoster] rooms recomputed');
   return rooms;
 }

@@ -1906,8 +1906,7 @@ export const BUILTIN_RELAYS: { cmd: SlashCommand; channelId: string | null; fall
   { cmd: { trigger: '/r',    description: 'Send to Raids',               requiresArgs: true, actionType: 'relay' }, channelId: '00000000-0000-0000-0000-000000000004', fallbackColor: '#FF6644' },
   { cmd: { trigger: '/raid', description: 'Send to Raids (alias of /r)', requiresArgs: true, actionType: 'relay' }, channelId: '00000000-0000-0000-0000-000000000004', fallbackColor: '#FF6644' },
   { cmd: { trigger: '/i',    description: 'Send to Infests',             requiresArgs: true, actionType: 'relay' }, channelId: '983995c1-f9ab-44c0-9b78-8b4cbf497273', fallbackColor: '#CC44FF' },
-  // /s omitted — server chat is pending re-enable (tracked in the server-scoped-chat
-  // epic). A typed "/s ..." falls through to the backend, which returns a disabled notice.
+  // /s is desktop-only and resolves the confirmed bridge room at send time.
 ];
 
 // Hardcoded form/utility commands — mirrors the desktop overlay's _acCommands list exactly.
@@ -4951,8 +4950,9 @@ export default function ChatOverlay() {
       ...BUILTIN_FORMS.map(c => c.trigger),
     ]);
     const dbOnly = fetched.filter(c => !builtinTriggers.has(c.trigger));
-    return [SYNTHETIC_HELP, ...BUILTIN_RELAYS.map(b => b.cmd), ...BUILTIN_FORMS, ...dbOnly];
-  }, [commandsRaw]);
+    const serverCommands: SlashCommand[] = overlayShell ? [{ trigger: '/s', description: 'Send to Server', requiresArgs: true, actionType: 'relay' }] : [];
+    return [SYNTHETIC_HELP, ...BUILTIN_RELAYS.map(b => b.cmd), ...serverCommands, ...BUILTIN_FORMS, ...dbOnly.filter(c => !overlayShell || c.trigger !== '/s')];
+  }, [commandsRaw, overlayShell]);
 
   // Input text color — tint to channel/party badge color as soon as a relay trigger is recognised
   const inputRelayColor: string | null = useMemo(() => {
@@ -7118,6 +7118,21 @@ export default function ChatOverlay() {
       else inputRef.current?.focus();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).relayBridge?.returnToGame?.();
+      return;
+    }
+
+    if (overlayShell && trigger === '/s') {
+      const state = bridgeStateRef.current;
+      if (!args) return;
+      if (state.status !== 'ready' || !wsOpen || isPublicMode) {
+        showActionToast('err', 'Server bridge is not connected.');
+        return; // Keep the draft and mentions; never fall back to another channel.
+      }
+      sendChatMessage(args, state.channelId, pendingMentionsRef.current.slice());
+      pendingMentionsRef.current = [];
+      setInputText('');
+      if (richInputRef.current) richInputRef.current.innerHTML = '';
+      (window as Window & { relayBridge?: { returnToGame?: () => void } }).relayBridge?.returnToGame?.();
       return;
     }
 

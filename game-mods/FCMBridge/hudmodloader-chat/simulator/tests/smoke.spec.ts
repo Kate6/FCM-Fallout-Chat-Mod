@@ -413,5 +413,14 @@ for (const provider of ['xscal', 'zfe']) {
     await page.goto(`/?mode=harness&provider=${provider}&scenario=ultrawide`);
     await expect(page.locator('#log')).toContainText(/ULTRAWIDE (PASS|FAIL)/, { timeout: 25_000 });
     await expect(page.locator('#log')).toContainText(`ULTRAWIDE PASS ${provider} negative=preserved menus=bounded editor=aligned reset=recovered`);
+    await expect(page.locator('#log')).toContainText('MENU-FRAME PASS branches=18 edges=all transforms=scaled viewport=16:9,21:9,32:9,small ownership=FCM-only');
+  });
+}
+
+for (const provider of ['xscal', 'zfe']) {
+  test(`renews Server membership while typing through ${provider}`, async ({ page }) => {
+    await page.goto(`/?mode=harness&provider=${provider}&scenario=typing-renewal`);
+    await expect(page.locator('#log')).toContainText(/TYPING-RENEWAL (PASS|FAIL)/, { timeout: 25_000 });
+    await expect(page.locator('#log')).toContainText(`TYPING-RENEWAL PASS ${provider} editor=preserved renewal=confirmed history=preserved expiry=enforced stale=leave auth=gated`);
   });
 }

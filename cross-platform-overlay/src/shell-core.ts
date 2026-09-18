@@ -263,7 +263,7 @@ export const IDLE_COLLAPSE_SECONDS_DEFAULT = 25;
 // explicit choice. Full mode hides the renderer and lets the native shell shrink
 // to a one-pixel strip without disconnecting the relay.
 export type AutoHideMode = 'subtabs' | 'full';
-export const AUTO_HIDE_MODE_DEFAULT: AutoHideMode = 'full';
+export const AUTO_HIDE_MODE_DEFAULT: AutoHideMode = 'subtabs';
 export const FULL_AUTO_HIDE_HEIGHT = 1;
 
 export function normalizeAutoHideMode(value: unknown): AutoHideMode {

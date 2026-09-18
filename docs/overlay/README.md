@@ -2,6 +2,35 @@
 
 Header actions and online counts: [header controls](header-controls.md).
 
+Desktop shortcut: `/s message` sends to the currently backend-confirmed Server
+room without changing the selected tab. It uses the normal authorized bridge send
+path; unavailable/offline Server chat preserves the draft and reports an error,
+never queues for later or falls back to General. `/s` alone sends nothing.
+
+Idle auto-hide defaults **off** for new profiles. If enabled without a saved mode,
+it defaults to **sub-tabs collapse**, retaining the header and channel rows.
+Explicit existing preferences remain unchanged. Full auto-hide remains an opt-in
+mode that hides all renderer layers, including portaled content; collapsed mode
+suppresses the full-window dim/scanline layers to avoid a residual rectangle.
+The isolated Electron `test:interaction` suite exercises three collapse/expand
+cycles in each mode, asserting header/sub-tab visibility, hidden effect layers,
+and a visible writable composer after expansion. This is desktop-renderer
+coverage, not Windows game-focus or multi-monitor acceptance.
+
+Position presets capture the chat's pre-modal size, not the temporary settings
+panel enlargement, while keeping the live x/y position. Resize gestures still
+read live geometry. Previously overwritten presets must be recaptured; their
+original dimensions cannot be reconstructed from the saved enlarged rectangle.
+
+Focus recovery: every explicit Open Chat/Insert focus request first reveals the
+renderer, independently of the native window's collapse flag. When a portable
+in-game idle collapse is suppressed, main also restores the already-hidden
+renderer without stealing focus or resizing the window. Regression coverage is
+`cross-platform-overlay/__tests__/focus-collapse-recovery.test.js` (repeated
+requests and both idle-hide modes), included in the overlay unit suite. Native
+Windows collapse → Insert → send → return-to-game acceptance remains required
+before treating a packaged build as verified.
+
 Channel controls and review status: [sub-tab customization and bridge safety](subtab-customization-and-bridge-review.md).
 
 Performance work: [idle renderer performance spec](idle-renderer-performance-spec.md)

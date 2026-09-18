@@ -243,16 +243,13 @@ class FcmCommand {
     }
 
     /**
-     * Bound automatic roster network calls. Provider snapshots fluctuate as Fallout
-     * menus update; overlapping membership churn is not a new room and must not
-     * trigger synchronous native traffic. Never perform that traffic while the
-     * player owns the chat editor.
+     * Bound capability-gated, nonblocking roster controls. Editor ownership must
+     * not pause membership renewal: the relay confirmation expires after 60s.
+     * Fresh observations and provider safety are checked before this scheduler.
      */
-    public static function shouldSendRoster(automaticTransportSafe:Bool, inputOpen:Bool,
-            serverSessionReady:Bool, elapsedSinceSend:Float, hasSent:Bool,
-            rosterChanged:Bool):Bool {
+    public static function shouldSendRoster(automaticTransportSafe:Bool,
+            serverSessionReady:Bool, elapsedSinceSend:Float, hasSent:Bool):Bool {
         if (!automaticTransportSafe) return false;
-        if (inputOpen) return false;
         if (!hasSent) return true;
         if (serverSessionReady) return elapsedSinceSend >= 30000;
         return elapsedSinceSend >= 10000;

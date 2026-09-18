@@ -149,8 +149,8 @@ test('leave during retained-history read drops late history and ready confirmati
   connection.dispose();
 });
 
-test.each(['zfe', 'xscal'].flatMap(hud => ['zfe', 'xscal'].map(bridge => [hud, bridge])))
-  ('HUD %s and desktop %s share assignment, bidirectional canonical publication, history and native hooks', async (_hudProvider, bridgeProvider) => {
+test.each(['zfe', 'xscal'].flatMap(hud => ['zfe', 'xscal'].flatMap(bridge => ['hud', 'desktop'].map(departing => [hud, bridge, departing]))))
+  ('HUD %s and desktop %s share canonical history when %s leaves', async (_hudProvider, bridgeProvider, departing) => {
     // Native protocol is provider-neutral: both extenders call the same ROSTER dispatcher.
     const a = desktop();
     await observeNativeRoster('user_b', '  BOB ', [' ALICE '], 'hud-one');
@@ -160,7 +160,7 @@ test.each(['zfe', 'xscal'].flatMap(hud => ['zfe', 'xscal'].map(bridge => [hud, b
     expect(await getWorldId('user_b')).toBe(room);
     expect(hooks.rebind).toHaveBeenCalledWith('user_b', room);
     expect(hooks.backfill).toHaveBeenCalledWith('user_b', room, 'hud-one');
-    expect(room).not.toBe(before); // Overlay actor sorts before user_, requiring a native rebind.
+    expect(room).toBe(before); // New mutual member joins the existing canonical room.
     const native = await sendServerMessage({ accountId: 'account-b', relayUserId: 'user_b', displayName: 'Bob' }, room, 'native says hello');
     await a.connection.watch('local-export');
     await a.connection.send(`server:${room}`, bridgeBindingId(ready.binding), 'desktop says hello');
@@ -174,6 +174,18 @@ test.each(['zfe', 'xscal'].flatMap(hud => ['zfe', 'xscal'].map(bridge => [hud, b
     const reload = new BridgeConnection('account-a', frame => replay.push(frame), () => new Set(), undefined, a.local);
     await reload.watch('local-export');
     expect(replay.flatMap(frame => frame.payload.messages ?? []).map(row => row.id)).toEqual(history.map(row => row.messageId));
+    if (departing === 'hud') {
+      await coordinateRooms(assertCurrent => clearRoomMembership('user_b', assertCurrent));
+      await a.connection.observe(snapshot({ provider: bridgeProvider, names: [], sequence: 2, observationSequence: 2 }));
+      expect((await a.local.resolve()).binding.room).toBe(room);
+      expect(await getWorldId('user_b')).toBeNull();
+    } else {
+      await a.local.close();
+      await observeNativeRoster('user_b', 'Bob', [], 'hud-one');
+      expect(await getWorldId('user_b')).toBe(room);
+    }
+    expect((await getServerHistory(room, 0, 50)).map(row => row.messageId)).toEqual(history.map(row => row.messageId));
+    reload.dispose();
   });
 
 test('bridge to bridge converges across providers; absent/one-sided sightings and isolated peers remain separated', async () => {

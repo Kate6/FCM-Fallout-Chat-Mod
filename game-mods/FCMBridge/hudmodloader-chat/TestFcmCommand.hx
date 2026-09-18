@@ -164,19 +164,21 @@ class TestFcmCommand {
             FcmCommand.shouldRebindRosterSession("Ada|Beck", ""));
         check("initial roster does not force a rebind",
             !FcmCommand.shouldRebindRosterSession("", "Ada"));
-        check("open editor suppresses automatic roster network work",
-            !FcmCommand.shouldSendRoster(true, true, true, 49000, true, false));
+        check("open editor permits due nonblocking membership renewal",
+            FcmCommand.shouldSendRoster(true, true, 49000, true));
         check("unsafe synchronous transport suppresses automatic roster work",
-            !FcmCommand.shouldSendRoster(false, false, false, 60000, false, true));
-        check("ready roster ignores harmless membership churn",
-            !FcmCommand.shouldSendRoster(true, false, true, 29000, true, true));
+            !FcmCommand.shouldSendRoster(false, false, 60000, false));
+        check("ready roster does not renew before the boundary",
+            !FcmCommand.shouldSendRoster(true, true, 29999, true));
         check("ready roster renews only at the keepalive boundary",
-            FcmCommand.shouldSendRoster(true, false, true, 30000, true, false));
+            FcmCommand.shouldSendRoster(true, true, 30000, true));
         check("unconfirmed roster retries only after its retry boundary",
-            !FcmCommand.shouldSendRoster(true, false, false, 9999, true, false)
-            && FcmCommand.shouldSendRoster(true, false, false, 10000, true, false));
+            !FcmCommand.shouldSendRoster(true, false, 9999, true)
+            && FcmCommand.shouldSendRoster(true, false, 10000, true));
+        check("blocking transport cannot renew even a ready session",
+            !FcmCommand.shouldSendRoster(false, true, 60000, true));
         check("first roster is sent once",
-            FcmCommand.shouldSendRoster(true, false, false, 0, false, false));
+            FcmCommand.shouldSendRoster(true, false, 0, false));
         check("bare true after a successful clear is an empty native buffer",
             FcmCommand.nativeInputBufferIsClear("true", "true"));
         check("a rejected clear does not admit an empty native buffer",

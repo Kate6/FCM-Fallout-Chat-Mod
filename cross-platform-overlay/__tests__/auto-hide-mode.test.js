@@ -53,6 +53,13 @@ describe('full auto-hide wiring', () => {
 });
 
 describe('Appearance auto-hide mode controls', () => {
+  it('defaults idle hiding off and hides full-window effects during collapse', () => {
+    expect(here('src/shell.ts')).toContain('fadeWhenIdle: false,');
+    const html = here('index.html');
+    expect(html).toContain('html.fcm-full-auto-hidden body *');
+    expect(html).toContain('body:has(#root.collapsed) #shell-bg-dim');
+    expect(html).toContain('body:has(#root.collapsed) #shell-scanline');
+  });
   it('renders both mutually exclusive mode choices and persists the setting', () => {
     const shell = here('src/shell.ts');
 
