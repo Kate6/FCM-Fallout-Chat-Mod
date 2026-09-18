@@ -517,6 +517,9 @@ describe('ChatOverlay private messaging', () => {
       },
     });
 
+    // Establish actual reading intent; a layout-only offset is now repaired.
+    fireEvent.wheel(feed, { deltaY: -100 });
+    fireEvent.scroll(feed);
     fireEvent.focus(screen.getByPlaceholderText('Type a message...'));
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, 180));

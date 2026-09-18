@@ -70,9 +70,9 @@ beforeEach(() => {
 
 afterEach(() => { cleanup(); client?.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-async function mount() {
+async function mount(role = 'user') {
   const result = render(<QueryClientProvider client={client}><MemoryRouter><Routes>
-    <Route element={<Outlet context={{ user: { id: 'alice', username: 'Alice', role: 'user' } }} />}>
+    <Route element={<Outlet context={{ user: { id: 'alice', username: 'Alice', role } }} />}>
       <Route path="/" element={<ChatOverlay />} />
     </Route>
   </Routes></MemoryRouter></QueryClientProvider>);
@@ -87,6 +87,80 @@ function history(socket: TestSocket, id = 'message-1', content = 'Existing chat 
 }
 
 describe('overlay lifecycle and navigation', () => {
+  it('shows a nearby unread dot for new unseen messages and clears it on click', async () => {
+    await mount();
+    act(() => sockets[0].open());
+    fireEvent.click(screen.getByRole('button', { name: 'Trading channel' }));
+    act(() => sockets[0].emit({ type: 'chat:message', payload: { id: 'replayed-event', userId: 'bob', username: 'Bob', channelId: 'events', content: 'Replayed event', historyReplay: true } }));
+    expect(screen.queryByRole('img', { name: 'Unread messages in Events' })).toBeNull();
+    act(() => sockets[0].emit({ type: 'chat:history', payload: { messages: [{ id: 'history-event', user_id: 'bob', username: 'Bob', channel_id: 'events', content: 'History event' }] } }));
+    act(() => sockets[0].emit({ type: 'chat:message', payload: { id: 'history-event', userId: 'bob', username: 'Bob', channelId: 'events', content: 'History event' } }));
+    expect(screen.queryByRole('img', { name: 'Unread messages in Events' })).toBeNull();
+    act(() => sockets[0].emit({ type: 'chat:message', payload: { id: 'unread-1', userId: 'bob', username: 'Bob', channelId: 'events', content: 'New event', source: 'game' } }));
+    expect(screen.getByRole('img', { name: 'Unread messages in Events' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Events channel' }));
+    expect(screen.queryByRole('img', { name: 'Unread messages in Events' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Trading channel' }));
+    act(() => sockets[0].emit({ type: 'chat:message', payload: { id: 'unread-1', userId: 'bob', username: 'Bob', channelId: 'events', content: 'New event', source: 'game' } }));
+    expect(screen.queryByRole('img', { name: 'Unread messages in Events' })).toBeNull();
+  });
+
+  it('gates cross-room messages to staff, supports muting, and purges on denial', async () => {
+    await mount('moderator');
+    act(() => sockets[0].open());
+    await waitFor(() => expect(sockets[0].sent.some(frame => frame.type === 'server:moderation:subscribe' && frame.payload.enabled)).toBe(true));
+    act(() => {
+      sockets[0].emit({ type: 'server:moderation:state', payload: { status: 'ready' } });
+      sockets[0].emit({ type: 'server:moderation:messages', payload: { historyReplay: false, messages: [{ id: 'server:r:other:1', channelId: 'server:r:other', serverDisplayId: '123', userId: 'bob', username: 'Bob', source: 'server', timestamp: '2026-09-18T12:00:00Z', content: 'Other room fixture' }] } });
+    });
+    expect(await screen.findByText('[Server · 123]')).toBeTruthy();
+    fireEvent.contextMenu(screen.getByText('[Server · 123]'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Mute this server' }));
+    expect(screen.queryByText('Other room fixture')).toBeNull();
+    act(() => window.dispatchEvent(new Event('fcm-subtab-settings')));
+    fireEvent.click(screen.getByRole('button', { name: /^Unmute$/ }));
+    expect(screen.getByText('Other room fixture')).toBeTruthy();
+    act(() => sockets[0].emit({ type: 'server:moderation:state', payload: { status: 'denied' } }));
+    expect(screen.queryByText('Other room fixture')).toBeNull();
+  });
+
+  it('ignores privileged rows for regular users even if a malformed server sends them', async () => {
+    await mount();
+    act(() => { sockets[0].open();
+      sockets[0].emit({ type: 'server:moderation:state', payload: { status: 'ready' } });
+      sockets[0].emit({ type: 'server:moderation:messages', payload: { messages: [{ id: 'server:r:other:1', channelId: 'server:r:other', serverDisplayId: '123', username: 'Bob', source: 'server', timestamp: '2026-09-18', content: 'Unauthorized fixture' }] } });
+    });
+    expect(screen.queryByText('Unauthorized fixture')).toBeNull();
+  });
+
+  it('keeps an older Server history page visible even when the live buffer is full', async () => {
+    await mount('admin');
+    act(() => { sockets[0].open(); sockets[0].emit({ type: 'server:moderation:state', payload: { status: 'ready' } });
+      sockets[0].emit({ type: 'server:moderation:messages', payload: { historyReplay: false, messages: Array.from({ length: 500 }, (_, i) => ({
+        id: `server:r:live:${i}`, channelId: 'server:r:live', serverDisplayId: '1', username: 'Bob', source: 'server', timestamp: '2026-09-18T12:00:00Z', content: `Live ${i}`,
+      })) } });
+      sockets[0].emit({ type: 'server:moderation:messages', payload: { historyReplay: true, hasMore: false, nextCursor: null, messages: [{
+        id: 'server:r:old:1', channelId: 'server:r:old', serverDisplayId: '2', username: 'Bob', source: 'server', timestamp: '2026-09-17T12:00:00Z', content: 'Older room page is visible',
+      }] } });
+    });
+    expect(await screen.findByText('Older room page is visible')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Refresh Server history' })).toBeTruthy();
+  });
+
+  it('renders Discord emojis and retries the media host before a readable label', async () => {
+    await mount();
+    act(() => { sockets[0].open(); history(sockets[0], 'emoji-message', '<a:Confused:1509625415726006313> <:Birthdaycake:1509631843207614626>'); });
+    const animated = await screen.findByAltText(':Confused:');
+    const birthday = screen.getByAltText(':Birthdaycake:');
+    expect(animated.getAttribute('src')).toBe('https://cdn.discordapp.com/emojis/1509625415726006313.webp?animated=true');
+    expect(birthday.getAttribute('src')).toBe('https://cdn.discordapp.com/emojis/1509631843207614626.png');
+    fireEvent.error(animated);
+    expect(animated.getAttribute('src')).toBe('https://media.discordapp.net/emojis/1509625415726006313.webp?animated=true');
+    fireEvent.error(animated);
+    expect(screen.getByText(':Confused:').tagName).toBe('SPAN');
+    expect(screen.queryByText(/<a:Confused:/)).toBeNull();
+  });
+
   it('does not restart a handshake for repeated visibility notifications', async () => {
     await mount();
     act(() => gameState(true));
@@ -197,6 +271,10 @@ describe('overlay lifecycle and navigation', () => {
     const list = last.closest('.fcm-scrollbar')!;
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    // A resize/programmatic scroll must not request older history by itself.
+    fireEvent.scroll(list);
+    expect(socket.sent.filter(frame => frame.type === 'chat:history' && frame.payload.offset === 300)).toHaveLength(0);
+    fireEvent.wheel(list, { deltaY: -100 });
     fireEvent.scroll(list);
     const lazyRequests = () => socket.sent.filter(frame => frame.type === 'chat:history' && frame.payload.offset === 300);
     expect(lazyRequests()).toHaveLength(1);

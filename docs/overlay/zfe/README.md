@@ -234,18 +234,12 @@ The shipped key map is `openKey=INSERT`, `channelNextKey=NextPage`, `channelPrev
 `hideKey=DELETE`. Insert opens chat by
 default; Enter sends a non-empty draft and Escape cancels. Page Up/Down switch channels while idle
 or typing. Up/Down selects a message row and paints a bounded highlight. The configured link key
-(Enter by default) activates the selected row's first validated HTTP(S) URL. Ruffle verifies the
-selection and activation path, but Fallout's GFx host did not open the operating-system browser
-through `getURL` during in-game acceptance. Shipping browser launch therefore requires a future,
-sanctioned native ZFE/xScal URL-opening capability; it must not be routed through the Electron
-overlay or a synchronous relay call. The HUD abbreviates
-URLs to `host/...` but retains the full target; Discord channel entities and scheduled events carry
-their native URLs in the existing capability-gated HUD transport. The SWF gains no independent
-network transport; browser navigation is confined to already validated HTTP(S) targets.
-Ordinary HTTP(S) URLs embedded in message text follow the same behavior, including messages that
-also contain bundled emoji; when several links exist, the action opens the first one. Link
-activation is accepted only while `openKey` owns a visible editor and a link row is selected;
-before OpenChat, the same physical key remains a normal Fallout control.
+(Enter by default) activates the selected row's first HTTP(S) URL through the
+capability-gated ZFE browser-v1 service. Full URLs remain literal and selectable; ZFE accepts
+only validated HTTPS targets. No generic Flash, Electron, relay or alternate-provider launcher
+is used. Unsupported providers retain readable links. See [browser links and site allowances](browser-links.md)
+for configuration, request lifecycle, native acceptance limits and the xScal maintainer proposal.
+Activation requires the visible editor and a selected link; incoming messages never open links.
 The highlight color is independently configurable as `Selected message` in F11 → Customize →
 Colors or as `selectedRowColor` in `FCMChat.ini`; it persists through ZFE storage and the xScal
 device-scoped layout relay.
@@ -421,3 +415,15 @@ existing `FCMHUD/1;` metadata carrier, with the confirmed room in `h`. Both ZFE 
 xScal use the same validation; authentication and world-exit gates are unchanged.
 See [Server room continuity](../../realtime/server-room-continuity.md) for the
 backend/overlay/HUD rollout order, tests and native-acceptance limitation.
+
+## Staff Server labels (local candidate)
+
+The visible HUD uses its existing server-authoritative moderation permission
+snapshot to label its own confirmed room **Your server** for staff. Regular users
+still see **Server**, without a numeric ID. This applies to feed tags, sub-tabs,
+loader channel choices and empty-feed text. Permission changes rerender the labels.
+No cross-room subscription, overlay authentication dependency, provider fork or
+native room-assignment change is introduced. Numeric labels for other rooms and
+room muting are overlay-only. Pure config tests and both delayed-auth Ruffle provider
+scenarios cover regular → staff → revoked labeling; native game acceptance of this
+candidate remains pending, independently of earlier released builds.

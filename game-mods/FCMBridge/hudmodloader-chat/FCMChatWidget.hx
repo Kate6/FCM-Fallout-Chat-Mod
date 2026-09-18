@@ -595,6 +595,7 @@ class FCMChatWidget extends MovieClip {
         if (_disposed) return;
         zfeLog("info", "lifecycle", "widget shutdown");
         _disposed = true;
+        stopBrowser();
 
         // Mark ownership lost before EndTextEdit: some loader builds invoke the cancel
         // callback synchronously, and that callback must not submit the draft or reopen
@@ -947,7 +948,7 @@ class FCMChatWidget extends MovieClip {
         _feedLayer.x = _logTf.x;
         _feedLayer.y = _logTf.y;
         _feedLayer.mouseEnabled = true;
-        _feedLayer.mouseChildren = false;
+        _feedLayer.mouseChildren = true; // Link fields retain selection/copy fallback.
         _feedLayer.scrollRect = new Rectangle(0, 0, _logTf.width, _logTf.height);
         _feedLayer.visible = false;
         _feedContentLayer = new Sprite();
@@ -1003,6 +1004,10 @@ class FCMChatWidget extends MovieClip {
             '<font face="' + FONT_BOLD + '" size="13" color="' + hx(_cfg.tabActiveColor) + '"><b>FALLOUT 76</b></font>';
     }
 
+    function channelTabLabel(index:Int):String {
+        return CHAN_SLUGS[index] == "server" && _canModerate ? "YOUR SERVER" : CHAN_NAMES[index];
+    }
+
     function renderSubTabs():Void {
         if (_subTf == null) return;
         // Borderless text strip (no boxes). Sub-tabs use the HEADER text colors (same as the
@@ -1014,7 +1019,7 @@ class FCMChatWidget extends MovieClip {
         var offset:Int = 0;
         for (si in tabOrder()) {
             if (labels.length > 0) { labels.push("  "); offset += 2; }
-            var label = CHAN_NAMES[si];
+            var label = channelTabLabel(si);
             labels.push(label);
             ranges.push({start:offset, end:offset + label.length, active:si == _chanIdx});
             offset += label.length;
@@ -1255,7 +1260,7 @@ class FCMChatWidget extends MovieClip {
             }
             // Top-level menu — channel entries in display order (SERVER included in-world).
             for (si in tabOrder()) {
-                Reflect.callMethod(_hudTools, add, ["chan" + si, CHAN_NAMES[si], true, false, MENU_ACTION_TIMEOUT_MS]);
+                Reflect.callMethod(_hudTools, add, ["chan" + si, channelTabLabel(si), true, false, MENU_ACTION_TIMEOUT_MS]);
             }
             Reflect.callMethod(_hudTools, add, ["scrollbottom", "Scroll to newest", true, false, MENU_ACTION_TIMEOUT_MS]);
             Reflect.callMethod(_hudTools, add, ["hidechat", "Hide chat", true, false, MENU_ACTION_TIMEOUT_MS]);
@@ -1582,6 +1587,7 @@ class FCMChatWidget extends MovieClip {
             zfeLog("info", "hide", "hide ignored while editor owns input");
             return;
         }
+        stopBrowser();
         this.visible = false;
         _hidden = true;
         stopAutoHideTimer();
@@ -2123,6 +2129,7 @@ class FCMChatWidget extends MovieClip {
     // numChildren/getChildAt (Scaleform VM crash, rule #9). buildPanel re-adds everything
     // and re-applies x/y from _cfg.
     function rebuildPanel():Void {
+        stopBrowser();
         if (_disposed) return;
         cancelPendingRender();
         if (_feedLayer != null) {
@@ -2787,7 +2794,8 @@ class FCMChatWidget extends MovieClip {
         _inputOpen = false;
         clearNavigationLatches();
         setPrompt(idlePrompt());
-        var s:String = (text == null) ? "" : Std.string(text);
+        if (text == null) return; // Cancellation is never link activation.
+        var s:String = Std.string(text);
         handleSubmittedText(s);
     }
 
@@ -2987,22 +2995,53 @@ class FCMChatWidget extends MovieClip {
         sendMessage(s);
     }
 
+    var _browser:FcmBrowser = null;
+    var _browserTimer:Timer = null;
+
+    function stopBrowser():Void {
+        if (_browserTimer != null) { _browserTimer.stop(); _browserTimer = null; }
+        if (_browser != null) { _browser.cancel(); _browser = null; }
+    }
+
+    function browserPrompt():Void {
+        if (_browser == null) return;
+        var text = switch (_browser.state) {
+            case "handed_off": "Browser handoff accepted";
+            case "accepted", "pending_confirmation": "Browser request awaiting ZFE";
+            case "launching": "Browser handoff in progress";
+            case "launch_unknown": "Browser outcome unknown; no automatic retry";
+            case "denied", "cancelled", "expired": "Browser request closed";
+            default: "Browser link unavailable; the URL remains in chat";
+        };
+        setPrompt(text);
+    }
+
     function activateSelectedLink():Void {
         if (_selectedRowIndex < 0 || _selectedRowIndex >= _feedRows.length) return;
         var url:String = _feedRows[_selectedRowIndex].linkUrl;
-        if (!FcmLink.validHttpUrl(url)) {
-            setPrompt("Selected message has no link");
+        if (!FcmLink.validHttpUrl(url)) return;
+        if (_browser != null && _browser.pending()) return;
+        stopBrowser();
+        if (_api == null || _api.provider != FcmNativeApi.ZFE) {
+            setPrompt("Browser links unavailable on this provider; the URL remains in chat");
             return;
         }
-        try {
-            // GFx owns this user-initiated navigation. Never synchronously send a
-            // relay control from Fallout's UI thread: a stalled TLS connection
-            // freezes the game and incorrectly requires a desktop client.
-            flash.Lib.getURL(new URLRequest(url), "_blank");
-            setPrompt("Opening " + FcmLink.displayUrl(url) + " in your browser...");
-        } catch (_:Dynamic) {
-            setPrompt("Could not open link in your browser");
-        }
+        // Capture the owning bridge. Never route a pending request through a replacement.
+        var owner = _api;
+        _browser = new FcmBrowser(function(verb, payload) { return owner.call(verb, payload); });
+        _browser.activate(url, flash.Lib.getTimer());
+        browserPrompt();
+        if (!_browser.pending()) return;
+        _browserTimer = new Timer(250);
+        _browserTimer.addEventListener(TimerEvent.TIMER, function(_) {
+            if (_disposed || _api != owner) { stopBrowser(); return; }
+            _browser.tick(flash.Lib.getTimer());
+            browserPrompt();
+            if (!_browser.pending() && _browserTimer != null) {
+                _browserTimer.stop(); _browserTimer = null;
+            }
+        });
+        _browserTimer.start();
     }
 
     function selectedRowHasLink():Bool {
@@ -3012,9 +3051,10 @@ class FCMChatWidget extends MovieClip {
 
     function activateSelectedLinkFromOpenInput():Void {
         if (!_inputOpen || !selectedRowHasLink()) return;
+        activateSelectedLink();
         if (_nativeInput) closeInputNative();
         else closeInputSharedHudTools("selected link activation");
-        activateSelectedLink();
+        browserPrompt();
     }
 
     // =========================================================================
@@ -3553,6 +3593,7 @@ class FCMChatWidget extends MovieClip {
     function tryFindZfe():Void {
         if (_disposed) return;
         _zfeSearchTries++;
+        stopBrowser();
         _api = FcmNativeApi.discover(this);
         if (_api != null) {
             onZfeFound();
@@ -3651,6 +3692,7 @@ class FCMChatWidget extends MovieClip {
 
     function startConnect():Void {
         if (_disposed) return;
+        stopBrowser();
         resetFalloutIdentity();
         if (_api == null) return;
         _connectAttempts++;
@@ -3748,6 +3790,7 @@ class FCMChatWidget extends MovieClip {
      */
     function forceReconnect(reason:String):Void {
         if (_disposed) return;
+        stopBrowser();
         zfeLog("warn", "connect", "reconnecting: " + reason);
         resetFalloutIdentity();
         clearNavigationLatches();
@@ -3863,6 +3906,7 @@ class FCMChatWidget extends MovieClip {
     }
 
     function scheduleConnectRetry():Void {
+        stopBrowser();
         if (_disposed) return;
         if (_connectTimer != null) return;
         _connectTimer = new Timer(_connectDelay, 1);
@@ -3952,6 +3996,7 @@ class FCMChatWidget extends MovieClip {
             if (_authState != prevAuth || _canModerate != prevCanModerate) {
                 zfeLog("info", "auth", "authState=" + _authState + " moderation=" + (_canModerate ? "yes" : "no"));
                 renderRecords();
+                renderSubTabs();
             }
             if (authDecision == FcmAuthFlow.AUTHENTICATED) {
                 // xScal may complete its worker-side handshake after the initial bounded
@@ -5572,15 +5617,16 @@ class FCMChatWidget extends MovieClip {
         var rawUser:String = rec.user == null ? "" : rec.user;
         var sourceBody:String = rec.body == null ? "" : rec.body;
         var rawBody:String = displayBody != null ? displayBody
-            : FcmLink.abbreviateBody(FcmConfig.normalizeDiscordEmojiMarkup(sourceBody));
+            : FcmConfig.normalizeDiscordEmojiMarkup(sourceBody);
         var rowLink:String = rec.linkUrl != null && FcmLink.validHttpUrl(rec.linkUrl)
             ? rec.linkUrl : FcmLink.firstUrl(sourceBody);
+        if (rowLink.length > 0 && rawBody.indexOf(rowLink) < 0) rawBody += "\n" + rowLink;
         var queuedSend = rec.pending ? _outbox.get(rec.localSendId) : null;
         var deliveryStatus:String = queuedSend == null ? ""
             : " [" + (queuedSend.attempts > 0 ? "sending" : "queued") + "]";
         var rawTag:String = rec.tag == null ? "" : rec.tag;
         var nameColor:Int = FcmConfig.parseHexColor(rec.color, _cfg.senderColor);
-        var channelLabel:String = FcmConfig.chanLabel(rec.channel);
+        var channelLabel:String = FcmConfig.chanLabel(rec.channel, _canModerate);
         var moderationText:String = "";
         if (_canModerate && rec.messageId != null && rec.messageId.length >= 8
                 && rec.senderUserId != null && rec.senderUserId.length > 0)
@@ -5599,6 +5645,9 @@ class FCMChatWidget extends MovieClip {
         _renderStep = "native-wrapped-text";
         var contentTf:TextField = makeFeedTextField("", viewportWidth, fs + 8, true);
         contentTf.text = runs.text;
+        contentTf.selectable = rowLink.length > 0;
+        contentTf.mouseEnabled = rowLink.length > 0;
+        contentTf.tabEnabled = rowLink.length > 0;
         row.addChild(contentTf);
         _renderStep = "native-text-colors";
         // Set the whole row to the theme first, then override only named ranges.
@@ -5639,7 +5688,7 @@ class FCMChatWidget extends MovieClip {
             } catch (_:Dynamic) {}
         }
         row.mouseEnabled = false;
-        row.mouseChildren = false;
+        row.mouseChildren = rowLink.length > 0;
         return { view: row, contentY: 0, height: Math.max(contentHeight, lineHeight), textField: contentTf,
             bodyOffset: runs.nameEnd + 2, linkUrl: rowLink };
     }
@@ -6010,7 +6059,7 @@ class FCMChatWidget extends MovieClip {
         zfeLog("info", "render", "records=" + _records.length + " shown=" + visibleRecords.length
             + " layout=row-local tags=enabled tab=" + CHAN_SLUGS[_chanIdx]);
         if (visibleRecords.length == 0) {
-            setLogText("No messages in " + CHAN_NAMES[_chanIdx] + " yet"); return;
+            setLogText("No messages in " + channelTabLabel(_chanIdx) + " yet"); return;
         }
 
         var viewportWidth:Float = _logTf.width;
@@ -6172,7 +6221,7 @@ class FCMChatWidget extends MovieClip {
             for (rec in _records) {
                 if ((!_connected && _outboxIdentity.length == 0) || _needsLink) break;
                 if (!FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], rec.channel)) continue;
-                fallback.add("[" + FcmConfig.chanLabel(rec.channel) + "] " + rec.user + ": " + rec.body + "\n");
+                fallback.add("[" + FcmConfig.chanLabel(rec.channel, _canModerate) + "] " + rec.user + ": " + rec.body + "\n");
             }
             _logTf.text = !_connected && _outboxIdentity.length == 0 ? "connecting..."
                 : (_needsLink ? "Link your account to chat" : fallback.toString());
@@ -6279,7 +6328,7 @@ class FCMChatWidget extends MovieClip {
         applyFeedScroll();
         applySelectedRowStyle();
         setPrompt(selected.linkUrl != null && FcmLink.validHttpUrl(selected.linkUrl)
-            ? "Selected link - press Enter to open " + FcmLink.displayUrl(selected.linkUrl)
+            ? "Selected link - activate to open " + FcmConfig.htmlEscape(selected.linkUrl)
             : "Selected message - no link");
     }
 

@@ -17,7 +17,7 @@ describe('renderer/native collapse reconciliation', () => {
     }
   });
 
-  it.each([false, true])('undoes rejected renderer collapse without stealing focus (full hide=%s)', (fullAutoHide) => {
+  it.each([false, true])('honors portable in-game collapse without forcing a wake (full hide=%s)', (fullAutoHide) => {
     const events = [];
     let handler;
     const start = source.indexOf("ipcMain.on('overlay:collapse'");
@@ -27,12 +27,12 @@ describe('renderer/native collapse reconciliation', () => {
       overlayCore: { shouldSuppressIdleCollapse: () => true },
       IS_PORTABLE: true, gameRunning: true, diag() {},
       sendToRenderer: (...args) => events.push(args),
-      collapseToHeader() { throw new Error('must not resize'); },
+      collapseToHeader: (...args) => events.push(['collapse', ...args]),
     });
     for (let i = 0; i < 20; i++) {
       events.length = 0;
       handler({}, { headerHeight: 40, fullAutoHide });
-      expect(events).toEqual([['overlay:force-expand', true]]);
+      expect(events).toEqual([['collapse', 40, fullAutoHide]]);
     }
   });
 });

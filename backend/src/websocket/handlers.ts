@@ -61,6 +61,9 @@ import { notifyRelayLiveChatMessage } from '../services/relay/relayLiveFanout';
 import { BridgeConnection } from './bridgeConnection';
 import { LocalExportBridge } from '../services/relay/localExportBridge';
 import { SERVER_EVENTS_CHANNEL, type ServerEventEnvelope } from '../services/relay/serverChat';
+import { ServerModerationConnection } from './serverModerationConnection';
+import { authorizeServerModeration } from './serverModerationAuthorization';
+import { moderationHistory, moderationRow, serverDisplayId } from '../services/relay/serverModeration';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -232,6 +235,7 @@ const WS_CLOSE_BANNED = 4002;
 const WS_CLOSE_OUTDATED_BUILD = 4003;
 
 interface ClientEntry {
+  serverModeration?: ServerModerationConnection;
   bridge?: BridgeConnection;
   ws: WebSocket;
   userId: string;
@@ -730,6 +734,10 @@ function receiveBridgePubSub(message: string): void {
     if (!envelope || !['msg', 'rebind'].includes(envelope.kind)) return;
     for (const client of clients.values()) {
       if (client.ws.readyState === WebSocket.OPEN) void client.bridge?.receive(envelope);
+      if (client.ws.readyState === WebSocket.OPEN && envelope.kind === 'msg') {
+        void client.serverModeration?.receive(async () =>
+          moderationRow(envelope.worldId, await serverDisplayId(envelope.worldId), envelope.event));
+      }
     }
   } catch (err) { logger.warn({ err }, 'Invalid server bridge event'); }
 }
@@ -1639,6 +1647,19 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
   } catch { /* default 'user' */ }
 
   clients.get(token)?.bridge?.dispose();
+  clients.get(token)?.serverModeration?.dispose();
+  const serverModeration = new ServerModerationConnection(frame => {
+    if (clients.get(token)?.ws === ws && ws.readyState === WebSocket.OPEN) safeSend(ws, JSON.stringify(frame), 'server-moderation');
+  }, {
+    history: moderationHistory,
+    authorize: () => authorizeServerModeration(user.id, !!webTicketUserId, {
+      current: () => ws.readyState === WebSocket.OPEN && clients.get(token)?.ws === ws,
+      session: async () => (await getRedisClient()).get(`session:${token}`),
+      account: () => prisma.user.findUnique({ where: { id: user.id }, select: { discordId: true, isBanned: true, kickedUntil: true } }),
+      // Privileged reads bypass the role cache: revocation affects the next delivery.
+      role: async discordId => (await prisma.adminUser.findUnique({ where: { discordId }, select: { role: true } }))?.role ?? null,
+    }),
+  });
   const serverBridge = new BridgeConnection(user.id, frame => {
     if (ws.readyState === WebSocket.OPEN && clients.get(token)?.ws === ws) {
       safeSend(ws, JSON.stringify(frame), `bridge:${user.id}`);
@@ -1649,6 +1670,7 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
     () => clients.get(token)?.ws === ws && clients.get(token)?.bridgeInGame === true));
   clients.set(token, {
     ws, userId: user.id, username: user.username, displayName, bridge: serverBridge,
+    serverModeration,
     isMuted: user.isMuted,
     blockedIds: initialBlockedIds,
     inGame: false,
@@ -2154,6 +2176,20 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
             ws.send(JSON.stringify({ type: 'presence:stats', payload: { requestId, totalOnline, ...server } }));
           }
         } finally { presenceStatsPending = false; }
+        break;
+      }
+      case 'server:moderation:subscribe': {
+        if (webTicketUserId || clients.get(token)?.ws !== ws || typeof frame.payload?.enabled !== 'boolean') break;
+        if (!frame.payload.enabled || await checkWsRateLimitBucket('server-moderation', user.id, 4, 30)) {
+          await serverModeration.subscribe(frame.payload.enabled);
+        }
+        break;
+      }
+      case 'server:moderation:history': {
+        if (webTicketUserId || clients.get(token)?.ws !== ws) break;
+        if (await checkWsRateLimitBucket('server-moderation-history', user.id, 6, 30)) {
+          await serverModeration.history(frame.payload?.cursor);
+        }
         break;
       }
       case 'bridge:watch': {
@@ -2852,9 +2888,11 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
   // interval fires. The ws.on('close') handler also clears this interval, so
   // cleanup is robust against both normal and error-path disconnects.
   const heartbeat = setInterval(() => {
+    void serverModeration.validate();
     if (ws.readyState !== WebSocket.OPEN) {
       clearInterval(heartbeat);
       serverBridge.dispose();
+      serverModeration.dispose();
       // Only evict if WE are still the current socket for this token. A newer
       // socket may have replaced us in the map (same session token reconnect) —
       // deleting by token blindly would evict the LIVE socket. See the close
@@ -2864,11 +2902,12 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
   }, 30_000);
   // Register an error handler that guarantees the interval is cleared if the
   // socket errors before ws.on('close') fires.
-  ws.once('error', () => { clearInterval(heartbeat); serverBridge.dispose(); });
+  ws.once('error', () => { clearInterval(heartbeat); serverBridge.dispose(); serverModeration.dispose(); });
 
   ws.on('close', () => {
     clearInterval(heartbeat);
     serverBridge.dispose();
+    serverModeration.dispose();
     // ── Supersession guard (token-keyed clients map) ───────────────────────────
     // The clients map is keyed by SESSION TOKEN, and the overlay reconnects with
     // the SAME token across WS flaps (the desktop relay proxy reuses sessionToken

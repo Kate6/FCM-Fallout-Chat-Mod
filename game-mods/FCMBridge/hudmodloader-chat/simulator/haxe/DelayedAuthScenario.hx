@@ -39,6 +39,14 @@ class DelayedAuthScenario {
                 check("confirmed Server tab is attached and visible", widget._subTf != null
                     && widget._subTf.parent == widget && widget._subTf.visible
                     && widget._subTf.text.indexOf("SERVER") >= 0 && MockXscal.serverControlCount > 0);
+                widget._canModerate = true;
+                widget.renderSubTabs();
+                check("staff own Server label", widget._subTf.text.indexOf("YOUR SERVER") >= 0);
+                widget._canModerate = false;
+                widget.renderSubTabs();
+                check("revoked regular Server label", widget._subTf.text.indexOf("YOUR SERVER") < 0
+                    && widget._subTf.text.indexOf("SERVER") >= 0);
+                flash.Lib.trace("SERVER-LABEL PASS " + provider + " regular=Server staff=Your-server revoked=Server");
                 timer.stop();
                 flash.Lib.trace("DELAYED-AUTH PASS " + provider + " automatic=auth,roster,tab reconnects=0 user-sends=0");
             } catch (error:Dynamic) {

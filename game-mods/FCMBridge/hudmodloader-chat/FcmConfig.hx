@@ -502,7 +502,7 @@ class FcmConfig {
      * Proper-cased channel name for a slug (CAP-012, D-09). Known slugs map to their
      * canonical label; an unknown slug falls back to a Title-Case of itself.
      */
-    public static function chanLabel(slug:String):String {
+    public static function chanLabel(slug:String, canModerate:Bool = false):String {
         if (slug == null) return "";
         var s:String = StringTools.trim(slug);
         if (s.length == 0) return "";
@@ -512,7 +512,7 @@ class FcmConfig {
             case "events":  return "Events";
             case "infests": return "Infests";
             case "raids":   return "Raids";
-            case "server":  return "Server";
+            case "server":  return canModerate ? "Your server" : "Server";
         }
         var lo:String = s.toLowerCase();
         return lo.charAt(0).toUpperCase() + lo.substr(1);

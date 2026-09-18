@@ -42,7 +42,9 @@ setting and ZFE's native key watcher aligned. The complete shipped key map is:
 
 `scrollBottomKey` is intentionally blank, so Home/End remain game controls. `activateLinkKey`
 opens a selected link only after OpenChat owns the editor and defaults to Enter; it is inert during
-ordinary gameplay. `hideKey=DELETE` hides the HUD while input is idle; `/hide` and the F11 menu
+ordinary gameplay. Opening requires ZFE browser-v1 and a validated HTTPS destination;
+unsupported providers keep the full URL readable and selectable. ZFE owns consent.
+`hideKey=DELETE` hides the HUD while input is idle; `/hide` and the F11 menu
 remain available. Enter still sends non-empty drafts and Escape cancels. Delete always edits text while input is
 open. The default `hideKey=DELETE` cannot hide or close an active editor;
 the hide binding applies again after input closes. For ZFE, the widget synchronizes the native

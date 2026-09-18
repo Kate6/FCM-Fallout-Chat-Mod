@@ -24,7 +24,6 @@ const {
   canShowOverlay,
   showModeFor,
   shouldExpandOnGameLaunch,
-  shouldSuppressIdleCollapse,
   ACTIVATING_REASONS,
 } = core;
 
@@ -39,15 +38,6 @@ describe('shouldExpandOnGameLaunch', () => {
     [true, false, false],
   ])('does not expand for gameRunning=%s wasRunning=%s collapsed=%s', (gameRunning, wasRunning, collapsed) => {
     expect(shouldExpandOnGameLaunch({ gameRunning, wasRunning, collapsed })).toBe(false);
-  });
-});
-
-describe('shouldSuppressIdleCollapse', () => {
-  it('keeps portable chat visible while the game is running', () => {
-    expect(shouldSuppressIdleCollapse({ portable: true, gameRunning: true })).toBe(true);
-  });
-  it.each([[false, true], [true, false], [false, false]])('does not suppress for portable=%s gameRunning=%s', (portable, gameRunning) => {
-    expect(shouldSuppressIdleCollapse({ portable, gameRunning })).toBe(false);
   });
 });
 

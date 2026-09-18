@@ -260,10 +260,6 @@ function shouldExpandOnGameLaunch({ gameRunning, wasRunning, collapsed } = {}) {
   return gameRunning === true && wasRunning !== true && collapsed === true;
 }
 
-function shouldSuppressIdleCollapse({ portable, gameRunning } = {}) {
-  return portable === true && gameRunning === true;
-}
-
 // Hysteresis reducer for focus, mirroring nextPresenceState's accumulator (found →
 // candidate/stableCount → commit after `need` consecutive samples) but committing
 // `gameFocused`. Game-not-running commits false instantly, no debounce. There's no
@@ -1369,7 +1365,6 @@ module.exports = {
   shouldIgnoreMouse,
   nextPresenceState,
   shouldExpandOnGameLaunch,
-  shouldSuppressIdleCollapse,
   nextGameFocusState,
   shouldHidePanelInGame,
   buildPanelHidingSaveScript,

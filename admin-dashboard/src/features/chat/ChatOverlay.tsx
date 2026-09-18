@@ -3,6 +3,7 @@ import { isOlderHistoryBatch } from './historyPagination';
 import { loadPartyDirectory, readPublicPartyDirectory, partyRecoveryInterval } from './partyAvailability';
 import { FONT_OPTIONS, FONT_SAMPLE, normalizeFontId, resolveFontFamily, OVERLAY_SETTINGS_EVENT, type FontId } from './overlayFonts';
 import { INACTIVE_BRIDGE, readBridgeState, mergeBridgeRows, clearBridgeRows, bridgeSendPayload, type BridgeState } from './bridgeFeed';
+import { serverRoomLabel, readModeratorRows, mergeModeratorRows, normalizeMutedRooms, readMutedRoomPreferences, shouldMarkChannelUnread } from './serverModeration';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 // Notification ping (#437). Imported as a module asset so Vite fingerprints it
@@ -33,6 +34,7 @@ import { supporterBadge, supporterStarColor, SUPPORTER_STAR_GLYPH } from './supp
 import { nameEffectMotion } from './nameEffectMotion';
 import { observeTabLayout } from './observeTabLayout';
 import { observeNameMotion } from './observeNameMotion';
+import { observeScrollIntent } from './observeScrollIntent';
 import { defaultTabTransition, emptyTabPreferences, fallbackTab, hideTab, moveTab, orderedTabs, replacementTab, tabKey, tabPreferenceScope } from './subtabPreferences';
 import { useSubtabPreferences } from './useSubtabPreferences';
 import { OverlayHeaderControls } from './OverlayHeaderControls';
@@ -1621,6 +1623,7 @@ interface ScheduledEventMetadata {
 type ChatMessageMetadata = PartyInviteMetadata | NukeCodesMetadata | ServerStatusMetadata | CampItemMetadata | CardShareMetadata | WikiShareMetadata | GiveawayMetadata | GiveawayWinnerMetadata | GiveawayListMetadata | GiveawayHistoryMetadata | ScheduledEventMetadata | { type?: string; [k: string]: unknown } | null;
 
 interface ChatMessage {
+  serverDisplayId?: string;
   id: string;
   content: string;
   username: string;
@@ -2196,6 +2199,7 @@ export function splitParts(content: string, entities: readonly ChatEntity[] = []
     if (s.start > pos) parts.push({ text: content.slice(pos, s.start), kind: 'plain' });
     parts.push({
       text: content.slice(s.start, s.end), kind: s.kind, url: s.url, emojiName: s.emojiName,
+      ...(s.fallbackUrl ? { fallbackUrl: s.fallbackUrl } : {}),
       ...(s.discordId ? { discordId: s.discordId } : {}),
     });
     pos = s.end;
@@ -3765,6 +3769,14 @@ export default function ChatOverlay() {
 
   // ── Chat state ────────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [moderatorRows, setModeratorRows] = useState<ChatMessage[]>([]);
+  const [moderatorHistoryPage, setModeratorHistoryPage] = useState<ChatMessage[]>([]);
+  const [moderatorCursor, setModeratorCursor] = useState<string | null>(null);
+  const [moderatorUnavailable, setModeratorUnavailable] = useState(false);
+  const [unreadChannels, setUnreadChannels] = useState<Record<string, boolean>>({});
+  const [serverMuteMenu, setServerMuteMenu] = useState<{ channelId: string; label: string; x: number; y: number } | null>(null);
+  const moderatorAccessRef = useRef(false);
+  const unreadSeenRef = useRef(new Set<string>());
   const [inputText, setInputText] = useState('');
   const [connected, setConnected] = useState(false);
   // Mirror of `connected` for callbacks with empty deps (e.g. the onVisibility
@@ -4150,7 +4162,7 @@ export default function ChatOverlay() {
   // components must NOT also poke the flag, or they'd clobber this on unmount.)
   // Declared after all modal-state hooks so none hit the const TDZ.
   const anyOverlayUiOpen = !!(
-    ctxMenu || partyTabCtx || subtabMenu || subtabSettings || tabDrag || memberCtx || partyOverflowCtx || partyDescriptionEditor ||
+    ctxMenu || partyTabCtx || subtabMenu || serverMuteMenu || subtabSettings || tabDrag || memberCtx || partyOverflowCtx || partyDescriptionEditor ||
     inviteModalFor || muteModalFor || kickModalFor || profileModalFor ||
     modModal || leaveConfirmFor || partyLimitEditor ||
     createPartyOpen || settingsOpen || blockManagerOpen ||
@@ -4539,10 +4551,10 @@ export default function ChatOverlay() {
     if (!staticChannels || !overlayShell || isPublicMode || bridgeState.status !== 'ready') return staticChannels;
     const parent = staticChannels.find(c => c.name.toLowerCase() === 'fallout 76') ?? staticChannels[0];
     return staticChannels.map(c => c !== parent ? c : { ...c, children: [...(c.children ?? []), {
-      id: bridgeState.channelId, name: 'Server', color: c.color, parentId: c.id,
+      id: bridgeState.channelId, name: isMod ? 'Your server' : 'Server', color: c.color, parentId: c.id,
       allowGifs: false, allowEmojis: true,
     }] });
-  }, [staticChannels, bridgeState, overlayShell, isPublicMode]);
+  }, [staticChannels, bridgeState, overlayShell, isPublicMode, isMod]);
   useEffect(() => { refetchChannelsRef.current = () => refetchChannels(); }, [refetchChannels]);
 
   // Live app version — the LATEST published release from GET /api/version, NOT the
@@ -4985,6 +4997,43 @@ export default function ChatOverlay() {
   }, [inputText, allCommands]);
 
   const preferenceScope = overlayShell ? tabPreferenceScope(overlayShell.relayBase, user?.id) : null;
+  const [roomMutes, setRoomMutes] = useState<{ scope: string | null; ids: string[]; labels: Record<string, string> }>({ scope: null, ids: [], labels: {} });
+  const mutedServerRooms = roomMutes.scope === preferenceScope ? roomMutes.ids : [];
+  const moderationEnabled = !!overlayShell && !isPublicMode && isMod;
+  const liveViewRef = useRef({ visible: true, muted: [] as string[], enabled: false });
+  liveViewRef.current = { visible: overlayVisible && !shellCollapsed, muted: mutedServerRooms, enabled: moderationEnabled };
+  useEffect(() => {
+    let prefs = readMutedRoomPreferences(null);
+    try { if (preferenceScope) prefs = readMutedRoomPreferences(JSON.parse(localStorage.getItem(`fcm-server-mutes:${preferenceScope}`) ?? '[]')); } catch { /* malformed local preference */ }
+    setRoomMutes({ scope: preferenceScope, ...prefs });
+    setModeratorRows([]); setModeratorHistoryPage([]); setUnreadChannels({}); unreadSeenRef.current.clear(); setServerMuteMenu(null);
+  }, [preferenceScope]);
+  const toggleServerMute = (channelId: string) => {
+    if (!moderationEnabled || !preferenceScope) return;
+    const ids = normalizeMutedRooms(mutedServerRooms.includes(channelId) ? mutedServerRooms.filter(id => id !== channelId) : [...mutedServerRooms, channelId]);
+    const displayId = [...moderatorRows, ...moderatorHistoryPage].find(row => row.channelId === channelId)?.serverDisplayId;
+    const prefs = readMutedRoomPreferences({ ids, labels: { ...roomMutes.labels, ...(displayId ? { [channelId]: displayId } : {}) } });
+    setRoomMutes({ scope: preferenceScope, ...prefs });
+    try { localStorage.setItem(`fcm-server-mutes:${preferenceScope}`, JSON.stringify({ version: 1, ...prefs })); } catch { /* storage unavailable */ }
+    setUnreadChannels(prev => { const next = { ...prev }; delete next[channelId]; return next; });
+    setServerMuteMenu(null);
+  };
+  useEffect(() => {
+    if (!moderationEnabled) { moderatorAccessRef.current = false; setModeratorRows([]); setModeratorHistoryPage([]); setServerMuteMenu(null); }
+    if (connected && wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ type: 'server:moderation:subscribe', payload: { enabled: moderationEnabled } }));
+  }, [moderationEnabled, connected]);
+  const markLiveUnread = (row: { id: string; channelId: string; userId?: string }, replay = false) => {
+    if (!overlayShell || isPublicMode || !row.id || !row.channelId) return;
+    const duplicate = unreadSeenRef.current.has(row.id);
+    unreadSeenRef.current.add(row.id);
+    if (unreadSeenRef.current.size > 1500) unreadSeenRef.current.delete(unreadSeenRef.current.values().next().value!);
+    const v = viewCtxRef.current;
+    const inView = v.feedId ? row.channelId === v.feedId || v.feedChildIds.includes(row.channelId) : row.channelId === v.activeSubId;
+    if (shouldMarkChannelUnread({ self: row.userId === myUserIdRef.current, replay, duplicate,
+      muted: liveViewRef.current.muted.includes(row.channelId), visible: liveViewRef.current.visible, inView })) {
+      setUnreadChannels(prev => ({ ...prev, [row.channelId]: true }));
+    }
+  };
   const preferenceTabs = useMemo(() => (channelsRaw ?? []).flatMap(c => c.children ?? []), [channelsRaw]);
   const tabLayout = useSubtabPreferences(preferenceScope, preferenceTabs, settings.channelFilters);
   const tabLayoutRef = useRef(tabLayout);
@@ -5191,6 +5240,10 @@ export default function ChatOverlay() {
     let cancelled = false;
     let bridgeWatch: ReturnType<typeof setInterval> | undefined;
     const resetBridge = () => {
+      moderatorAccessRef.current = false;
+      setModeratorRows([]);
+      setModeratorHistoryPage([]);
+      setModeratorCursor(null); setModeratorUnavailable(false);
       clearInterval(bridgeWatch);
       bridgeStateRef.current = INACTIVE_BRIDGE;
       setBridgeState(INACTIVE_BRIDGE);
@@ -5354,6 +5407,20 @@ export default function ChatOverlay() {
             if (!isCurrent()) return;
             try {
               const frame = JSON.parse(event.data);
+              if (frame.type === 'server:moderation:state') {
+                moderatorAccessRef.current = liveViewRef.current.enabled && frame.payload?.status === 'ready';
+                setModeratorUnavailable(liveViewRef.current.enabled && frame.payload?.status === 'unavailable');
+                if (!moderatorAccessRef.current) { setModeratorRows([]); setModeratorHistoryPage([]); setModeratorCursor(null); setServerMuteMenu(null); }
+                return;
+              }
+              if (frame.type === 'server:moderation:messages') {
+                if (!liveViewRef.current.enabled || !moderatorAccessRef.current) return;
+                const rows = readModeratorRows(frame.payload?.messages);
+                if (frame.payload?.historyReplay === true) setModeratorHistoryPage(rows);
+                else setModeratorRows(prev => mergeModeratorRows(prev, rows));
+                if (frame.payload?.historyReplay === true) setModeratorCursor(frame.payload.hasMore === true && typeof frame.payload.nextCursor === 'string' ? frame.payload.nextCursor : null);
+                return;
+              }
               if (frame.type === 'bridge:state') {
                 const next = readBridgeState(frame.payload, !!overlayShell && !isPublicMode);
                 const previous = bridgeStateRef.current;
@@ -5375,6 +5442,9 @@ export default function ChatOverlay() {
                   return typeof r.id === 'string' && typeof r.channelId === 'string' && typeof r.content === 'string' && typeof r.username === 'string';
                 }) as ChatMessage[] : [];
                 setMessages(prev => bridgeStateRef.current === state ? mergeBridgeRows(prev, rows, state, frame.payload ?? {}, MESSAGE_CAP) : prev);
+                if (state.status === 'ready' && frame.payload?.bindingId === state.bindingId && frame.payload?.channelId === state.channelId) {
+                  for (const row of rows) markLiveUnread(row, frame.type === 'bridge:history' || frame.payload?.historyReplay === true);
+                }
                 return;
               }
               if (frame.type === 'chat:message') {
@@ -5425,6 +5495,7 @@ export default function ChatOverlay() {
                   starColor: frame.payload.starColor ?? null,
                 };
                 const liveCosmetics = cosmeticsFromMessage(frame.payload);
+                markLiveUnread(liveMessage, frame.payload.historyReplay === true);
                 if (liveMessage.userId && liveCosmetics) {
                   knownCosmetics.current.set(liveMessage.userId, liveCosmetics);
                 }
@@ -5584,6 +5655,7 @@ export default function ChatOverlay() {
                   const known = uid ? knownCosmetics.current.get(uid) : null;
                   return known ? withMessageCosmetics(message, known) : message;
                 });
+                for (const message of incoming) markLiveUnread(message, true);
                 if (!isPublicMode) {
                   const eventCodes = new Set(
                     incoming
@@ -6249,6 +6321,7 @@ export default function ChatOverlay() {
   const scrollPinGenerationRef = useRef(0);
   const scrollToBottom = useCallback(() => {
     const generation = ++scrollPinGenerationRef.current;
+    stickToBottomRef.current = true;
     const pin = () => {
       if (generation !== scrollPinGenerationRef.current) return;
       const cont = messagesContRef.current;
@@ -6321,31 +6394,24 @@ export default function ChatOverlay() {
     };
   }, []);
 
-  // #313: Track stick-to-bottom INTENT from real scroll events. Reading the
-  // distance HERE (as the user scrolls) is what lets the auto-scroll effect
-  // distinguish "user scrolled up to read history" from "a tall card was just
-  // appended at the bottom" — the latter inflates a post-append distance reading
-  // and used to misfire the guard. Always-on and seeded from the actual position
-  // (never assumed pinned), independent of the lazy-load top-scroll listener
-  // (which is gated off in public mode). The container is display-toggled, not
-  // unmounted, so a single mount-time attach stays valid.
+  // Browser layout/resize scroll events must not cancel bottom-follow. Only
+  // wheel, scrollbar/touch and navigation-key input on the list changes intent.
+  // Preserve that intent across hide/reveal and late images/history batches.
   useEffect(() => {
     const cont = messagesContRef.current;
     if (!cont) return;
-    const onScroll = () => {
-      stickToBottomRef.current = isNearBottom(cont.scrollHeight, cont.scrollTop, cont.clientHeight);
-      if (!stickToBottomRef.current) {
+    return observeScrollIntent(cont, {
+      isPinned: () => stickToBottomRef.current && !lazyLoadingRef.current,
+      setPinned: pinned => { stickToBottomRef.current = pinned; },
+      cancelPendingPin: () => {
         scrollPinGenerationRef.current++;
         didInitialScrollRef.current = true;
         if (initialScrollTimerRef.current !== null) {
           clearTimeout(initialScrollTimerRef.current);
           initialScrollTimerRef.current = null;
         }
-      }
-    };
-    stickToBottomRef.current = isNearBottom(cont.scrollHeight, cont.scrollTop, cont.clientHeight);
-    cont.addEventListener('scroll', onScroll, { passive: true });
-    return () => cont.removeEventListener('scroll', onScroll);
+      },
+    });
   }, []);
 
   // (a3) The typing indicator is a flexShrink:0 sibling BELOW the flex:1 message
@@ -6364,13 +6430,11 @@ export default function ChatOverlay() {
   useEffect(() => {
     const cont = messagesContRef.current;
     if (!cont) return;
-    // Generous threshold so the indicator's own height (~16px) isn't read as
-    // "scrolled up". If the user genuinely scrolled up to read history, leave them.
-    if (!isNearBottom(cont.scrollHeight, cont.scrollTop, cont.clientHeight, TYPING_INDICATOR_STICK_THRESHOLD)) return;
-    const pin = () => { const c = messagesContRef.current; if (c) c.scrollTop = c.scrollHeight; };
-    requestAnimationFrame(() => { pin(); requestAnimationFrame(pin); });
-    setTimeout(pin, 50);
-  }, [typingVisibleForScope]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Reuse intent and cancellable pin retries; post-layout distance is not
+    // evidence of a reader gesture, and a late typing retry must be cancellable.
+    if (!stickToBottomRef.current || lazyLoadingRef.current) return;
+    scrollToBottom();
+  }, [typingVisibleForScope, scrollToBottom]);
 
   // (b) Channel / sub-tab switch OR main-tab switch → land at the bottom (latest
   // message). HARD RULE: opening a channel (e.g. Fallout 76 → General, including
@@ -6411,6 +6475,7 @@ export default function ChatOverlay() {
     if (!cont || isPublicMode) return;
     const TOP_THRESHOLD = 60;
     const onScroll = () => {
+      if (stickToBottomRef.current || cont.clientHeight === 0) return;
       if (cont.scrollTop > TOP_THRESHOLD) return;
       if (lazyLoadingRef.current) return;
       const ws = wsRef.current;
@@ -7275,6 +7340,11 @@ export default function ChatOverlay() {
       for (const id of clearIds) delete next[id];
       return next;
     });
+    setUnreadChannels(prev => {
+      const next = { ...prev };
+      for (const id of feedId ? [feedId, ...feedChildIds] : [activeSubId]) delete next[id];
+      return next;
+    });
   }, [activeSubId, isMainFeedView, feedParent, activeMainId, partyView]);
 
   const visibleMessages = useMemo(() => {
@@ -7299,16 +7369,20 @@ export default function ChatOverlay() {
       const feedPartyIds = isPublicMode
         ? boundedPublicPartyIds(publicPartyIdKey)
         : joinedParties.map(p => p.id);
-      return messages
+      const combined = moderationEnabled
+        ? [...new Map([...messages, ...moderatorHistoryPage, ...moderatorRows].map(row => [row.id, row])).values()].sort((a, b) => (a.timestamp ?? '').localeCompare(b.timestamp ?? ''))
+        : messages;
+      return combined
         .filter(m =>
-          shouldShowInMainFeed(m, {
+          ((moderationEnabled && m.channelId.startsWith('server:')) || shouldShowInMainFeed(m, {
             feedParentId: feedParent.id,
             childIds,
             feedPartyIds,
             isMod,
             isPublicMode,
             mutedPartyIds: settings.mutedPartyIds,
-          }) &&
+          })) &&
+          !(moderationEnabled && mutedServerRooms.includes(m.channelId)) &&
           // Drop messages from channels the viewer hid (e.g. Trading) out of the
           // aggregated feed.
           !hiddenChannelIds.has(m.channelId) &&
@@ -7316,7 +7390,7 @@ export default function ChatOverlay() {
         );
     }
     return messages.filter(m => m.channelId === activeSubId && notBlocked(m));
-  }, [messages, activeSubId, isMainFeedView, feedParent, activeMainId, partyView, pmView, blockedIds, user?.id, joinedParties, isPublicMode, publicPartyIdKey, isMod, hiddenChannelIds, settings.mutedPartyIds, privateMessages]);
+  }, [messages, moderatorRows, moderatorHistoryPage, moderationEnabled, roomMutes, activeSubId, isMainFeedView, feedParent, activeMainId, partyView, pmView, blockedIds, user?.id, joinedParties, isPublicMode, publicPartyIdKey, isMod, hiddenChannelIds, settings.mutedPartyIds, privateMessages]);
 
   // After a mention-badge click switched channel, run the scroll once the new
   // channel's messages have rendered into the DOM (this effect re-runs whenever
@@ -7398,6 +7472,14 @@ export default function ChatOverlay() {
     }
     const i = jumpIdxRef.current % nodes.length;
     jumpIdxRef.current = i + 1;
+    // Explicit mention navigation is reading intent, unlike a layout scroll.
+    stickToBottomRef.current = false;
+    scrollPinGenerationRef.current++;
+    didInitialScrollRef.current = true;
+    if (initialScrollTimerRef.current !== null) {
+      clearTimeout(initialScrollTimerRef.current);
+      initialScrollTimerRef.current = null;
+    }
     nodes[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
     // Mark the message at this index as dismissed by its data attribute or id.
     const el = nodes[i] as HTMLElement;
@@ -9030,7 +9112,9 @@ export default function ChatOverlay() {
                 // Parity with desktop overlay: Discord-relayed → purple [Discord];
                 // server → amber [Server]; party → [PartyName]; otherwise channel
                 // name (Trading → "Trade"). System (bot) messages get no tag.
-                const { label: tagName, color: tagColor } = channelTag(msg, flattenedChannels, parties, inactiveTab, activeSubId);
+                const tag = channelTag(msg, flattenedChannels, parties, inactiveTab, activeSubId);
+                const tagName = msg.channelId.startsWith('server:') ? serverRoomLabel(moderationEnabled, msg.channelId, bridgeState.status === 'ready' ? bridgeState.channelId : null, msg.serverDisplayId) : tag.label;
+                const tagColor = tag.color;
                 const contentColor = (() => {
                   const rc = msg.responseColor;
                   if (!rc) return textRgba;
@@ -9061,6 +9145,10 @@ export default function ChatOverlay() {
                         ...(clickable ? { cursor: 'pointer' } : {}),
                       }}
                       title={clickable ? `Go to ${tagName}` : undefined}
+                      onContextMenu={moderationEnabled && msg.channelId.startsWith('server:') ? e => {
+                        e.preventDefault(); e.stopPropagation();
+                        setServerMuteMenu({ channelId: msg.channelId, label: tagName, x: e.clientX, y: e.clientY });
+                      } : undefined}
                       // Hover affordance (parity with the .username-chip hover): a
                       // tinted background + glow in the tag's OWN color so it reads
                       // as clickable without losing the channel/party color.
@@ -9197,12 +9285,15 @@ export default function ChatOverlay() {
                   </div>
                 );
               })
-  , [visibleMessages, resolveUsername, renderContent, scaleGap, msgMentionsMe, shareCardToChat, flattenedChannels, parties, inactiveTab, isMainFeedView, isPublicMode, partyView, activeMainId, activeSubId, hoveredMsg, isMod, primaryColor, primaryText, textAlpha, textRgba, glowEnabled, textOutline, theme, fontSize, lineH, settings, cardShareCooldown, dimText]); // eslint-disable-line react-hooks/exhaustive-deps
+  , [visibleMessages, moderationEnabled, bridgeState, resolveUsername, renderContent, scaleGap, msgMentionsMe, shareCardToChat, flattenedChannels, parties, inactiveTab, isMainFeedView, isPublicMode, partyView, activeMainId, activeSubId, hoveredMsg, isMod, primaryColor, primaryText, textAlpha, textRgba, glowEnabled, textOutline, theme, fontSize, lineH, settings, cardShareCooldown, dimText]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row', alignItems: 'stretch' }}>
       <style style={{ display: 'none' }}>{`
         @keyframes fcm-tip-in { from { opacity: 0; transform: translate(-50%, -2px); } to { opacity: 1; transform: translate(-50%, 0); } }
+        @keyframes fcm-unread-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+        .fcm-channel-unread { animation: fcm-unread-pulse 1.6s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) { .fcm-channel-unread { animation: none; } }
         .fcm-scrollbar::-webkit-scrollbar { width: 4px; }
         .fcm-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .fcm-scrollbar::-webkit-scrollbar-thumb { background: ${hexAlpha(primaryColor, 0.25)}; }
@@ -9620,7 +9711,10 @@ export default function ChatOverlay() {
                       if (preferenceScope) setSubtabMenu({ id: sub.id, scope: preferenceScope, x: r.left, y: r.bottom });
                     }
                   }}
-                  onClick={() => { if (!suppressTabClick.current) setActiveSubId(sub.id); }} style={{
+                  onClick={() => { if (!suppressTabClick.current) {
+                    setActiveSubId(sub.id);
+                    setUnreadChannels(prev => { const next = { ...prev }; delete next[sub.id]; return next; });
+                  } }} style={{
                   // Sub-tab font is SMALLER than the main-tab title font
                   // (main = fontSize+1, sub = fontSize-1) in the shell.
                   fontSize: overlayShell ? `${Math.max(8, fontSize - 1)}px` : `${fontSize}px`,
@@ -9649,6 +9743,9 @@ export default function ChatOverlay() {
                   ...(overlayShell ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}),
                 }}>
                   {unread > 0 && <UnreadBadge n={unread} onClick={e => jumpToSubMention(e, sub.id)} />}
+                  {overlayShell && unreadChannels[sub.id] && !mutedServerRooms.includes(sub.id) && <span
+                    className="fcm-channel-unread" role="img" aria-label={`Unread messages in ${sub.name}`}
+                    style={{ width: 6, height: 6, borderRadius: '50%', background: primaryColor, marginRight: 3, flexShrink: 0 }} />}
                   {giveawayActive && sub.id === '00000000-0000-0000-0000-000000000003' && (
                     <span title="Giveaway in progress!" style={{
                       fontSize: `${Math.max(7, fontSize - 2)}px`,
@@ -9668,6 +9765,20 @@ export default function ChatOverlay() {
         )}
 
         {/* ── Report alerts (mod only) ── */}
+        {moderationEnabled && isMainFeedView && <div style={{ padding: '2px 8px', color: primaryColor }}>
+          {(moderatorCursor || moderatorUnavailable) && <button onClick={() => {
+            if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+            wsRef.current.send(JSON.stringify(moderatorUnavailable
+              ? { type: 'server:moderation:subscribe', payload: { enabled: true } }
+              : { type: 'server:moderation:history', payload: { cursor: moderatorCursor } }));
+          }}>{moderatorUnavailable ? 'Server moderation paused — retry' : 'Next Server rooms'}</button>}
+          <button onClick={() => {
+            if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+            wsRef.current.send(JSON.stringify({ type: 'server:moderation:subscribe', payload: { enabled: false } }));
+            wsRef.current.send(JSON.stringify({ type: 'server:moderation:subscribe', payload: { enabled: true } }));
+          }}>Refresh Server history</button>
+          <span style={{ fontSize: '.8em' }}> Current history page plus recent live messages. Next replaces the history page.</span>
+        </div>}
         {isMod && reportAlerts.length > 0 && (
           <div style={{ padding: '2px 8px', flexShrink: 0 }}>
             {reportAlerts.map((r, i) => (
@@ -11698,6 +11809,13 @@ export default function ChatOverlay() {
         document.body
       )}
 
+      {moderationEnabled && serverMuteMenu && createPortal(
+        <div onClick={() => setServerMuteMenu(null)} onContextMenu={e => { e.preventDefault(); setServerMuteMenu(null); }} style={{ position: 'fixed', inset: 0, zIndex: 100002 }}>
+          <div role="menu" aria-label={serverMuteMenu.label} onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === 'Escape') setServerMuteMenu(null); }}
+            style={{ position: 'absolute', left: Math.max(0, Math.min(serverMuteMenu.x, window.innerWidth - 210)), top: Math.max(0, Math.min(serverMuteMenu.y, window.innerHeight - 70)), background: theme.inputBgColor, color: primaryColor, border: `1px solid ${primaryColor}`, padding: 8 }}>
+            <button autoFocus role="menuitem" onClick={() => toggleServerMute(serverMuteMenu.channelId)}>{mutedServerRooms.includes(serverMuteMenu.channelId) ? 'Unmute this server' : 'Mute this server'}</button>
+          </div>
+        </div>, document.body)}
       {overlayShell && preferenceScope && subtabMenu?.scope === preferenceScope && createPortal(
         <div onPointerDown={() => setSubtabMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 100000 }}>
           <div role="menu" aria-label="Channel actions" onPointerDown={e => e.stopPropagation()}
@@ -11718,6 +11836,7 @@ export default function ChatOverlay() {
               const visible = siblings.filter(t => !tabLayout.prefs.hidden.includes(tabKey(t.id)));
               const index = visible.findIndex(t => t.id === tab.id);
               return <>
+                {moderationEnabled && tab.id.startsWith('server:') && <button role="menuitem" onClick={() => { toggleServerMute(tab.id); setSubtabMenu(null); }}>{mutedServerRooms.includes(tab.id) ? 'Unmute this server' : 'Mute this server'}</button>}
                 <button role="menuitem" autoFocus onClick={() => { tabLayout.update(hideTab(tabLayout.prefs, tab, preferenceTabs)); setSubtabMenu(null); }}>Hide channel</button>
                 <button role="menuitem" onClick={() => { tabLayout.update({ ...tabLayout.prefs, defaultKey: tabKey(tab.id) }); setSubtabMenu(null); }}>Set as default</button>
                 {([-1, 1] as const).map(direction => <button role="menuitem" key={direction} disabled={!visible[index + direction]} onClick={() => {
@@ -11734,6 +11853,9 @@ export default function ChatOverlay() {
         <div onClick={() => setSubtabSettings(false)} style={{ position: 'fixed', inset: 0, zIndex: 100001, background: '#0008', display: 'grid', placeItems: 'center' }}>
           <section role="dialog" aria-modal="true" aria-label="Channel layout" onClick={e => e.stopPropagation()} style={{ background: '#151515', color: primaryColor, padding: 16, maxHeight: '80vh', overflowY: 'auto', width: 'min(360px, 90vw)', border: `1px solid ${primaryColor}` }}>
             <h3>Channel layout</h3>
+            {moderationEnabled && mutedServerRooms.length > 0 && <fieldset><legend>Muted Server rooms</legend>
+              {mutedServerRooms.map(id => <div key={id}><span>{serverRoomLabel(true, id, bridgeState.status === 'ready' ? bridgeState.channelId : null, roomMutes.labels[id] ?? [...moderatorRows, ...moderatorHistoryPage].find(row => row.channelId === id)?.serverDisplayId)}</span> <button onClick={() => toggleServerMute(id)}>Unmute</button></div>)}
+            </fieldset>}
             <p>Hidden channels are excluded from the combined feed. Layout is saved for this account on this device.</p>
             <p>Default: {tabLayout.prefs.defaultKey === 'server' ? 'Server (when available)' : preferenceTabs.find(t => tabKey(t.id) === tabLayout.prefs.defaultKey)?.name ?? 'General / first visible channel'}</p>
             <label>Default channel <select aria-label="Default channel" value={tabLayout.prefs.defaultKey ?? ''} onChange={e => {

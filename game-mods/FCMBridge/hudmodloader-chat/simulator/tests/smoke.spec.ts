@@ -135,6 +135,7 @@ for (const provider of ['xscal', 'zfe']) {
     const log = await page.locator('#log').textContent();
     expect(log).toContain(`DELAYED-AUTH PENDING ${provider} history=received roster=read controls=blocked`);
     expect(log).toContain(`DELAYED-AUTH PASS ${provider} automatic=auth,roster,tab reconnects=0 user-sends=0`);
+    expect(log).toContain(`SERVER-LABEL PASS ${provider} regular=Server staff=Your-server revoked=Server`);
     expect(log).not.toContain('DELAYED-AUTH FAIL');
   });
 
@@ -423,5 +424,13 @@ for (const provider of ['xscal', 'zfe']) {
     await page.goto(`/?mode=harness&provider=${provider}&scenario=typing-renewal`);
     await expect(page.locator('#log')).toContainText(/TYPING-RENEWAL (PASS|FAIL)/, { timeout: 25_000 });
     await expect(page.locator('#log')).toContainText(`TYPING-RENEWAL PASS ${provider} editor=preserved renewal=confirmed history=preserved expiry=enforced stale=leave auth=gated`);
+  });
+}
+
+for (const provider of ['zfe', 'xscal']) {
+  test(`browser request lifecycle and readable fallback through ${provider}`, async ({ page }) => {
+    await page.goto(`/?mode=harness&provider=${provider}&scenario=browser-links`);
+    await expect(page.locator('#log')).toContainText(`BROWSER PASS ${provider}`, { timeout: 30_000 });
+    await expect(page.locator('#log')).not.toContainText('BROWSER FAIL');
   });
 }

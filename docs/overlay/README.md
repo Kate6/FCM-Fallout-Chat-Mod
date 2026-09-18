@@ -11,7 +11,8 @@ Idle auto-hide defaults **off** for new profiles. If enabled without a saved mod
 it defaults to **sub-tabs collapse**, retaining the header and channel rows.
 Explicit existing preferences remain unchanged. Full auto-hide remains an opt-in
 mode that hides all renderer layers, including portaled content; collapsed mode
-suppresses the full-window dim/scanline layers to avoid a residual rectangle.
+suppresses the full-window dim/scanline layers, including the shared dashboard's
+`body::before` vignette and `body::after` scanlines, to avoid a residual rectangle.
 The isolated Electron `test:interaction` suite exercises three collapse/expand
 cycles in each mode, asserting header/sub-tab visibility, hidden effect layers,
 and a visible writable composer after expansion. This is desktop-renderer
@@ -23,13 +24,61 @@ read live geometry. Previously overwritten presets must be recaptured; their
 original dimensions cannot be reconstructed from the saved enlarged rectangle.
 
 Focus recovery: every explicit Open Chat/Insert focus request first reveals the
-renderer, independently of the native window's collapse flag. When a portable
-in-game idle collapse is suppressed, main also restores the already-hidden
-renderer without stealing focus or resizing the window. Regression coverage is
+renderer, independently of the native window's collapse flag. Portable builds
+honor user-enabled idle collapse while the game is running, exactly like installed
+builds. The former portable-only suppression sent `force-expand` after every
+collapse, causing a repeating blink; it is removed. Regression coverage is
 `cross-platform-overlay/__tests__/focus-collapse-recovery.test.js` (repeated
-requests and both idle-hide modes), included in the overlay unit suite. Native
+requests and both idle-hide modes), included in the overlay unit suite. Electron
+interaction tests also inspect pseudo-element visibility and delayed wake-up. Native
 Windows collapse → Insert → send → return-to-game acceptance remains required
 before treating a packaged build as verified.
+
+AutoHide candidate verification (2026-09-18): 1,237 overlay unit tests and the
+complete isolated Electron interaction suite passed. The new tests reproduced
+the portable forced-wake and visible body pseudo-element failures before fixes.
+Windows portable 1.4.0 was built natively and installed on the laptop with an
+exact-file/profile backup; installed EXE SHA-256 is
+`e8470771ac39d1947555d6e7738159658abec39754919f0042617b0ea88bfcf0`.
+Fresh native logs show full-hide reaching 1 DIP without the suppression loop;
+later wake triggers are not logged and still require user acceptance. The desktop
+Downloads portable ZIP was updated with checksums and no private profile data.
+No backend/HUD change or public release is part of this candidate.
+
+Follow-up animation/scroll correction: visible collapse now uses a 240 ms
+compositor clip and full-hide uses a whole-body fade, before native resizing.
+Delayed completion is cancelled on wake, including focus during expansion.
+Scroll intent is tracked from input rather than resize-generated scroll events;
+saved-size changes keep bottom-follow, while intentional history reading remains
+unpinned. The test relay covers sending two messages large, shrinking, and seeing
+the newest without Insert. See [window management](window-management.md#idle-collapse-auto-hide-to-header-strip)
+for tests and the isolated Windows packaged-executable runner.
+
+Follow-up verification (2026-09-18): 1,241 overlay and 443 dashboard unit tests
+pass, with TypeScript checks and the complete Linux Electron interaction suite.
+The Windows isolated portable run verifies the send-then-shrink sequence, repeated
+size switching, retained reading intent and visible compositor transitions.
+Measured Windows collapse samples contain 8–19 intermediate clip states; full
+hide contains 40–49 intermediate opacity samples across three cycles. These are
+sampled transition states, not a claim of guaranteed frame rate under arbitrary
+load. The animation fixture settles settings before measuring idle collapse;
+concurrent settings redraw/build load is not an idle-frame-rate benchmark.
+Release CI and manual live-game visual/focus acceptance remain separate gates.
+
+Final isolated interaction runs passed on Linux at `2026-09-18T08:02:17Z` and
+native Windows at `2026-09-18T08:03:16Z`, with no renderer exceptions. Both include
+ten reconnects, restart persistence, font/window sizes and hidden-message recovery.
+The latest local laptop candidate supersedes the earlier AutoHide binary above:
+portable 1.4.0, 101,301,701 bytes, SHA-256
+`8ae62abf5d741160d81331d717288170efccc0df8730d51b0e3412646576cad4`.
+It was installed with an EXE/profile backup and launched; fresh logs confirm
+successful authenticated relay registration and running-game detection. Install
+identity and settings match the backup. The desktop Downloads ZIP now contains
+this binary (ZIP SHA-256
+`80bfd8442cb6e72c99d5fa91a74a4b5e674f7f366d910515529e94bf366682a3`),
+unchanged optional bridge/docs, updated checksums, and no private profile data.
+Test profiles/relays and temporary build/test/launch scheduled tasks were torn
+down. No public release, backend deployment, commit or push was performed.
 
 Channel controls and review status: [sub-tab customization and bridge safety](subtab-customization-and-bridge-review.md).
 

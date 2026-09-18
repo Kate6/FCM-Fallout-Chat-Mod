@@ -11,7 +11,9 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const profile = await mkdtemp(`${tmpdir()}/fcm-usability-`);
+const testRoot = await mkdtemp(`${tmpdir()}/fcm-usability-`);
+const packagedExecutable = process.env.FCM_TEST_EXECUTABLE;
+const profile = packagedExecutable ? resolve(testRoot, 'FCMData') : testRoot;
 const artifacts = resolve(root, 'test-results/overlay-usability');
 const standardTabs = ['General', 'Trading', 'Events', 'Infests', 'Raids'];
 const channels = [{ id: 'fo76', name: 'Fallout 76', parentId: null, color: '#F5CB5B', children:
@@ -33,10 +35,19 @@ const server = createServer((request, response) => {
 });
 const relay = new WebSocketServer({ server });
 let connectionCount = 0;
+let sentMessages = 0;
 relay.on('connection', socket => {
   connectionCount++;
   socket.on('message', raw => {
     const frame = JSON.parse(raw.toString());
+    if (frame.type === 'server:moderation:subscribe') socket.send(JSON.stringify({ type: 'server:moderation:state', payload: { status: frame.payload.enabled ? 'ready' : 'inactive' } }));
+    if (frame.type === 'chat:send') {
+      sentMessages++;
+      socket.send(JSON.stringify({ type: 'chat:message', payload: {
+        ...frame.payload, id: `sent-fixture-${sentMessages}`, userId: 'alice', username: 'Alice',
+        source: 'game', timestamp: new Date().toISOString(),
+      } }));
+    }
     if (frame.type === 'presence:stats') socket.send(JSON.stringify({ type: 'presence:stats', payload: {
       requestId: frame.payload.requestId, totalOnline: 17, observedPlayers: null, bindingId: null,
     } }));
@@ -57,40 +68,135 @@ const errors = [];
 try {
   await rm(artifacts, { recursive: true, force: true });
   await mkdir(artifacts, { recursive: true });
+  await mkdir(profile, { recursive: true });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
   await writeFile(`${profile}/overlay-state.json`, JSON.stringify({
     installToken: 'usability-fixture-only', username: 'Alice', displayName: 'Alice',
-    discordLinked: true, userRole: 'admin', settings: { onboarded: true, fadeWhenIdle: false, fontSize: 14 },
+    discordLinked: true, userRole: 'admin', settings: { onboarded: true, fadeWhenIdle: true, idleCollapseSeconds: 120, fontSize: 14 },
   }));
   const env = { ...process.env, BUILD_CHANNEL: 'stable', APP_CLIENT_KEY: 'fixture-only-client',
     RELAY_HTTP: `http://127.0.0.1:${port}`, RELAY_WS: `ws://127.0.0.1:${port}/ws`,
     XDG_CURRENT_DESKTOP: '', XDG_SESSION_DESKTOP: '', XDG_SESSION_TYPE: 'x11',
   };
+  if (packagedExecutable) env.PORTABLE_EXECUTABLE_DIR = testRoot;
   for (const key of ['ELECTRON_RUN_AS_NODE', 'APPIMAGE', 'APPDIR', 'RENDERER_URL', 'WAYLAND_DISPLAY',
     'OVERLAY_SHOT', 'OVERLAY_FIRE', 'DEV_PERSONA_LOGIN_SECRET']) delete env[key];
   async function launch() {
     app = await electron.launch({
-      executablePath: `${root}/node_modules/electron/dist/electron`,
-      args: [root, `--user-data-dir=${profile}`, '--ozone-platform=x11', '--no-sandbox'],
+      executablePath: packagedExecutable || resolve(root, 'node_modules/electron/dist', process.platform === 'win32' ? 'electron.exe' : 'electron'),
+      args: [...(packagedExecutable ? [] : [root]), `--user-data-dir=${profile}`, ...(process.platform === 'linux' ? ['--ozone-platform=x11', '--no-sandbox'] : [])],
       env, timeout: 30_000,
     });
     page = await app.firstWindow();
     page.setDefaultTimeout(10_000);
     page.on('pageerror', error => errors.push(error.message));
     await page.getByText('general message 79: readable chat', { exact: true }).waitFor();
+    // Presence is sampled asynchronously after every launch, including restart.
+    // Do not race its legitimate game-launch wake against a hide assertion.
+    // Portable startup legitimately queues a 20s hidden visibility grace when
+    // the game is closed. Let it finish before supplying visible fixture state.
+    await page.waitForTimeout(packagedExecutable ? 25000 : 5000);
+    // Packaged Windows normally hides when the game is absent. The fixture must
+    // explicitly show its own window; never launch/spoof/input-automate the game.
+    await app.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      window.show();
+      window.webContents.send('overlay:game-state', true);
+      window.webContents.send('overlay:visibility', true);
+    });
+    await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible())).toBe(true);
   }
   const command = value => app.evaluate(({ BrowserWindow }, cmd) => BrowserWindow.getAllWindows()[0].webContents.send('overlay:command', cmd), value);
   const composer = () => page.locator('[contenteditable="true"]').first();
   await launch();
+  // Preserve bottom-follow through layout scroll, late content and viewport
+  // changes. No wheel/key/pointer input means these are not a reading gesture.
+  await page.evaluate(async () => {
+    const list = document.querySelector('[data-fcm-message-line]').closest('.fcm-scrollbar');
+    window.dispatchEvent(new Event('fcm-scroll-bottom'));
+    await new Promise(resolve => setTimeout(resolve, 200));
+    list.scrollTop = 100;
+    list.dispatchEvent(new Event('scroll'));
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const list = document.querySelector('[data-fcm-message-line]').closest('.fcm-scrollbar');
+    return list.scrollHeight - list.scrollTop - list.clientHeight;
+  })).toBeLessThan(3);
+  const presetBounds = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds());
+  const applyPreset = async (width, height) => {
+    await app.evaluate(({ ipcMain }, bounds) => ipcMain.emit('window:set-bounds', {}, bounds), { ...presetBounds, width, height });
+    // Let native resize notification and renderer reflow arrive before checking
+    // scroll position; an immediate check could read the previous viewport.
+    await page.waitForTimeout(160);
+  };
+  const bottomDistance = () => page.evaluate(() => {
+    const list = document.querySelector('[data-fcm-message-line]').closest('.fcm-scrollbar');
+    return list.scrollHeight - list.scrollTop - list.clientHeight;
+  });
+  for (let cycle = 0; cycle < 10; cycle++) {
+    await applyPreset(420, 280);
+    await expect.poll(bottomDistance).toBeLessThan(3);
+    await applyPreset(700, 560);
+    await expect.poll(bottomDistance).toBeLessThan(3);
+  }
+  await applyPreset(700, 560);
+  for (const content of ['Large-size send first', 'Large-size send newest']) {
+    await composer().fill(content); await composer().press('Enter');
+    await expect(page.getByText(content, { exact: true })).toBeVisible();
+  }
+  assert.equal(sentMessages, 2, 'both test messages must reach the isolated relay');
+  await applyPreset(420, 280);
+  await expect.poll(bottomDistance).toBeLessThan(3);
+  await expect(page.getByText('Large-size send newest', { exact: true })).toBeInViewport();
+  console.log('PASS send two messages in large size, shrink, newest remains visible without Insert');
+  // Real wheel input to the overlay only establishes intentional reading.
+  await page.locator('[data-fcm-message-line]').last().hover();
+  await page.mouse.wheel(0, -900);
+  await expect.poll(bottomDistance).toBeGreaterThan(100);
+  for (let cycle = 0; cycle < 3; cycle++) {
+    await applyPreset(420, 280); await page.waitForTimeout(150);
+    await expect.poll(bottomDistance).toBeGreaterThan(100);
+    await applyPreset(700, 560); await page.waitForTimeout(150);
+    await expect.poll(bottomDistance).toBeGreaterThan(100);
+  }
+  await applyPreset(presetBounds.width, presetBounds.height);
+  await page.evaluate(() => window.dispatchEvent(new Event('fcm-scroll-bottom')));
+  await expect.poll(bottomDistance).toBeLessThan(3);
+  console.log('PASS repeated saved-size changes preserve bottom-follow and intentional history reading');
   // Exercise real renderer collapse layout and native size IPC, not just source
   // contracts. This does not send input to any game process.
+  const animationSamples = [];
   for (const mode of ['subtabs', 'full']) {
     for (let cycle = 0; cycle < 3; cycle++) {
-      await page.evaluate(mode => {
+      const samples = await page.evaluate(async mode => {
         window.__ovTest.setAutoHideMode(mode);
+        // Real idle collapse occurs after settings/render work has settled.
+        // Do not include a full settings re-render in the fade frame budget.
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const samples = [];
+        const start = performance.now();
         window.__ovTest.collapse();
+        await new Promise(resolve => {
+          const sample = () => {
+            samples.push({ time: performance.now() - start, height: window.innerHeight, opacity: Number(getComputedStyle(document.body).opacity), clip: getComputedStyle(document.body).clipPath });
+            if (performance.now() - start < 1000) requestAnimationFrame(sample);
+            else resolve();
+          };
+          requestAnimationFrame(sample);
+        });
+        return samples;
       }, mode);
+      animationSamples.push({ mode, cycle, samples });
+      await writeFile(`${artifacts}/animation-samples.json`, JSON.stringify(animationSamples, null, 2));
+      if (mode === 'full') {
+        assert.ok(samples.some(sample => sample.opacity > 0 && sample.opacity < 1), 'full hide must paint intermediate opacity, not blink');
+      } else {
+        const first = samples[0].height, last = samples.at(-1).height;
+        assert.ok(last < first, 'native height must settle smaller after the visible clip');
+        assert.ok(new Set(samples.filter(sample => sample.height === first).map(sample => sample.clip)).size >= 4,
+          'visible collapse must animate on the compositor before native resizing');
+      }
       if (mode === 'subtabs') {
         await expect(page.locator('[data-fcm-main-tab-row]')).toBeVisible();
         await expect(page.locator('[data-fcm-subtab-row="channels"]')).toBeVisible();
@@ -101,14 +207,47 @@ try {
       for (const selector of ['#shell-bg-dim', '#shell-scanline']) {
         await expect(page.locator(selector)).toBeHidden();
       }
+      for (const pseudo of ['::before', '::after']) {
+        assert.equal(await page.evaluate(pseudo => getComputedStyle(document.body, pseudo).visibility, pseudo),
+          'hidden', `body${pseudo} must not leave an effect layer behind`);
+      }
+      // Catch a native rejection/force-expand after renderer collapse.
+      await page.waitForTimeout(1500);
+      await expect(composer()).toBeHidden();
       await page.evaluate(() => window.__ovTest.expand());
       await expect(composer()).toBeVisible();
+      for (const pseudo of ['::before', '::after']) {
+        assert.equal(await page.evaluate(pseudo => getComputedStyle(document.body, pseudo).visibility, pseudo), 'visible');
+      }
       await composer().fill(`collapse recovery ${cycle}`);
       await expect(composer()).toHaveText(`collapse recovery ${cycle}`);
     }
   }
+  await writeFile(`${artifacts}/animation-samples.json`, JSON.stringify(animationSamples, null, 2));
+  // A wake during the fade must cancel its delayed hide completion.
+  await page.evaluate(async () => {
+    window.__ovTest.setAutoHideMode('full'); window.__ovTest.collapse();
+    await new Promise(resolve => setTimeout(resolve, 60));
+    window.__ovTest.expand();
+  });
+  await page.waitForTimeout(700);
+  await expect(composer()).toBeVisible();
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).opacity), '1');
+  // Native focus activation can arrive while the renderer's reveal is pending.
+  for (const mode of ['subtabs', 'full']) {
+    await page.evaluate(async mode => {
+      window.__ovTest.setAutoHideMode(mode); window.__ovTest.collapse();
+      await new Promise(resolve => setTimeout(resolve, 600));
+      window.__ovTest.expand();
+    }, mode);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('overlay:force-expand', true));
+    await page.waitForTimeout(700);
+    await expect(composer()).toBeVisible();
+    assert.equal(await page.evaluate(() => document.getElementById('root').classList.contains('collapsed')), false);
+    assert.equal(await page.evaluate(() => getComputedStyle(document.body).opacity), '1');
+  }
   await composer().fill('');
-  await page.evaluate(() => window.__ovTest.setAutoHideMode('subtabs'));
+  await page.evaluate(() => { window.__ovTest.setAutoHideMode('subtabs'); window.__ovTest.noIdle(); });
   console.log('PASS repeated sub-tab/full collapse visibility, effect-layer hiding and composer recovery');
   // Real header interactions: portals must escape row clipping and not drag the window.
   const headerConnections = connectionCount;
@@ -135,6 +274,7 @@ try {
   console.log('PASS PM divider, Live counts, repeated actions menu and Escape without reconnect');
   await expect.poll(() => page.locator('[data-fcm-motion-paused]').count()).toBeGreaterThan(0);
   const newestName = page.locator('[data-msg-id="general-79"] .fcm-name-fx--shimmer');
+  await newestName.scrollIntoViewIfNeeded();
   await expect(newestName).not.toHaveAttribute('data-fcm-motion-paused');
   await expect(newestName).toHaveCSS('animation-name', 'fcm-shimmer-highlight');
   await expect(newestName).toHaveCSS('animation-play-state', 'running');
@@ -294,6 +434,7 @@ try {
   await page.evaluate(() => {
     const list = document.querySelector('[data-fcm-message-line]').closest('.fcm-scrollbar');
     window.usabilityList = list;
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
     list.scrollTop = 150;
     // CSS zoom/display scaling can quantize a requested CSS offset to a physical
     // pixel (e.g. 150 becomes 150.4). Preserve the accepted offset exactly.
@@ -398,11 +539,133 @@ try {
     } }));
   }
   await expect.poll(() => page.locator('[data-msg-id^="perf-hidden-"]').count()).toBe(100);
-  await app.evaluate(({ ipcMain }) => ipcMain.emit('overlay:show-for-mention'));
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    window.show();
+    window.webContents.send('overlay:visibility', true);
+  });
   await expect.poll(() => page.locator('.fcm-name-fx--shimmer:not([data-fcm-motion-paused])').count()).toBeGreaterThan(0);
   assert.equal(connectionCount, hiddenConnections, 'hiding during active game must not reconnect');
   assert.equal(await page.locator('[data-msg-id^="perf-hidden-"]').evaluateAll(rows => new Set(rows.map(row => row.getAttribute('data-msg-id'))).size), 100);
   console.log('PASS 100 hidden messages survive show without duplicates or a visibility reconnect');
+
+  // User-visible unread dots are live-only, close to the corresponding label,
+  // clear on click, and keep the theme color with reduced-motion support.
+  const channelTab = name => page.locator('[data-fcm-subtab-row="channels"]').getByRole('button', { name: `${name} channel`, exact: true });
+  await channelTab('Trading').click();
+  for (const socket of relay.clients) socket.send(JSON.stringify({ type: 'chat:message', payload: {
+    id: 'unread-ui-1', channelId: 'events', userId: 'bob', username: 'Bob', content: 'Unread UI fixture', source: 'game', createdAt: new Date().toISOString(),
+  } }));
+  const unreadDot = page.getByRole('img', { name: 'Unread messages in Events' });
+  await expect(unreadDot).toBeVisible();
+  await expect(unreadDot).toHaveCSS('margin-right', '3px');
+  await expect(unreadDot).toHaveCSS('animation-name', 'fcm-unread-pulse');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(unreadDot).toHaveCSS('animation-name', 'none');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.screenshot({ path: `${artifacts}/unread-dot.png` });
+  await channelTab('Events').click();
+  await expect(unreadDot).toHaveCount(0);
+  await channelTab('General').click();
+
+  // Privileged stream remains a view over canonical room/message IDs.
+  const ownRoom = 'server:r:own-fixture';
+  // Supply an already-confirmed state at the renderer boundary. This suite has
+  // no installed game export; native local-bridge authority is separately tested
+  // and must continue rejecting uncorrelated ready frames from the fixture relay.
+  await page.evaluate(() => { window.fixtureSocketUnsubscribe = window.relayBridge.onWsMessage(m => { window.fixtureSocketId = m.id; }); });
+  for (const socket of relay.clients) socket.send(JSON.stringify({ type: 'fixture:identify-socket', payload: {} }));
+  await expect.poll(() => page.evaluate(() => window.fixtureSocketId)).toBeTruthy();
+  const fixtureSocketId = await page.evaluate(() => window.fixtureSocketId);
+  await app.evaluate(({ BrowserWindow }, { id, channelId }) => BrowserWindow.getAllWindows()[0].webContents.send('proxy:ws:message', {
+    id, data: JSON.stringify({ type: 'bridge:state', payload: { status: 'ready', channelId, bindingId: 'fixture/r:own-fixture' } }),
+  }), { id: fixtureSocketId, channelId: ownRoom });
+  await page.evaluate(() => window.fixtureSocketUnsubscribe?.());
+  for (const socket of relay.clients) {
+    socket.send(JSON.stringify({ type: 'server:moderation:messages', payload: { historyReplay: false, messages: [
+      { id: `${ownRoom}:1`, channelId: ownRoom, serverDisplayId: '101', username: 'Bob', userId: 'bob', content: 'Own room moderation fixture', source: 'server', timestamp: new Date().toISOString() },
+      { id: 'server:r:other-fixture:1', channelId: 'server:r:other-fixture', serverDisplayId: '102', username: 'Bob', userId: 'bob', content: 'Other room moderation fixture', source: 'server', timestamp: new Date().toISOString() },
+    ] } }));
+  }
+  await expect(page.getByText('[Your server]', { exact: true })).toBeVisible();
+  await expect(page.getByText('[Server · 102]', { exact: true })).toBeVisible();
+  await expect(channelTab('Your server')).toBeVisible();
+  await page.getByText('[Server · 102]', { exact: true }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Mute this server', exact: true }).click();
+  await expect(page.getByText('Other room moderation fixture', { exact: true })).toHaveCount(0);
+  await page.evaluate(() => window.dispatchEvent(new Event('fcm-subtab-settings')));
+  await page.getByRole('button', { name: 'Unmute', exact: true }).click();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(page.getByText('Other room moderation fixture', { exact: true })).toBeVisible();
+  await page.screenshot({ path: `${artifacts}/server-moderation.png` });
+  for (const socket of relay.clients) socket.send(JSON.stringify({ type: 'server:moderation:state', payload: { status: 'denied' } }));
+  await expect(page.getByText('Other room moderation fixture', { exact: true })).toHaveCount(0);
+  console.log('PASS live unread pulse/click/reduced-motion and moderator labels/mute/unmute/revocation');
+
+  await command('settings:open');
+  for (let cycle = 0; cycle < 3; cycle++) {
+    await page.locator('.ss-navbtn').filter({ hasText: /appearance/i }).click();
+    await page.getByRole('spinbutton', { name: 'Overlay width in pixels' }).fill(String(640 + cycle * 20));
+    await page.getByRole('spinbutton', { name: 'Overlay height in pixels' }).fill(String(480 + cycle * 20));
+    await page.getByRole('button', { name: 'Apply size', exact: true }).click();
+    await expect(page.locator('[data-fcm-size-status]')).toContainText('Applied ');
+    const actualWidth = Number(await page.getByRole('spinbutton', { name: 'Overlay width in pixels' }).inputValue());
+    const actualHeight = Number(await page.getByRole('spinbutton', { name: 'Overlay height in pixels' }).inputValue());
+    assert.ok(Math.abs(actualWidth - (640 + cycle * 20)) <= 2 && Math.abs(actualHeight - (480 + cycle * 20)) <= 2, `only desktop pixel rounding may alter these in-range dimensions: cycle=${cycle} actual=${actualWidth}x${actualHeight}`);
+    await expect(page.locator('[data-fcm-size-status]')).toHaveText(`Applied ${actualWidth}×${actualHeight}`);
+    await page.locator('.ss-navbtn').filter({ hasText: /keybinds/i }).click();
+    await page.getByRole('button', { name: 'SET POS', exact: true }).first().click();
+    await expect.poll(async () => JSON.parse(await readFile(`${profile}/overlay-state.json`, 'utf8')).settings.presets[0].w).toBe(actualWidth);
+    const saved = JSON.parse(await readFile(`${profile}/overlay-state.json`, 'utf8')).settings.presets[0];
+    assert.equal(saved.h, actualHeight);
+    await applyPreset(800, 600);
+    await page.evaluate(p => window.relayBridge.setBounds({ x: p.x, y: p.y, width: p.w, height: p.h }), saved);
+    await expect.poll(async () => Math.abs(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds().width) - saved.w)).toBeLessThanOrEqual(1);
+    await expect.poll(async () => Math.abs(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds().height) - saved.h)).toBeLessThanOrEqual(1);
+  }
+  await page.keyboard.press('Escape');
+  console.log('PASS pixel Apply -> SET POS persistence -> restore repeated three times');
+
+  // Exercise the real message renderer and picker, without posting to Discord.
+  const emojiRequests = [];
+  await page.route(/https:\/\/(cdn\.discordapp\.com|media\.discordapp\.net)\/emojis\//, async route => {
+    const url = route.request().url();
+    emojiRequests.push(url);
+    if (url.includes('1509625415726006313') ||
+        (url.includes('1509631843207614626') && url.includes('cdn.discordapp.com'))) {
+      await route.abort();
+    } else {
+      await route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="12" cy="12" r="11" fill="gold"/></svg>' });
+    }
+  });
+  for (const socket of relay.clients) socket.send(JSON.stringify({ type: 'chat:message', payload: {
+    id: 'emoji-ui-fixture', channelId: 'general', userId: 'bob', username: 'Bob',
+    content: '<a:Confused:1509625415726006313> <:Birthdaycake:1509631843207614626> <:falloutlondon:1549283103372222514>',
+    source: 'discord', createdAt: new Date().toISOString(),
+  } }));
+  const emojiRow = page.locator('[data-msg-id="emoji-ui-fixture"]');
+  await expect(emojiRow.getByText(':Confused:', { exact: true })).toBeVisible();
+  await expect(emojiRow.getByAltText(':Birthdaycake:')).toHaveAttribute('src', 'https://media.discordapp.net/emojis/1509631843207614626.png');
+  await expect.poll(() => emojiRow.locator('img').evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0))).toBe(true);
+  assert.ok(emojiRequests.some(url => url.includes('media.discordapp.net/emojis/1509625415726006313.webp?animated=true')));
+  assert.ok(!(await emojiRow.innerText()).includes('<:'), 'custom tokens must not leak as raw markup');
+  await composer().fill('Emoji draft ');
+  await page.getByTitle('Emoji picker', { exact: true }).click();
+  const search = page.getByPlaceholder('Search emoji…');
+  await expect(search).toBeVisible();
+  await page.screenshot({ path: `${artifacts}/emoji-picker.png` });
+  await search.fill('grinning');
+  const cell = page.locator('.fcm-ep-cell[title=":grinning:"]').first();
+  await expect(cell).toBeVisible();
+  assert.ok((await cell.locator('span').evaluate(el => getComputedStyle(el).fontFamily)).includes('Noto Color Emoji'));
+  await cell.click();
+  await expect(composer()).toContainText('😀');
+  await expect(composer()).toContainText('Emoji draft');
+  if (await search.isVisible()) await page.getByTitle('Emoji picker', { exact: true }).click();
+  await composer().press('Enter');
+  await expect(page.getByText('Emoji draft 😀', { exact: true })).toBeVisible();
+  await page.screenshot({ path: `${artifacts}/emoji-message.png` });
+  console.log('PASS custom emoji image/retry/label paths, native picker font, insertion and send');
 
   // The real account boundary still discards the old component and its draft.
   await composer().fill('private draft from Alice');
@@ -417,7 +680,8 @@ try {
   await writeFile(`${artifacts}/result.json`, JSON.stringify({
     status: 'passed', completedAt: new Date().toISOString(), disconnects: 10,
     fontScales: [9, 14, 22], widths: [320, 520, 800], rendererErrors: errors,
-    checks: ['live-font-and-theme', 'one-step-navigation', 'same-account-update',
+    checks: ['unread-dots', 'server-moderation-muting', 'pixel-size-presets', 'emoji-image-fallback-picker-insert-send', 'saved-size-bottom-follow', 'send-then-shrink', 'compositor-collapse-and-full-fade',
+      'interrupted-hide-and-reveal', 'live-font-and-theme', 'one-step-navigation', 'same-account-update',
       'reading-anchor', 'native-preference-restart', 'composer-layout', 'account-switch-reset'],
   }, null, 2));
 } catch (error) {
@@ -432,6 +696,6 @@ try {
   await new Promise(resolve => relay.close(resolve));
   server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
-  await rm(profile, { recursive: true, force: true });
+  await rm(testRoot, { recursive: true, force: true });
   console.log('Teardown: owned Electron, local relay and temporary profile removed');
 }

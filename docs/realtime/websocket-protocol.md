@@ -880,3 +880,52 @@ serialized, revalidated and deduplicated; stale bindings are discarded. Public m
 observer sockets do not participate. Ordinary UUID channel history/typing is unchanged. See
 [background bridge](../overlay/zfe/background-server-bridge.md) for authority, moderation,
 installation, source ownership and the pending deployment/runtime acceptance.
+
+### Desktop Server moderation feed
+
+Authenticated desktop session sockets may explicitly send
+`server:moderation:subscribe { enabled: true }` (disable with `false`). This is a
+read-only moderator/admin/owner capability; web tickets, public and native HUD
+transports do not subscribe. A claimed role or arbitrary room ID grants nothing.
+The server responds with `server:moderation:state { status }`, where status is
+`ready`, `inactive`, `denied`, or `unavailable`, followed by
+`server:moderation:messages { historyReplay, messages }`. Each normalized row has
+the ordinary canonical message `id`, `channelId: "server:<room>"`, `source: "server"`,
+and numeric-string `serverDisplayId`, plus content/username/timestamp/account ID
+and existing cosmetics. No roster, relay install identity or credentials appear.
+
+Each history page considers ten rooms, each with at most 50 retained messages,
+and returns at most 500 messages. History frames always include `hasMore` and
+`nextCursor` (null when complete), including empty pages. A moderator can explicitly
+request the next page with `server:moderation:history { cursor: nextCursor }`;
+only the cursor issued to that socket is accepted, at most six requests/30 seconds.
+Every page repeats the same authorization checks. A stable lexical room keyset means
+keepalives cannot reorder rooms during traversal. New rooms preceding the cursor
+appear on a fresh subscription; their live messages are delivered immediately.
+The UI must offer load-more rather than silently auto-fetch unbounded history. Live delivery then
+uses the existing Server publication channel. The subscription serializes snapshot
+and live events and deduplicates them; clients must additionally deduplicate by
+canonical message ID against their ordinary own-room bridge delivery. Display IDs
+are labels only: moderators see `[Your server]` for their current room and
+`[Server · 123]` elsewhere; regular users continue to see `[Server]`.
+
+Display numbers are allocated atomically using Redis INCR, shared across backend
+instances, never used as authority. Their room mapping lasts two hours after last
+membership refresh/message (longer than one-hour history retention). The allocation
+sequence does not expire. World keepalives preserve the label for continuously
+occupied rooms. A Redis dataset reset also resets this temporary numbering.
+
+Every snapshot/live delivery validates the current socket, Redis session, account
+ban/kick state and fresh database moderation role before and after data I/O. Idle
+subscriptions revalidate every 30 seconds; failures revoke instead of falling back
+to cached privileges. A pending queue of 128 disables the stream; explicit subscribe
+requests are limited to four per account per 30 seconds. Unsubscribe, socket replacement
+and teardown fence in-flight responses. No new send/history membership bypass is
+introduced. Server edits/deletions are not supported by the existing Server protocol.
+UI room muting is local presentation filtering, not authorization or leaving a room.
+The role check reads the current database role, not Discord on each message. Existing
+Discord role verification runs periodically and preserves roles during transient
+Discord failures; therefore upstream Discord removal is not an instantaneous
+revocation guarantee. Once the database role is removed, the next delivery/page
+is denied, or the idle subscription is cleared within 30 seconds. No new Discord
+authentication or role model is introduced by this feature.

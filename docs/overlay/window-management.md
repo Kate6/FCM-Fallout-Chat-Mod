@@ -170,8 +170,8 @@ Controlled by a JS idle timer in `shell.ts` that sends `overlay:collapse` / `ove
 confirmed stopped-to-running Fallout 76 transition, the main process expands that window before
 showing it; otherwise KWin can correctly stack an effectively invisible one-pixel overlay above
 the game. The pure `shouldExpandOnGameLaunch` predicate covers this transition. Fully-contained
-portable mode also suppresses subsequent idle-collapse requests while the game remains running;
-the installed overlay retains the user's normal auto-hide behavior.
+portable mode honors subsequent user-enabled idle-collapse requests just like the
+installed overlay; game presence must not force an immediate wake after each hide.
 
 **Collapse height + the CSS-zoom gotcha.** The collapsed window height is computed by `headerStripHeight()` (`shell.ts`) = shell-bar height + the two tab rows, clamped to a plausible band (24–160 visual px) so a bad mid-reflow measurement can never reveal the message body/input. The strip is measured with `getBoundingClientRect()` on elements inside the CSS-`zoom`ed `#root`. **Whether that rect already includes the zoom depends on the Chromium build** — Chromium ≤127 (Electron ≤31) returned UNSCALED CSS-px; Chromium 138 (Electron 39, the current pin) returns zoom-SCALED px. `rectsAreZoomScaled()` detects this once (an offscreen `zoom:2` probe), and the pure `resolveCollapsedHeight()` (in `shell-core.ts`, unit-tested both ways) applies the zoom factor **only** when rects are unscaled. The earlier code multiplied unconditionally, which after the Electron 31→39 bump **double-applied** the zoom and left the window tall enough to reveal the text input at Scale > 1 — the "collapses to the input box instead of the tabs" bug.
 
@@ -190,7 +190,7 @@ If a move or scroll-to-bottom command arrives while collapsed, the main process 
 
 **Typing indicator while collapsed (issue #420).** The normal typing indicator is a `flexShrink:0` sibling *below* the message list, so `applyCollapsedHidden()` hides it along with everything after the sub-tab row. A compact indicator is therefore also rendered **inside** the sub-tab row itself (`[data-fcm-subtab-row]`), which survives collapse by construction — no change to `headerStripHeight()`, deliberately, since that function has a history of zoom double-apply bugs (see above). It is gated on `ShellSettings.showTypingWhenCollapsed` (default **off** — opt in via Settings → "Show typing indicator while collapsed") and is Electron-shell-only; nothing collapses on the website. The shell emits `fcm-overlay-collapse-state` with `{ collapsed }` on **both** transitions for this — kept separate from the older one-way `fcm-overlay-collapsed` signal, which existing listeners treat as "close your floating panels" and which must not fire on expand.
 
-The "Auto-hide chat when idle" setting (`ShellSettings.fadeWhenIdle`, default `true`) toggles this behavior and maps to `OverlayConfig.FadeWhenIdle` in the WinForms desktop overlay.
+The "Auto-hide chat when idle" setting (`ShellSettings.fadeWhenIdle`, default `false`) toggles this behavior and maps to `OverlayConfig.FadeWhenIdle` in the WinForms desktop overlay. Portable builds honor this opt-in setting even while the game is running; the native process must not immediately force-expand a renderer-owned idle collapse.
 
 **Auto-hide mode.** The Electron Appearance panel stores `ShellSettings.autoHideMode` as
 `full` or `subtabs` (the default). Auto-hide itself defaults off for new profiles;
@@ -201,13 +201,55 @@ the user-hidden/tray path: the renderer and relay remain alive, so `markActivity
 expand the complete window when a new message, mention, or explicit interaction arrives.
 The global focus/Insert path also force-expands it. Switching back to `subtabs` or resetting
 defaults is safe because the normal expand path restores native minimum/maximum sizing and
-removes the full-hide class.
+removes the full-hide class. Both collapsed modes suppress the shell effects and
+the dashboard CSS `body::before`/`body::after` effects; descendant selectors alone
+do not cover these pseudo-elements. Normal expansion restores the effects.
+
+**Animation and reading position.** Full hide fades the complete composited body
+over 240 ms before shrinking the native window; this includes scanline pseudo-elements.
+Sub-tab collapse fades content without `display:none` and animates a compositor
+clip to the header before resizing the already-clipped native window. Repeated
+native resize calls can stall Windows painting; they do not drive the visible fade.
+The hide deadline starts at the first animation frame, not the input handler, so
+a delayed first paint cannot consume the fade duration before anything is drawn.
+Native min/max hints permit intermediate frames and are pinned only after completion.
+A wake cancels pending hide completion; expansion restores the saved height.
+Passive expansion preserves scroll intent; explicit Insert/focus-to-chat still requests
+the newest message. Wheel, scrollbar/touch and list navigation keys establish reading
+intent; browser layout/resize scroll events do not. Event-driven observers re-pin a
+bottom-following feed after layout or asset loading, never a reader browsing history.
+
+Regression coverage: `collapse-animation.test.js`, `observeScrollIntent.test.ts`,
+shared chat lifecycle/PM suites, and `npm run test:interaction`. The interaction
+run records intermediate opacity/native-height samples, cancellation, reading
+position, ten small/large saved-size switches while following latest messages,
+three switches while reading history, sending two messages large then shrinking
+without Insert, reconnects and draft retention, and tears
+down its own profile/relay. `FCM_TEST_EXECUTABLE` may target the Windows portable
+package's unpacked executable: the runner supplies an isolated temporary
+`PORTABLE_EXECUTABLE_DIR`/`FCMData` and fixture-only local relay, never the live profile.
+Native Windows visual acceptance is separate from Linux/unit results.
 
 The **"Auto-hide delay"** slider (Settings → Appearance) controls how long the overlay waits before collapsing. It is persisted as `ShellSettings.idleCollapseSeconds` (default 25, bounded 5–120 by `clampIdleCollapseSeconds` in `shell-core.ts`). The idle timer reads the live `idleFadeMs` value, which is updated immediately as the slider drags (`applyLive`) and on commit — no restart needed. Out-of-range or corrupted persisted values fall back to the default via the clamp.
 
 ---
 
 ## Mention auto-appear
+
+### Numeric sizing and saved positions
+
+Appearance provides Width/Height fields and **Apply size**. Positive whole-number
+desktop logical pixels are accepted; the main process clamps to the current
+monitor's usable work area and supported minimums. Apply reports the actual native
+dimensions (window-manager rounding can differ by a pixel), not merely the input.
+It clears temporary modal-size restoration so closing settings preserves the new
+size. **SET POS** under Keybinds captures those dimensions and the position into an
+existing preset; restoring the preset uses the same guarded bounds path as before.
+Changing a field alone never resizes the window. No new global input binding is used.
+
+Tests: `numeric-size.test.js` rejects invalid/nonfinite/fractional dimensions and
+verifies clamping/persistence; Electron interaction tests repeat Apply → SET POS →
+restore three times using the dimensions actually reported by the native window.
 
 When a live WebSocket `chat:message` arrives that mentions the current user,
 `ChatOverlay.tsx` dispatches the appear event for **every** such mention — both

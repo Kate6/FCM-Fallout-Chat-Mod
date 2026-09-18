@@ -19,6 +19,10 @@ interface EmojiMartData {
 }
 
 const DATA = emojiData as EmojiMartData;
+
+// Keep Unicode cells independent of decorative chat fonts, which may contain
+// monochrome or missing-glyph placeholders that prevent useful OS fallback.
+const EMOJI_FONT_FAMILY = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", emoji, sans-serif';
 const CUSTOM_EMOJI_TOKEN_RE = /^<(a?):([A-Za-z0-9_]+):(\d{16,22})>$/;
 export const RECENT_EMOJI_STORAGE_KEY = 'fcm-recent-emojis';
 export const RECENT_EMOJI_LIMIT = 16;
@@ -414,7 +418,7 @@ export default function EmojiPicker({
                       <img src={custom.url} alt={`:${custom.name}:`} loading="lazy"
                         style={{ width: 24, height: 24, objectFit: 'contain' }} />
                     ) : (
-                      <span style={{ fontSize: 20, lineHeight: '32px', userSelect: 'none' }}>{token}</span>
+                      <span style={{ fontFamily: EMOJI_FONT_FAMILY, fontSize: 20, lineHeight: '32px', userSelect: 'none' }}>{token}</span>
                     )}
                   </EmojiCell>
                 );
@@ -460,7 +464,7 @@ export default function EmojiPicker({
                     title={`:${e.id}:`}
                     onClick={() => { handleInsert(native); }}
                   >
-                    <span style={{ fontSize: 20, lineHeight: '32px', userSelect: 'none' }}>{native}</span>
+                    <span style={{ fontFamily: EMOJI_FONT_FAMILY, fontSize: 20, lineHeight: '32px', userSelect: 'none' }}>{native}</span>
                   </EmojiCell>
                 );
               })}
