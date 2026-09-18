@@ -25,7 +25,11 @@ class FcmServerSession {
         return true;
     }
     public function fresh(now:Float):Bool { return room.length > 0 && now - confirmedAt < 60000; }
-    public function acceptsMessage(messageId:String):Bool {
-        return room.length > 0 && messageId != null && StringTools.startsWith(messageId, "server:" + room + ":");
+    public function acceptsMessage(messageId:String, historyRoom:String = ""):Bool {
+        if (room.length == 0 || messageId == null) return false;
+        if (StringTools.startsWith(messageId, "server:" + room + ":")) return true;
+        // Replay remains bound to the confirmed room. Never accept an old live
+        // row merely because it has a well-formed ID from a previous room.
+        return historyRoom == room && ~/^server:r:[0-9a-f-]{36}:[1-9][0-9]*$/.match(messageId);
     }
 }

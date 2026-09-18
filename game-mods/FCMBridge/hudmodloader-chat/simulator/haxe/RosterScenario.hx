@@ -188,6 +188,19 @@ class RosterScenario {
         check("empty solo room can rebind after expiry", widget._serverSessionReady);
         MockXscal.enqueueServerHistory(widget._serverSession.room);
         drain(widget);
+        // Replay authorization crosses the actual native adapter and carrier decoder.
+        var replayRoom = "r:00000000-0000-4000-8000-000000000002";
+        MockXscal.enqueueServerReady(widget._serverSession.requestId, replayRoom);
+        MockXscal.enqueueRetainedHistory("", 101);
+        MockXscal.enqueueRetainedHistory("r:stale", 102);
+        MockXscal.enqueueRetainedHistory(replayRoom, 103);
+        MockXscal.enqueueRetainedHistory(replayRoom, 103);
+        drain(widget);
+        check("only authorized retained row rendered once count=" + serverRows(widget)
+            + " room=" + widget._serverSession.room, serverRows(widget) == 1);
+        check("retained message identity preserved", widget._records[widget._records.length - 1].messageId
+            == "server:r:00000000-0000-4000-8000-000000000001:103");
+        flash.Lib.trace("RETAINED-HISTORY PASS authorized=once stale=rejected unmarked=rejected id=preserved");
         MockGameData.publish("MenuStackData", {menuStackA:[{menuName:"MainMenu"}]});
         widget.checkWorldId();
         widget.checkWorldId();

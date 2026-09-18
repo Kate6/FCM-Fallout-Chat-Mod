@@ -1,5 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { SERVER_HISTORY_ROOM } from '../serverChat';
 import {
   relayHudCosmetics,
   relayHudCosmeticTransport,
@@ -7,6 +8,16 @@ import {
   relayHudSendAck,
   withoutRelayHudCosmetics,
 } from '../relayCosmetics';
+
+test('native history room marker requires server-read provenance and negotiation', () => {
+  const room = 'r:00000000-0000-4000-8000-000000000002';
+  const event = { channel: 'server', messageId: 'server:r:00000000-0000-4000-8000-000000000001:1' };
+  const projected = relayHudEventForClient({ ...event, [SERVER_HISTORY_ROOM]: room }, true);
+  assert.ok(String((projected as Record<string, unknown>).targetUserId).endsWith(';h=' + encodeURIComponent(room)));
+  assert.ok(!String((relayHudEventForClient({ ...event, historyRoom: room }, true) as Record<string, unknown>).targetUserId).includes(';h='));
+  assert.equal((relayHudEventForClient({ ...event, [SERVER_HISTORY_ROOM]: room }, false) as Record<string, unknown>).targetUserId, undefined);
+  assert.ok(!String((relayHudEventForClient({ ...event, channel: 'global', [SERVER_HISTORY_ROOM]: room }, true) as Record<string, unknown>).targetUserId).includes(';h='));
+});
 
 describe('relayHudCosmetics', () => {
   test('projects the Overseer tag and selected supporter star colour', () => {

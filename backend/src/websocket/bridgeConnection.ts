@@ -124,7 +124,7 @@ export class BridgeConnection {
       if (!(await this.matches(binding, epoch))) return;
       const messages = this.rows(history, binding, true);
       this.output({ type: 'bridge:history', payload: { bindingId: bridgeBindingId(binding),
-        channelId: `server:${binding.room}`, messages } });
+        channelId: `server:${binding.room}`, historyReplay: true, messages } });
     });
   }
   observe(value: unknown, receivedAt = Date.now()): Promise<void> {
@@ -143,7 +143,7 @@ export class BridgeConnection {
       const history = await this.deps.history(binding.room, 0, 50);
       if (!(await this.matches(binding, epoch))) return;
       this.output({ type: 'bridge:history', payload: { bindingId: bridgeBindingId(binding),
-        channelId: `server:${binding.room}`, messages: this.rows(history, binding, true) } });
+        channelId: `server:${binding.room}`, historyReplay: true, messages: this.rows(history, binding, true) } });
     });
   }
   leave(): Promise<void> {

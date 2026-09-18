@@ -5,6 +5,17 @@ const state = readBridgeState({ status: 'ready', channelId: 'server:r:one', bind
 const frame = { channelId: 'server:r:one', bindingId: 'user_a/nonce/r:one' };
 const row = (id: number) => ({ id: `server:r:one:${id}`, channelId: 'server:r:one', content: 'same text', timestamp: `2026-09-12T00:00:0${id}Z` });
 describe('private bridge feed', () => {
+  it('accepts inherited IDs only in current-bound history and deduplicates replay', () => {
+    const inherited = { ...row(1), id: 'server:r:00000000-0000-4000-8000-000000000001:1' };
+    expect(mergeBridgeRows([], [inherited], state, frame, 100)).toEqual([]);
+    const replay = { ...frame, historyReplay: true };
+    const first = mergeBridgeRows([], [inherited], state, replay, 100);
+    expect(first).toEqual([inherited]);
+    expect(mergeBridgeRows(first, [inherited], state, replay, 100)).toBe(first);
+    expect(mergeBridgeRows([], [inherited], state, { ...replay, bindingId: 'stale' }, 100)).toEqual([]);
+    expect(mergeBridgeRows([], [{ ...inherited, channelId: 'server:r:other' }], state, replay, 100)).toEqual([]);
+    expect(mergeBridgeRows([], [{ ...inherited, id: 'global:1' }], state, replay, 100)).toEqual([]);
+  });
   it('public/web mode and malformed room states cannot enable Server', () => {
     expect(readBridgeState({ ...frame, status: 'ready' }, false)).toEqual(INACTIVE_BRIDGE);
     expect(readBridgeState({ ...frame, status: 'ready', channelId: 'general' }, true)).toEqual(INACTIVE_BRIDGE);

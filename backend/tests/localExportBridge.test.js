@@ -46,6 +46,7 @@ const { getServerHistory } = require('../src/services/relay/serverChat');
 const { sendServerMessage } = require('../src/services/relay/serverMessageService');
 const { bridgeBindingId } = require('../src/services/relay/overlayServerBridge');
 const { BridgeConnection } = require('../src/websocket/bridgeConnection');
+const { mergeBridgeRows, readBridgeState, clearBridgeRows, INACTIVE_BRIDGE } = require('../../admin-dashboard/src/features/chat/bridgeFeed');
 const snapshot = (changes = {}) => ({ schemaVersion: 1, environment: 'dev', provider: 'zfe', build: '0.2.0',
   sessionId: 'movie-one', worldGeneration: 'world-one', sequence: 1, observationSequence: 1,
   observationAgeMs: 0, state: 'active', ownName: 'Alice', names: ['Bob'], ...changes });
@@ -151,6 +152,15 @@ test.each([['zfe', 'zfe'], ['zfe', 'xscal'], ['xscal', 'zfe'], ['xscal', 'xscal'
   expect((await getServerHistory(survivorRoom, 0, 50)).map(row => row.messageId)).toEqual([message.messageId]);
   await a.connection.watch('local-export');
   expect(a.frames.filter(frame => frame.type === 'bridge:history').flatMap(frame => frame.payload.messages).map(row => row.id)).toContain(message.messageId);
+  // Exercise the actual renderer filter across serialized backend frames, not
+  // just storage and backend row projection (the previous regression gap).
+  let rendered = [], state = INACTIVE_BRIDGE;
+  for (const frame of JSON.parse(JSON.stringify(a.frames))) {
+    if (frame.type === 'bridge:state') { state = readBridgeState(frame.payload, true); rendered = clearBridgeRows(rendered); }
+    else if (frame.type === 'bridge:history' || frame.type === 'bridge:message')
+      rendered = mergeBridgeRows(rendered, frame.payload.messages, state, frame.payload, 50);
+  }
+  expect(rendered.map(row => row.id)).toEqual([message.messageId]);
   expect(expiries.get(`relay:serverchat:${survivorRoom}`)).toBe(deadline);
   await sendServerMessage({ accountId: 'account-b', relayUserId: 'user_b', displayName: 'Bob' }, departingRoom, 'after split');
   expect((await getServerHistory(survivorRoom, 0, 50)).map(row => row.body)).toEqual(['before departure']);

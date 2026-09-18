@@ -7,6 +7,8 @@
  * arbitrary badge text on the Scaleform surface.
  */
 
+import { SERVER_HISTORY_ROOM } from './serverChat';
+
 export interface RelayHudCosmetics {
   tag?: string;
   supporterStar?: true;
@@ -122,8 +124,13 @@ export function relayHudEventForClient<T extends Record<string, unknown>>(
     cosmetics,
     typeof event.messageId === 'string' ? event.messageId : '',
   );
+  // Native providers preserve targetUserId but can discard additive JSON fields.
+  // Only a server history read supplies this Symbol; live/client JSON cannot.
+  const historyRoom = (event as T & { [SERVER_HISTORY_ROOM]?: string })[SERVER_HISTORY_ROOM];
+  const historySuffix = event.channel === 'server' && typeof historyRoom === 'string'
+    && /^r:[0-9a-f-]{36}$/.test(historyRoom) ? `;h=${encodeURIComponent(historyRoom)}` : '';
   return transport
-    ? ({ ...event, targetUserId: transport } as T)
+    ? ({ ...event, targetUserId: transport + historySuffix } as T)
     : event;
 }
 
