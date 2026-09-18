@@ -95,3 +95,13 @@ identifies this local candidate. These installs do not establish native acceptan
 
 No hosted backend deployment occurred. Cross-room staff visibility requires the
 compatible backend deployment and cannot be accepted solely from these installs.
+
+### Hosted CI test-isolation correction
+
+PR #544 exposed a delayed rejection from the Discord mapping Jest suite: its
+logger mock lacked `__esModule`, so esbuild default-import interop hid `warn`.
+A direct presence-flush regression reproduced the exact failure. The suite now
+uses the correct mock shape, an unavailable Redis fixture instead of a real
+connection, and clears intervals created during its imports. Production presence
+behavior is unchanged; this prevents the suite's background work leaking into
+later tests.
