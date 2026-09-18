@@ -21,6 +21,12 @@ const redis = {
   lPush: jest.fn(async (key, value) => { lists.set(key, [value, ...(lists.get(key) ?? [])]); return lists.get(key).length; }),
   lTrim: jest.fn(async (key, first, last) => { lists.set(key, lists.get(key).slice(first, last + 1)); return 'OK'; }),
   lRange: jest.fn(async (key, first, last) => (lists.get(key) ?? []).slice(first, last + 1)),
+  copy: jest.fn(async (source, destination) => {
+    if (!lists.has(source) || lists.has(destination)) return false;
+    lists.set(destination, [...lists.get(source)]);
+    if (expiries.has(source)) expiries.set(destination, expiries.get(source));
+    return true;
+  }),
   publish: jest.fn(async (_channel, body) => { for (const listener of listeners) listener(JSON.parse(body)); return listeners.size; }),
 };
 const prisma = { user: { findUnique: jest.fn() } };
@@ -130,6 +136,47 @@ test('backend queue and auth latency consume observation freshness rather than r
   expect(a.frames.some(frame => frame.payload.status === 'ready')).toBe(false);
 });
 
+test.each([['zfe', 'zfe'], ['zfe', 'xscal'], ['xscal', 'zfe'], ['xscal', 'xscal']])('delayed HUD %s departure preserves bridge %s history but isolates future messages', async (_hudProvider, provider) => {
+  const a = desktop();
+  await a.local.observe(snapshot({ provider }));
+  await observeNativeRoster('user_b', 'Bob', ['Alice'], 'native-world');
+  const shared = await getWorldId(a.local.actorId);
+  const message = await sendServerMessage({ accountId: 'account-b', relayUserId: 'user_b', displayName: 'Bob' }, shared, 'before departure');
+  const deadline = expiries.get(`relay:serverchat:${shared}`);
+  // Laptop sees the peer disappear before the desktop's leave arrives.
+  await a.local.observe(snapshot({ provider, names: [], sequence: 2, observationSequence: 2 }));
+  const survivorRoom = await getWorldId(a.local.actorId);
+  const departingRoom = await getWorldId('user_b');
+  expect(survivorRoom).not.toBe(departingRoom);
+  expect((await getServerHistory(survivorRoom, 0, 50)).map(row => row.messageId)).toEqual([message.messageId]);
+  await a.connection.watch('local-export');
+  expect(a.frames.filter(frame => frame.type === 'bridge:history').flatMap(frame => frame.payload.messages).map(row => row.id)).toContain(message.messageId);
+  expect(expiries.get(`relay:serverchat:${survivorRoom}`)).toBe(deadline);
+  await sendServerMessage({ accountId: 'account-b', relayUserId: 'user_b', displayName: 'Bob' }, departingRoom, 'after split');
+  expect((await getServerHistory(survivorRoom, 0, 50)).map(row => row.body)).toEqual(['before departure']);
+  await coordinateRooms(assertCurrent => clearRoomMembership('user_b', assertCurrent));
+  await a.local.observe(snapshot({ provider, names: [], sequence: 3, observationSequence: 3 }));
+  expect(await getWorldId(a.local.actorId)).toBe(survivorRoom);
+  expect((await getServerHistory(survivorRoom, 0, 50)).map(row => row.messageId)).toEqual([message.messageId]);
+});
+
+test('delayed bridge peer departure preserves history for another bridge', async () => {
+  const a = desktop(), b = desktop('account-b', 'session-b');
+  await a.connection.observe(snapshot());
+  await b.connection.observe(snapshot({ provider: 'xscal', ownName: 'Bob', names: ['Alice'] }));
+  const shared = await getWorldId(a.local.actorId);
+  const message = await sendServerMessage({ accountId: 'account-b', relayUserId: b.local.actorId, displayName: 'Bob' }, shared, 'retained');
+  await a.connection.observe(snapshot({ names: [], sequence: 2, observationSequence: 2 }));
+  const survivor = await getWorldId(a.local.actorId);
+  expect(survivor).not.toBe(await getWorldId(b.local.actorId));
+  await b.local.close();
+  await a.connection.watch();
+  expect(await getWorldId(a.local.actorId)).toBe(survivor);
+  expect((await getServerHistory(survivor, 0, 50)).map(row => row.messageId)).toEqual([message.messageId]);
+  const histories = a.frames.filter(frame => frame.type === 'bridge:history');
+  expect(histories.some(frame => frame.payload.channelId === `server:${survivor}` && frame.payload.messages.some(row => row.id === message.messageId))).toBe(true);
+});
+
 test('leave during retained-history read drops late history and ready confirmations', async () => {
   const a = desktop();
   await a.local.observe(snapshot());
@@ -213,6 +260,20 @@ test('native to native retains shared room assignment and clears pending resync 
   expect(await getWorldId('user_a')).toBe(await getWorldId('user_b'));
   await coordinateRooms(assert => clearRoomMembership('user_a', assert));
   expect(await getWorldId('user_a')).toBeNull(); expect(hooks.clearResync).toHaveBeenCalledWith('user_a');
+});
+
+test('native survivor retains history when roster loss precedes native leave', async () => {
+  await observeNativeRoster('user_a', 'Alice', ['Bob'], 'hud-a');
+  await observeNativeRoster('user_b', 'Bob', ['Alice'], 'hud-b');
+  const shared = await getWorldId('user_a');
+  const message = await sendServerMessage({ accountId: 'account-b', relayUserId: 'user_b', displayName: 'Bob' }, shared, 'native retained');
+  await observeNativeRoster('user_a', 'Alice', [], 'hud-a');
+  const survivor = await getWorldId('user_a');
+  expect(survivor).not.toBe(await getWorldId('user_b'));
+  await coordinateRooms(assert => clearRoomMembership('user_b', assert));
+  await observeNativeRoster('user_a', 'Alice', [], 'hud-a');
+  expect(await getWorldId('user_a')).toBe(survivor);
+  expect((await getServerHistory(survivor, 0, 50)).map(row => row.messageId)).toEqual([message.messageId]);
 });
 
 test('heartbeat age cannot refresh observation expiry; fast travel holding preserves only the original room deadline', async () => {

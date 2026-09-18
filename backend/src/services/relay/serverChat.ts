@@ -17,6 +17,8 @@ import logger from '../../config/logger';
 
 /** Redis pub/sub channel carrying server-room events across backend instances. */
 export const SERVER_EVENTS_CHANNEL = 'relay:server:events';
+/** In-process provenance only: JSON/socket payloads cannot supply this marker. */
+export const SERVER_HISTORY_ROOM = Symbol('serverHistoryRoom');
 
 const HISTORY_PREFIX = 'relay:serverchat:';
 const HISTORY_MAX = 50; // recent messages retained per world
@@ -30,8 +32,18 @@ function historyKey(worldId: string): string {
   return `${HISTORY_PREFIX}${worldId}`;
 }
 
+/** Seed a newly isolated room with already-authorized history. COPY is atomic,
+ * preserves the source TTL and never replaces a destination or publishes events.
+ * Only the room coordinator may select source/destination; clients cannot do so. */
+export async function copySplitRoomHistory(source: string, destination: string): Promise<void> {
+  if (source === destination) throw new Error('Split history requires a new room');
+  const redis = await getRedisClient();
+  await redis.copy(historyKey(source), historyKey(destination));
+}
+
 /** A chat.message event as delivered to the ZFE client over the subscribe stream. */
 export interface ServerRoomEvent {
+  [SERVER_HISTORY_ROOM]?: string;
   id: number; // relaySeq cursor
   kind: 'chat.message';
   messageId: string;
@@ -124,7 +136,9 @@ export async function getServerHistory(
     const events: ServerRoomEvent[] = [];
     for (const s of raw) {
       try {
-        events.push(JSON.parse(s) as ServerRoomEvent);
+        const event = JSON.parse(s) as ServerRoomEvent;
+        event[SERVER_HISTORY_ROOM] = worldId;
+        events.push(event);
       } catch {
         /* skip corrupt entry */
       }

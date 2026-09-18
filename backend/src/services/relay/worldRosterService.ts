@@ -14,6 +14,7 @@
 import { getRedisClient } from '../../config/redis';
 import logger from '../../config/logger';
 import { randomUUID } from 'node:crypto';
+import { copySplitRoomHistory } from './serverChat';
 
 const KEY_PREFIX = 'relay:roster:';
 const TTL_SECONDS = 120;
@@ -185,6 +186,15 @@ export async function computeRooms(assertCurrent: () => Promise<void> = async ()
     const initial = `r:${members.find(m => m.userId === root)!.session}`;
     // Never resurrect a split room through its original root session UUID.
     const roomKey = candidates[0] ?? (members.some(m => m.roomKey) ? `r:${randomUUID()}` : initial);
+    // A disappearing sighting can precede a peer's leave. Isolate live delivery
+    // immediately, but retain the history these unchanged sessions could already
+    // read. Never seed a mixed group/new generation/new member from another room.
+    const prior = members[0]?.roomKey;
+    if (!candidates.length && prior && owners.get(prior)!.size > 1
+      && members.every(member => member.roomKey === prior)) {
+      await assertCurrent();
+      await copySplitRoomHistory(prior, roomKey);
+    }
     for (const member of members) {
       rooms.set(member.userId, roomKey);
       if (member.roomKey === roomKey) continue;

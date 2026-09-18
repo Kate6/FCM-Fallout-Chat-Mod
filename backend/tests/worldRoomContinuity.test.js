@@ -6,6 +6,7 @@ const redis = {
     values.set(key, value); return 'OK';
   }),
   del: jest.fn(async key => values.delete(key)),
+  copy: jest.fn(async () => false),
   scanIterator: async function* () { yield [...values.keys()]; },
 };
 jest.mock('../src/config/redis', () => ({ getRedisClient: async () => redis }));
@@ -39,4 +40,29 @@ test('world generation change and leave/rejoin do not inherit old history', asyn
   expect((await computeRooms()).get('a')).not.toBe(old);
   await clearRoster('a'); await setRoster('a', 'Alice', [], 'new');
   expect((await readRoster('a')).roomKey).toBeUndefined();
+  expect(redis.copy).not.toHaveBeenCalled();
+});
+
+test('split history is not granted to a newly joined member', async () => {
+  await setRoster('a', 'Alice', ['Bob'], 'a');
+  await setRoster('b', 'Bob', ['Alice'], 'b');
+  const old = (await computeRooms()).get('a');
+  await setRoster('a', 'Alice', ['Charlie'], 'a');
+  await setRoster('c', 'Charlie', ['Alice'], 'c');
+  const rooms = await computeRooms();
+  expect(rooms.get('a')).toBe(rooms.get('c'));
+  expect(rooms.get('a')).not.toBe(rooms.get('b'));
+  expect(redis.copy).not.toHaveBeenCalledWith(`relay:serverchat:${old}`, `relay:serverchat:${rooms.get('a')}`);
+  expect(redis.copy).toHaveBeenCalledWith(`relay:serverchat:${old}`, `relay:serverchat:${rooms.get('b')}`);
+});
+
+test('history storage failure aborts a split before changing room affinity', async () => {
+  await setRoster('a', 'Alice', ['Bob'], 'a');
+  await setRoster('b', 'Bob', ['Alice'], 'b');
+  const old = (await computeRooms()).get('a');
+  await setRoster('a', 'Alice', [], 'a');
+  redis.copy.mockRejectedValueOnce(new Error('storage unavailable'));
+  await expect(computeRooms()).rejects.toThrow('storage unavailable');
+  expect((await readRoster('a')).roomKey).toBe(old);
+  expect((await readRoster('b')).roomKey).toBe(old);
 });

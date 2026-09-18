@@ -1,5 +1,5 @@
 import { bridgeBindingId, resolveOverlayBridge, type BridgeBinding, type BridgeResolution } from '../services/relay/overlayServerBridge';
-import { getServerHistory, type ServerRoomEvent, type ServerEventEnvelope } from '../services/relay/serverChat';
+import { getServerHistory, SERVER_HISTORY_ROOM, type ServerRoomEvent, type ServerEventEnvelope } from '../services/relay/serverChat';
 import { sendServerMessage, ServerMessageError } from '../services/relay/serverMessageService';
 import type { LocalExportBridge } from '../services/relay/localExportBridge';
 import { readRoster } from '../services/relay/worldRosterService';
@@ -78,11 +78,14 @@ export class BridgeConnection {
     const current = await this.refresh();
     return epoch === this.epoch && !!current && bridgeBindingId(current) === bridgeBindingId(binding);
   }
-  private rows(events: ServerRoomEvent[], binding: BridgeBinding): Record<string, unknown>[] {
+  private rows(events: ServerRoomEvent[], binding: BridgeBinding, retainedHistory = false): Record<string, unknown>[] {
     const rows: Record<string, unknown>[] = [];
     for (const e of events) {
       if (e.kind !== 'chat.message' || !Number.isSafeInteger(e.id) || e.id <= 0
-        || e.messageId !== `server:${binding.room}:${e.id}` || !e.linkedUserId
+        || !(e.messageId === `server:${binding.room}:${e.id}`
+          || (retainedHistory && e[SERVER_HISTORY_ROOM] === binding.room
+            && typeof e.messageId === 'string'
+            && new RegExp(`^server:r:[0-9a-f-]{36}:${e.id}$`).test(e.messageId))) || !e.linkedUserId
         || typeof e.body !== 'string' || typeof e.createdAt !== 'string') continue;
       if (this.seen.has(e.messageId)) continue;
       this.seen.add(e.messageId);
@@ -119,7 +122,7 @@ export class BridgeConnection {
       // Watch also recovers missed pub/sub frames (up to the room's retained 50).
       const history = await this.deps.history(binding.room, 0, 50);
       if (!(await this.matches(binding, epoch))) return;
-      const messages = this.rows(history, binding);
+      const messages = this.rows(history, binding, true);
       this.output({ type: 'bridge:history', payload: { bindingId: bridgeBindingId(binding),
         channelId: `server:${binding.room}`, messages } });
     });
@@ -140,7 +143,7 @@ export class BridgeConnection {
       const history = await this.deps.history(binding.room, 0, 50);
       if (!(await this.matches(binding, epoch))) return;
       this.output({ type: 'bridge:history', payload: { bindingId: bridgeBindingId(binding),
-        channelId: `server:${binding.room}`, messages: this.rows(history, binding) } });
+        channelId: `server:${binding.room}`, messages: this.rows(history, binding, true) } });
     });
   }
   leave(): Promise<void> {

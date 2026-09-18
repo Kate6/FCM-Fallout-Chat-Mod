@@ -1,11 +1,12 @@
 jest.mock('../src/services/relay/overlayServerBridge', () => ({
   bridgeBindingId: b => `${b.relayUserId}/${b.requestId}/${b.room}`, resolveOverlayBridge: jest.fn(),
 }));
-jest.mock('../src/services/relay/serverChat', () => ({ getServerHistory: jest.fn() }));
+jest.mock('../src/services/relay/serverChat', () => ({ getServerHistory: jest.fn(), SERVER_HISTORY_ROOM: Symbol('serverHistoryRoom') }));
 jest.mock('../src/services/relay/worldRosterService', () => ({ readRoster: jest.fn() }));
 jest.mock('../src/services/relay/serverMessageService', () => ({ sendServerMessage: jest.fn(), ServerMessageError: class extends Error {} }));
 const { BridgeConnection } = require('../src/websocket/bridgeConnection');
 const { bridgeBindingId } = require('../src/services/relay/overlayServerBridge');
+const { SERVER_HISTORY_ROOM } = require('../src/services/relay/serverChat');
 const binding = { accountId: 'account-a', relayUserId: 'user_a', requestId: 'world-one', room: 'r:one', displayName: 'Alice' };
 const event = (id = 1, override = {}) => ({ id, kind: 'chat.message', messageId: `server:r:one:${id}`, channel: 'server',
   linkedUserId: 'account-b', senderUserId: 'user_b', senderDisplayName: 'Bob', body: 'hello', createdAt: '2026-09-12T00:00:00Z', ...override });
@@ -73,6 +74,18 @@ test('foreign rooms, forged IDs and legacy events without account attribution ar
 test('blocks apply to both history and live, including after a block change', async () => {
   const s = setup(); s.blocked.add('account-b'); s.deps.history.mockResolvedValue([event()]);
   await s.bridge.watch(); await s.bridge.receive(envelope(event(2))); expect(s.rows()).toEqual([]);
+});
+test('carried history needs in-process room provenance and cannot enter live delivery', async () => {
+  const s = setup();
+  const old = event(7, { messageId: 'server:r:00000000-0000-4000-8000-000000000001:7' });
+  s.deps.history.mockResolvedValue([old, { ...old, serverHistoryRoom: binding.room }, { ...old, [SERVER_HISTORY_ROOM]: 'r:other' }]);
+  await s.bridge.watch(); expect(s.rows()).toEqual([]);
+  await s.bridge.receive(envelope({ ...old, [SERVER_HISTORY_ROOM]: binding.room }));
+  expect(s.rows()).toEqual([]);
+  s.deps.history.mockResolvedValue([{ ...old, [SERVER_HISTORY_ROOM]: binding.room }]);
+  await s.bridge.watch(); await s.bridge.watch();
+  expect(s.rows()).toHaveLength(1);
+  expect(s.rows()[0]).toMatchObject({ id: old.messageId, channelId: 'server:r:one' });
 });
 test('stale client room/nonce cannot send, and accepted sends have one publication path', async () => {
   const s = setup(); await s.bridge.watch();
