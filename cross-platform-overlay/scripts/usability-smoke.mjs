@@ -632,7 +632,7 @@ try {
     const url = route.request().url();
     emojiRequests.push(url);
     if (url.includes('1509625415726006313') ||
-        (url.includes('1509631843207614626') && url.includes('cdn.discordapp.com'))) {
+        (url.includes('1509631843207614626') && new URL(url).hostname === 'cdn.discordapp.com')) {
       await route.abort();
     } else {
       await route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="12" cy="12" r="11" fill="gold"/></svg>' });
