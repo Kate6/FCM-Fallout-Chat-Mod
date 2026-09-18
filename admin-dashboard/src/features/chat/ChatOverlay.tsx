@@ -7132,7 +7132,7 @@ export default function ChatOverlay() {
       pendingMentionsRef.current = [];
       setInputText('');
       if (richInputRef.current) richInputRef.current.innerHTML = '';
-      window.relayBridge?.returnToGame?.();
+      (window as Window & { relayBridge?: { returnToGame?: () => void } }).relayBridge?.returnToGame?.();
       return;
     }
 
