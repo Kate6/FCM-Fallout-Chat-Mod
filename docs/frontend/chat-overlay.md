@@ -129,21 +129,35 @@ in the combined feed. Channel layout settings restore muted rooms. Mutes and the
 numeric labels are bounded and stored locally per account/backend environment;
 canonical IDs, not display numbers, identify the muted room. Muting does not leave
 the room, delete messages, or grant/revoke backend authority.
+While staff moderation is authorized, the overlay checks saved mutes every 30
+seconds. Backend-confirmed expired rooms disappear from the Unmute list and local
+preferences. Expiry follows the existing room activity index: one hour without a
+message or membership keepalive. Quiet occupied rooms remain; missing history,
+disconnects, failed checks and authorization loss never imply expiry. Older
+backends without the additive expiry control retain mutes until upgraded.
 
-History loads in bounded pages of up to ten rooms (50 retained messages per room).
-**Next Server rooms** replaces the current history page; up to 500 recent live
-moderation messages are retained separately, so live traffic cannot evict an older
-page under review. **Refresh Server history** starts again without reconnecting
-ordinary chat. An unavailable/overflowed stream displays an explicit retry control.
+History automatically loads into General in sequential pages of up to ten rooms
+(50 retained messages per room), paced 5.5 seconds apart to respect the existing
+rate limit. Pages merge by message ID into a rolling 500-message history buffer;
+another 500 recent live moderation messages are retained separately. Every indexed
+room is traversed, but this is a bounded recent feed, not an unlimited archive.
+There are no separate paging or refresh buttons. The normal header-menu **Refresh**
+remounts chat and restarts Server history along with ordinary history. An unavailable
+stream displays a small status directing staff to that same Refresh action.
+Disconnect, revocation and unmount cancel pending page requests; repeated or
+regressing lexical cursors cannot create a request loop.
 Privileged buffers clear on denial, account/role change and connection replacement.
 See the protocol document for authorization checks, rate bounds and the existing
 Discord-to-backend role-sync delay; this does not guarantee immediate Discord-role
 revocation or tamper-proof game membership.
 
 Desktop channel tabs show a 6px theme-primary dot, 3px left of the label, for live
-messages not currently viewed. Clicking clears it; repeated/history/self messages
-do not badge. The combined feed counts its visible channels as viewed. Hidden or
-collapsed overlay content is not considered viewed. Reduced-motion preferences
+messages in channels other than the selected sub-tab. Selecting a sub-tab by click,
+cycling keybind or other navigation clears its dot. The selected channel never
+badges, even while the overlay is hidden or collapsed. General's combined feed
+does not clear other channels' dots. Repeated/history/self messages do not badge.
+Appearance → Channel layout → **Show unread channel dots** defaults on; turning it
+off clears existing dots and ignores unread arrivals until enabled again. Reduced-motion preferences
 disable the opacity pulse. Existing mention badges and Party/PM controls remain.
 
 Regression coverage: `serverModeration.test.ts`, `overlayStability.test.tsx`, backend

@@ -13,6 +13,17 @@ publication is part of this change.
 - Desktop muting is account/environment-local, reversible and cosmetic.
 - Unread dots apply to unseen live messages, not self messages, duplicates or
   history. Reduced motion disables pulsing.
+- The selected community sub-tab never receives a dot, including while hidden;
+  every selection path clears it. Appearance can disable dots (default enabled).
+- Staff Server history pages load automatically into General without additional
+  buttons. The standard header-menu Refresh restarts both community and Server
+  history. Sequential 5.5-second page requests respect backend rate limits;
+  rolling history/live buffers remain bounded at 500 messages each.
+- Backend-confirmed expired muted rooms are removed from local Unmute preferences;
+  quiet occupied rooms survive. Expiry controls reject unauthenticated, oversized
+  and malformed requests, and suppress responses after revocation. Redis tests
+  exercise fresh, expired and missing activity records; Electron verifies the
+  Unmute entry and persisted preference disappear after confirmation.
 - Appearance pixel sizing returns native applied dimensions and uses the existing
   SET POS storage. Linux compositor acknowledgment is asynchronous: Apply waits
   briefly before returning geometry instead of persisting the previous size.
@@ -61,6 +72,12 @@ game-state/own-room confirmation fixtures with the game closed. This validates
 UI behavior, not native provider discovery or production authorization. It does
 not weaken the shipping game-presence or bridge-confirmation gates.
 
+The unread/automatic-history regression also checks multi-room accumulation,
+cursor progression and denial cancellation, click/keyboard clearing, saved unread
+preferences, absence of standalone Server history controls, and actual dropdown
+Refresh resubscription and automatic history replay. Run native Windows animation
+checks with the game closed: a concurrent game can starve compositor samples.
+
 Manual two-client game acceptance and hosted rollout remain separate, pending
 authorization. Do not describe local fixture success as production deployment.
 
@@ -105,3 +122,31 @@ uses the correct mock shape, an unavailable Redis fixture instead of a real
 connection, and clears intervals created during its imports. Production presence
 behavior is unchanged; this prevents the suite's background work leaking into
 later tests.
+
+### Unread and automatic Server-history follow-up — 2026-09-18
+
+455 dashboard tests, 1,243 overlay tests and both TypeScript checks passed.
+Complete Linux Electron and native packaged Windows UI suites passed, including
+automatic multi-room history and the existing dropdown Refresh. Fixture profiles,
+relay servers and owned test processes were torn down automatically.
+
+Under separate user authorization, the local Prod-targeted desktop AppImage and
+laptop portable overlay were replaced and launched, preserving settings. The
+desktop original is recoverable from `Fallout Chat Mod.AppImage.before-unread-20260918`
+beside the installed AppImage. The laptop EXE and FCMData backup is
+`C:\Users\White\FCM-overlay-backup-portable-20260917\before-unread-fix-20260918`.
+Final desktop SHA-256: `8f030ab214bca440e0f69ffd53cec350bd9b834f495a86897f6d4d0bb2f14291`.
+Final portable SHA-256: `b6f781f8adfdebcb958ba97e72b1df05609699cee69d9882116b4f724f9c3900`.
+These are local 1.4.0 test builds, not a published release; no HUD or backend
+change, commit, push or deployment was made in this follow-up.
+
+### Expired-room mute cleanup (not deployed)
+
+The additive authenticated expiry control requires a compatible backend and
+overlay. Previously installed 1.4.0 test builds above do not contain this later
+change. Retained room activity expires after one hour; occupied-room keepalives
+preserve it. The overlay polls only its bounded mute list every 30 seconds while
+staff access is ready. It removes expired preferences and corresponding cached
+moderation rows, without touching ordinary membership history. Failed checks,
+disconnects and revoked access preserve preferences. The disposable Redis test
+container is removed after integration verification.

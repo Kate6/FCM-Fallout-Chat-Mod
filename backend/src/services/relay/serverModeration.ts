@@ -5,6 +5,22 @@ import type { ModerationRow, ModerationPage } from '../../websocket/serverModera
 const INDEX = 'relay:server-display:rooms';
 const ACTIVITY = 'relay:server-display:activity';
 const TTL = 7200; // exceeds retained history; refreshed while any membership is alive
+const EXPIRED_MUTES = `local expired = {}
+for i = 2, #ARGV do
+  local activity = redis.call('ZSCORE', KEYS[1], ARGV[i])
+  if not activity or tonumber(activity) <= tonumber(ARGV[1]) then
+    table.insert(expired, 'server:' .. ARGV[i])
+  end
+end
+return expired`;
+
+/** Only called after staff/session authorization; bounded, atomic, read-only. */
+export async function expiredModerationRooms(channelIds: string[]): Promise<string[]> {
+  const redis = await getRedisClient();
+  return await redis.eval(EXPIRED_MUTES, { keys: [ACTIVITY],
+    arguments: [String(Date.now() - 3600_000), ...channelIds.map(id => id.slice('server:'.length))],
+  }) as string[];
+}
 const ALLOCATE = `local id = redis.call('GET', KEYS[1])
 if not id then id = tostring(redis.call('INCR', KEYS[2])) end
 redis.call('SET', KEYS[1], id, 'EX', ARGV[1])

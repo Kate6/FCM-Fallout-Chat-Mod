@@ -3,6 +3,25 @@ import assert from 'node:assert/strict';
 import { ServerModerationConnection, type ModerationRow, type ModerationPage } from '../serverModerationConnection';
 
 const row = (id = '1', room = 'a'): ModerationRow => ({ id, channelId: `server:${room}`, serverDisplayId: '123' });
+test('mute expiry is bounded, authenticated and discarded after revocation', async () => {
+  const frames: Array<{ type: string; payload: Record<string, unknown> }> = [];
+  let allowed = true; let calls = 0; let revokeDuringRead = false;
+  const c = new ServerModerationConnection(f => frames.push(f), {
+    authorize: async () => allowed,
+    history: async () => ({ messages: [], nextCursor: null }),
+    expiredRooms: async ids => { calls++; if (revokeDuringRead) allowed = false; return [...ids, 'server:r:unrequested']; },
+  });
+  await c.pruneMutes(['server:r:gone']); assert.equal(calls, 0);
+  await c.subscribe(true);
+  await c.pruneMutes(Array(501).fill('server:r:gone'));
+  await c.pruneMutes(['../../session']); assert.equal(calls, 0);
+  await c.pruneMutes(['server:r:gone', 'server:r:gone']);
+  assert.deepEqual(frames.at(-1), { type: 'server:moderation:expired', payload: { channelIds: ['server:r:gone'] } });
+  revokeDuringRead = true;
+  await c.pruneMutes(['server:r:other']);
+  assert.equal(frames.at(-1)?.payload.status, 'denied');
+  assert.equal(frames.filter(f => f.type === 'server:moderation:expired').length, 1);
+});
 function fixture() {
   const frames: Array<{ type: string; payload: Record<string, unknown> }> = [];
   let allowed = true;

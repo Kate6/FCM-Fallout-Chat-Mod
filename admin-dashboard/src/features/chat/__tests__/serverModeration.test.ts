@@ -25,6 +25,6 @@ describe('unread channel dot eligibility', () => {
   it('badges only genuinely unseen incoming messages', () => {
     expect(shouldMarkChannelUnread(incoming)).toBe(true);
     for (const flag of ['self', 'replay', 'duplicate', 'muted', 'inView']) expect(shouldMarkChannelUnread({ ...incoming, [flag]: true })).toBe(false);
-    expect(shouldMarkChannelUnread({ ...incoming, inView: true, visible: false })).toBe(true);
+    expect(shouldMarkChannelUnread({ ...incoming, inView: true, visible: false })).toBe(false);
   });
 });

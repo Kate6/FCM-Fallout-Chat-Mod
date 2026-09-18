@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 test('atomic numeric labels survive concurrent instances and retained history is bounded',
   { skip: process.env.FCM_MODERATION_REDIS_TEST !== '1' }, async () => {
     const { getRedisClient } = await import('../../../config/redis.js');
-    const { serverDisplayId, moderationHistory, noteModerationRoom } = await import('../serverModeration.js');
+    const { serverDisplayId, moderationHistory, noteModerationRoom, expiredModerationRooms } = await import('../serverModeration.js');
     const { publishServerMessage } = await import('../serverChat.js');
     const redis = await getRedisClient();
     try {
@@ -46,5 +46,8 @@ test('atomic numeric labels survive concurrent instances and retained history is
         await noteModerationRoom('test-page-00');
       } while (cursor);
       assert.equal(found.size, 23);
+      await noteModerationRoom('r:quiet');
+      await redis.zAdd('relay:server-display:activity', { value: 'r:expired', score: Date.now() - 3600_001 });
+      assert.deepEqual(await expiredModerationRooms(['server:r:quiet', 'server:r:expired', 'server:r:missing']), ['server:r:expired', 'server:r:missing']);
     } finally { await redis.quit(); }
   });

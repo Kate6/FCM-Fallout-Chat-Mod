@@ -63,7 +63,7 @@ import { LocalExportBridge } from '../services/relay/localExportBridge';
 import { SERVER_EVENTS_CHANNEL, type ServerEventEnvelope } from '../services/relay/serverChat';
 import { ServerModerationConnection } from './serverModerationConnection';
 import { authorizeServerModeration } from './serverModerationAuthorization';
-import { moderationHistory, moderationRow, serverDisplayId } from '../services/relay/serverModeration';
+import { moderationHistory, moderationRow, serverDisplayId, expiredModerationRooms } from '../services/relay/serverModeration';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -1652,6 +1652,7 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
     if (clients.get(token)?.ws === ws && ws.readyState === WebSocket.OPEN) safeSend(ws, JSON.stringify(frame), 'server-moderation');
   }, {
     history: moderationHistory,
+    expiredRooms: expiredModerationRooms,
     authorize: () => authorizeServerModeration(user.id, !!webTicketUserId, {
       current: () => ws.readyState === WebSocket.OPEN && clients.get(token)?.ws === ws,
       session: async () => (await getRedisClient()).get(`session:${token}`),
@@ -2182,6 +2183,13 @@ async function handleConnection(ws: WebSocket, req: IncomingMessage): Promise<vo
         if (webTicketUserId || clients.get(token)?.ws !== ws || typeof frame.payload?.enabled !== 'boolean') break;
         if (!frame.payload.enabled || await checkWsRateLimitBucket('server-moderation', user.id, 4, 30)) {
           await serverModeration.subscribe(frame.payload.enabled);
+        }
+        break;
+      }
+      case 'server:moderation:prune-mutes': {
+        if (webTicketUserId || clients.get(token)?.ws !== ws) break;
+        if (await checkWsRateLimitBucket('server-moderation-mutes', user.id, 2, 30)) {
+          await serverModeration.pruneMutes(frame.payload?.channelIds);
         }
         break;
       }

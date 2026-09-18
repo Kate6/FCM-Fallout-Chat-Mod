@@ -769,6 +769,7 @@ export type TimestampFormat = '12h' | '24h';
 
 interface WebOverlaySettings {
   alwaysShowOnlineStats?: boolean;
+  showUnreadDots?: boolean;
   alwaysShowServerStats?: boolean;
   themeId: string;
   fontId?: FontId;
@@ -3772,6 +3773,7 @@ export default function ChatOverlay() {
   const [moderatorRows, setModeratorRows] = useState<ChatMessage[]>([]);
   const [moderatorHistoryPage, setModeratorHistoryPage] = useState<ChatMessage[]>([]);
   const [moderatorCursor, setModeratorCursor] = useState<string | null>(null);
+  const moderatorRequestedCursor = useRef<string | null>(null);
   const [moderatorUnavailable, setModeratorUnavailable] = useState(false);
   const [unreadChannels, setUnreadChannels] = useState<Record<string, boolean>>({});
   const [serverMuteMenu, setServerMuteMenu] = useState<{ channelId: string; label: string; x: number; y: number } | null>(null);
@@ -5000,36 +5002,67 @@ export default function ChatOverlay() {
   const [roomMutes, setRoomMutes] = useState<{ scope: string | null; ids: string[]; labels: Record<string, string> }>({ scope: null, ids: [], labels: {} });
   const mutedServerRooms = roomMutes.scope === preferenceScope ? roomMutes.ids : [];
   const moderationEnabled = !!overlayShell && !isPublicMode && isMod;
-  const liveViewRef = useRef({ visible: true, muted: [] as string[], enabled: false });
-  liveViewRef.current = { visible: overlayVisible && !shellCollapsed, muted: mutedServerRooms, enabled: moderationEnabled };
+  const liveViewRef = useRef({ visible: true, muted: [] as string[], enabled: false, unreadEnabled: true, selectedChannelId: '' });
+  liveViewRef.current = { visible: overlayVisible && !shellCollapsed, muted: mutedServerRooms, enabled: moderationEnabled, unreadEnabled: settings.showUnreadDots !== false,
+    selectedChannelId: activeMainId === PARTY_MAIN_ID || activeMainId === PM_MAIN_ID ? '' : activeSubId };
+  useEffect(() => {
+    if (settings.showUnreadDots === false) setUnreadChannels({});
+  }, [settings.showUnreadDots]);
   useEffect(() => {
     let prefs = readMutedRoomPreferences(null);
     try { if (preferenceScope) prefs = readMutedRoomPreferences(JSON.parse(localStorage.getItem(`fcm-server-mutes:${preferenceScope}`) ?? '[]')); } catch { /* malformed local preference */ }
     setRoomMutes({ scope: preferenceScope, ...prefs });
     setModeratorRows([]); setModeratorHistoryPage([]); setUnreadChannels({}); unreadSeenRef.current.clear(); setServerMuteMenu(null);
   }, [preferenceScope]);
+  useEffect(() => {
+    if (!roomMutes.scope || roomMutes.scope !== preferenceScope) return;
+    try { localStorage.setItem(`fcm-server-mutes:${roomMutes.scope}`, JSON.stringify({ version: 1, ids: roomMutes.ids, labels: roomMutes.labels })); } catch { /* storage unavailable */ }
+  }, [roomMutes, preferenceScope]);
   const toggleServerMute = (channelId: string) => {
     if (!moderationEnabled || !preferenceScope) return;
     const ids = normalizeMutedRooms(mutedServerRooms.includes(channelId) ? mutedServerRooms.filter(id => id !== channelId) : [...mutedServerRooms, channelId]);
     const displayId = [...moderatorRows, ...moderatorHistoryPage].find(row => row.channelId === channelId)?.serverDisplayId;
     const prefs = readMutedRoomPreferences({ ids, labels: { ...roomMutes.labels, ...(displayId ? { [channelId]: displayId } : {}) } });
     setRoomMutes({ scope: preferenceScope, ...prefs });
-    try { localStorage.setItem(`fcm-server-mutes:${preferenceScope}`, JSON.stringify({ version: 1, ...prefs })); } catch { /* storage unavailable */ }
     setUnreadChannels(prev => { const next = { ...prev }; delete next[channelId]; return next; });
     setServerMuteMenu(null);
   };
   useEffect(() => {
+    if (!moderationEnabled || !connected || !mutedServerRooms.length) return;
+    // Deliberately wait for subscription authorization, and never infer expiry
+    // from missing history rows or a temporary transport failure.
+    const timer = setInterval(() => {
+      if (moderatorAccessRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'server:moderation:prune-mutes', payload: { channelIds: mutedServerRooms } }));
+      }
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [moderationEnabled, connected, roomMutes]);
+  useEffect(() => {
     if (!moderationEnabled) { moderatorAccessRef.current = false; setModeratorRows([]); setModeratorHistoryPage([]); setServerMuteMenu(null); }
     if (connected && wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ type: 'server:moderation:subscribe', payload: { enabled: moderationEnabled } }));
   }, [moderationEnabled, connected]);
+  // Walk authorized history pages automatically, one response at a time. Delay
+  // each request to avoid a burst; cancel on disconnect, revocation or unmount.
+  useEffect(() => {
+    if (!moderationEnabled || !connected || !moderatorCursor || moderatorUnavailable
+      || moderatorCursor.length > 128
+      || (moderatorRequestedCursor.current !== null && moderatorCursor <= moderatorRequestedCursor.current)) return;
+    const socket = wsRef.current;
+    const timer = setTimeout(() => {
+      if (!moderatorAccessRef.current || socket !== wsRef.current || socket?.readyState !== WebSocket.OPEN) return;
+      moderatorRequestedCursor.current = moderatorCursor;
+      socket.send(JSON.stringify({ type: 'server:moderation:history', payload: { cursor: moderatorCursor } }));
+    }, 5500); // Stay below the existing six history requests per 30s limit.
+    return () => clearTimeout(timer);
+  }, [moderationEnabled, connected, moderatorCursor, moderatorUnavailable]);
   const markLiveUnread = (row: { id: string; channelId: string; userId?: string }, replay = false) => {
     if (!overlayShell || isPublicMode || !row.id || !row.channelId) return;
     const duplicate = unreadSeenRef.current.has(row.id);
     unreadSeenRef.current.add(row.id);
     if (unreadSeenRef.current.size > 1500) unreadSeenRef.current.delete(unreadSeenRef.current.values().next().value!);
-    const v = viewCtxRef.current;
-    const inView = v.feedId ? row.channelId === v.feedId || v.feedChildIds.includes(row.channelId) : row.channelId === v.activeSubId;
-    if (shouldMarkChannelUnread({ self: row.userId === myUserIdRef.current, replay, duplicate,
+    const inView = row.channelId === liveViewRef.current.selectedChannelId;
+    if (liveViewRef.current.unreadEnabled && shouldMarkChannelUnread({ self: row.userId === myUserIdRef.current, replay, duplicate,
       muted: liveViewRef.current.muted.includes(row.channelId), visible: liveViewRef.current.visible, inView })) {
       setUnreadChannels(prev => ({ ...prev, [row.channelId]: true }));
     }
@@ -5243,6 +5276,7 @@ export default function ChatOverlay() {
       moderatorAccessRef.current = false;
       setModeratorRows([]);
       setModeratorHistoryPage([]);
+      moderatorRequestedCursor.current = null;
       setModeratorCursor(null); setModeratorUnavailable(false);
       clearInterval(bridgeWatch);
       bridgeStateRef.current = INACTIVE_BRIDGE;
@@ -5410,13 +5444,28 @@ export default function ChatOverlay() {
               if (frame.type === 'server:moderation:state') {
                 moderatorAccessRef.current = liveViewRef.current.enabled && frame.payload?.status === 'ready';
                 setModeratorUnavailable(liveViewRef.current.enabled && frame.payload?.status === 'unavailable');
-                if (!moderatorAccessRef.current) { setModeratorRows([]); setModeratorHistoryPage([]); setModeratorCursor(null); setServerMuteMenu(null); }
+                if (!moderatorAccessRef.current) { setModeratorRows([]); setModeratorHistoryPage([]); setModeratorCursor(null); moderatorRequestedCursor.current = null; setServerMuteMenu(null); }
+                return;
+              }
+              if (frame.type === 'server:moderation:expired') {
+                if (!liveViewRef.current.enabled || !moderatorAccessRef.current) return;
+                const expired = normalizeMutedRooms(frame.payload?.channelIds);
+                // Removing a mute must not resurrect its cached expired-room
+                // rows in General. Ordinary membership/history is untouched.
+                setModeratorRows(prev => prev.filter(row => !expired.includes(row.channelId)));
+                setModeratorHistoryPage(prev => prev.filter(row => !expired.includes(row.channelId)));
+                setServerMuteMenu(prev => prev && expired.includes(prev.channelId) ? null : prev);
+                setRoomMutes(prev => {
+                  if (!prev.scope || !prev.ids.some(id => expired.includes(id))) return prev;
+                  const prefs = readMutedRoomPreferences({ ids: prev.ids.filter(id => !expired.includes(id)), labels: prev.labels });
+                  return { scope: prev.scope, ...prefs };
+                });
                 return;
               }
               if (frame.type === 'server:moderation:messages') {
                 if (!liveViewRef.current.enabled || !moderatorAccessRef.current) return;
                 const rows = readModeratorRows(frame.payload?.messages);
-                if (frame.payload?.historyReplay === true) setModeratorHistoryPage(rows);
+                if (frame.payload?.historyReplay === true) setModeratorHistoryPage(prev => mergeModeratorRows(prev, rows));
                 else setModeratorRows(prev => mergeModeratorRows(prev, rows));
                 if (frame.payload?.historyReplay === true) setModeratorCursor(frame.payload.hasMore === true && typeof frame.payload.nextCursor === 'string' ? frame.payload.nextCursor : null);
                 return;
@@ -7342,7 +7391,7 @@ export default function ChatOverlay() {
     });
     setUnreadChannels(prev => {
       const next = { ...prev };
-      for (const id of feedId ? [feedId, ...feedChildIds] : [activeSubId]) delete next[id];
+      if (activeMainId !== PARTY_MAIN_ID && activeMainId !== PM_MAIN_ID) delete next[activeSubId];
       return next;
     });
   }, [activeSubId, isMainFeedView, feedParent, activeMainId, partyView]);
@@ -9743,7 +9792,7 @@ export default function ChatOverlay() {
                   ...(overlayShell ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}),
                 }}>
                   {unread > 0 && <UnreadBadge n={unread} onClick={e => jumpToSubMention(e, sub.id)} />}
-                  {overlayShell && unreadChannels[sub.id] && !mutedServerRooms.includes(sub.id) && <span
+                  {overlayShell && settings.showUnreadDots !== false && sub.id !== activeSubId && unreadChannels[sub.id] && !mutedServerRooms.includes(sub.id) && <span
                     className="fcm-channel-unread" role="img" aria-label={`Unread messages in ${sub.name}`}
                     style={{ width: 6, height: 6, borderRadius: '50%', background: primaryColor, marginRight: 3, flexShrink: 0 }} />}
                   {giveawayActive && sub.id === '00000000-0000-0000-0000-000000000003' && (
@@ -9765,19 +9814,8 @@ export default function ChatOverlay() {
         )}
 
         {/* ── Report alerts (mod only) ── */}
-        {moderationEnabled && isMainFeedView && <div style={{ padding: '2px 8px', color: primaryColor }}>
-          {(moderatorCursor || moderatorUnavailable) && <button onClick={() => {
-            if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-            wsRef.current.send(JSON.stringify(moderatorUnavailable
-              ? { type: 'server:moderation:subscribe', payload: { enabled: true } }
-              : { type: 'server:moderation:history', payload: { cursor: moderatorCursor } }));
-          }}>{moderatorUnavailable ? 'Server moderation paused — retry' : 'Next Server rooms'}</button>}
-          <button onClick={() => {
-            if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-            wsRef.current.send(JSON.stringify({ type: 'server:moderation:subscribe', payload: { enabled: false } }));
-            wsRef.current.send(JSON.stringify({ type: 'server:moderation:subscribe', payload: { enabled: true } }));
-          }}>Refresh Server history</button>
-          <span style={{ fontSize: '.8em' }}> Current history page plus recent live messages. Next replaces the history page.</span>
+        {moderationEnabled && isMainFeedView && moderatorUnavailable && <div role="status" style={{ padding: '2px 8px', color: primaryColor, fontSize: '.8em' }}>
+          Server history unavailable. Use Refresh in the header menu to retry.
         </div>}
         {isMod && reportAlerts.length > 0 && (
           <div style={{ padding: '2px 8px', flexShrink: 0 }}>

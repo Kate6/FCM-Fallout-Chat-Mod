@@ -40,5 +40,5 @@ export function readMutedRoomPreferences(value: unknown): { ids: string[]; label
 }
 
 export function shouldMarkChannelUnread(input: { self: boolean; replay: boolean; duplicate: boolean; muted: boolean; visible: boolean; inView: boolean }): boolean {
-  return !input.self && !input.replay && !input.duplicate && !input.muted && !(input.visible && input.inView);
+  return !input.self && !input.replay && !input.duplicate && !input.muted && !input.inView;
 }
