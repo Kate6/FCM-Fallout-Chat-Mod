@@ -4,7 +4,8 @@
  * The chat feed can mount many message rows at once. A process-global random
  * value would reshuffle on reconnects/renders, while no delay makes every row
  * animate in lockstep. Hashing the message identity gives each row its own
- * repeatable phase without a timer or per-frame JavaScript work.
+ * repeatable phase without per-frame JavaScript work. Chroma uses these same
+ * variables in its visible-only discrete scheduler rather than CSS animation.
  */
 
 export const OVERSEER_ANIMATED_EFFECTS = [

@@ -84,6 +84,8 @@ Channel controls and review status: [sub-tab customization and bridge safety](su
 
 Performance work: [idle renderer performance spec](idle-renderer-performance-spec.md)
 defines the desktop CPU investigation, draft budgets and regression gates.
+[Windows focus-return performance](windows-focus-performance.md) covers the reusable
+helper and opt-in bounded local CPU/bridge-read capture for portable and installed builds.
 The [implementation and profiling results](idle-renderer-performance-results.md) distinguish
 verified local regressions from pending native performance acceptance.
 
@@ -117,7 +119,7 @@ cross-platform-overlay/
 The Electron shell provides everything the web `ChatOverlay.tsx` component does not:
 
 - **Window chrome** — transparent/frameless BrowserWindow, drag strip, tray icon, min/close buttons
-- **Game-process detection** — `tasklist` (Windows) / `ps -A` (Linux) to detect `Fallout76.exe`; shows or hides the overlay automatically when the game starts or exits
+- **Game-process detection** — the existing Windows foreground helper checks a process-only OS metadata snapshot every 2.5 seconds for `Fallout76.exe` / `Project76_GamePass.exe`; bounded `tasklist` fallback remains for startup or unavailable/stale helpers. Linux uses `ps -A`. Existing launch/exit hysteresis still controls automatic visibility; no game memory is read.
 - **Experimental contained portable mode** — explicit portable builds keep FCM-owned durable state beside the artifact under `FCMData/`, while retaining normal process-triggered visibility. This dev-relay experiment neither imports installed state nor registers auto-start; see [building.md](building.md#fully-contained-portable-experiment).
 - **Global hotkeys** — navigation-cluster keys (Insert, Delete, End, PageUp/Down, Home, `\`, `/`) intercepted before the game receives them
 - **Click-through** — `setIgnoreMouseEvents` so clicks pass through to the game behind

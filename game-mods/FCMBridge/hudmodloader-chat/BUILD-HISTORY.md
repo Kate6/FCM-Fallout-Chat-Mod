@@ -1,5 +1,15 @@
 # Archived HUD build notes
 
+## Roster-visible self evidence, private candidate 2.10.111 (2026-09-19)
+
+- Adds up to four bounded `@self:` values to the existing printable v1 roster control. These are
+  room-grouping evidence only; relay-token identity and message attribution do not change.
+- The local UI name is collected from the same bounded roster rows that expose peers. The backend
+  still requires mutual sightings, and old relays safely treat the additive field as an unmatched
+  peer name during rolling deployment.
+- Automated gates are required before local installation. Fresh two-client native acceptance
+  remains pending and this candidate is not a published release.
+
 ## Production release 2.10.110 (2026-09-16)
 
 - Published as a HUD-only update after commit `775905d0` and production merge `782024f6`.

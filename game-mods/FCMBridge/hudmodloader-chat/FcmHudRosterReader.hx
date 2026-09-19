@@ -63,11 +63,13 @@ class FcmHudRosterReader {
         phase = "list shape";
         var rows:Dynamic = null;
         var names:Array<String> = null;
+        var selfName:String = "";
         if (key == "MapMenuData" || key == "PublicTeamsData") {
             rows = field(data, key == "MapMenuData" ? "MarkerData" : "publicTeams");
             if (count(rows, 2048) < 0) { result.reason = "invalid list"; return result; }
             phase = "map team helper";
             names = FcmRoster.readNames(key, data, localName);
+            if (names != null) selfName = FcmRoster.lastSelfName;
         } else {
             if (key == "TeamMarkers") { try { rows = data.Markers; } catch (_:Dynamic) {} }
             else if (key == "VoiceChatAreaData") { try { rows = data.participants; } catch (_:Dynamic) {} }
@@ -76,7 +78,8 @@ class FcmHudRosterReader {
             var n = count(rows, 2048);
             if (n < 0) { result.reason = "invalid list"; return result; }
             phase = "auxiliary helper";
-            names = readAuxiliary(rows, n, localName);
+            var auxiliary = readAuxiliary(rows, n, localName);
+            if (auxiliary != null) { names = auxiliary.names; selfName = auxiliary.selfName; }
         }
         // Invalid/damaged data is not evidence of an empty or partial world.
         if (names == null) { result.reason = "unreadable entries"; result.skipped = 1; return result; }
@@ -88,20 +91,28 @@ class FcmHudRosterReader {
                     && result.names.length < 24) result.names.push(clean);
         }
         result.names.sort(compare);
+        result.selfName = cleanName(selfName);
         return remember(result, pushed);
     }
 
     /** Mirrors the accepted widget's four-source traversal, without map/team branches. */
-    function readAuxiliary(rows:Dynamic, n:Int, localName:String):Array<String> {
+    function readAuxiliary(rows:Dynamic, n:Int, localName:String):{names:Array<String>, selfName:String} {
         phase = "auxiliary rows";
         var names:Array<String> = [];
         var local = cleanName(localName).toLowerCase();
         var damaged = false;
+        var selfName = "";
         for (i in 0...n) {
             try {
                 var row:Dynamic = rows[i];
                 if (row == null) continue;
-                if (field(row, "isLocalPlayer") == true || field(row, "isLocal") == true || field(row, "isSelf") == true) continue;
+                if (field(row, "isLocalPlayer") == true || field(row, "isLocal") == true || field(row, "isSelf") == true) {
+                    for (candidate in ["displayName", "characterName", "name", "playerName"]) {
+                        var ownValue:Dynamic = field(row, candidate);
+                        if (ownValue != null && Std.string(ownValue).length > 0) { selfName = cleanName(Std.string(ownValue)); break; }
+                    }
+                    continue;
+                }
                 var name:String = "";
                 for (candidate in ["displayName", "characterName", "name", "playerName"]) {
                     var value:Dynamic = field(row, candidate);
@@ -114,11 +125,11 @@ class FcmHudRosterReader {
                 damaged = true;
             }
         }
-        return damaged ? null : names;
+        return damaged ? null : {names:names, selfName:selfName};
     }
 
     function remember(result:FcmRosterObservation, pushed:Bool):FcmRosterObservation {
-        var signature = result.names.join("|");
+        var signature = result.selfName + "\x1F" + result.names.join("|");
         var previous = null;
         for (source in sources) if (source.key == result.key) previous = source;
         if (previous == null) {
@@ -140,6 +151,7 @@ class FcmRosterObservation {
     public var at:Float;
     public var reason:String;
     public var names:Array<String> = [];
+    public var selfName:String = "";
     public var revision:Int = 0;
     public var skipped:Int = 0;
     public function new(key:String, at:Float, reason:String = "") {

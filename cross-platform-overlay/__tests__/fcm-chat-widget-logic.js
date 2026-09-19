@@ -176,7 +176,8 @@ function worldControlBody(kind, namesOrWorldId = []) {
   switch (kind) {
     case 'world': return WORLD_CONTROL_PREFIXES.world + String(namesOrWorldId);
     case 'leave': return WORLD_CONTROL_PREFIXES.leave;
-    case 'roster': return WORLD_CONTROL_PREFIXES.roster + namesOrWorldId.join('|');
+    case 'roster': return WORLD_CONTROL_PREFIXES.roster + '@self:Self'
+      + (namesOrWorldId.length ? '|' + namesOrWorldId.join('|') : '');
     default: return '';
   }
 }

@@ -1,10 +1,9 @@
 /* ============================================================================
  * Supporter name effects.
  *
- * Pure CSS on purpose. The chat feed retains bounded message history, and the Electron
- * overlay renders transparently ON TOP of Fallout 76 — every frame of JS animation
- * work is taken from the game. Driving these from a JS animation library would cost
- * a per-name animation loop and break the feed's memoization for no visual gain.
+ * CSS owns the visual keyframes. The desktop shell bounds repetitive animation
+ * sampling with one shared clock; Chroma has a visible-only discrete scheduler.
+ * No animation library or per-name React updates enter the retained chat feed.
  *
  * Contract with ChatOverlay:
  *   --fcm-name-color    the user's resolved colour (inline, per element)
@@ -75,35 +74,26 @@
 /* Chroma Split is deliberately quiet at rest. Each message gets a short,
    occasional CRT offset burst through nameEffectMotion; it should read as a
    subtle signal, not a permanently bright or vibrating name. */
-@keyframes fcm-chroma-shift {
-  0%, 78%, 90%, 100% {
-    text-shadow:
-      0 0 2px color-mix(in srgb, var(--fcm-fx-color) 38%, transparent),
-      -1px 0 0 rgba(255, 0, 64, 0.28),
-      1px 0 0 rgba(0, 224, 255, 0.28),
-      var(--fcm-fx-outline);
-  }
-  82% {
+.fcm-name-fx--chroma-split[data-fcm-chroma="a"] {
     text-shadow:
       0 0 2px color-mix(in srgb, var(--fcm-fx-color) 42%, transparent),
       -2px 1px 0 rgba(255, 0, 64, 0.46),
       2px -1px 0 rgba(0, 224, 255, 0.46),
       var(--fcm-fx-outline);
-  }
-  84% {
+}
+.fcm-name-fx--chroma-split[data-fcm-chroma="b"] {
     text-shadow:
       0 0 2px color-mix(in srgb, var(--fcm-fx-color) 42%, transparent),
       -3px 0 0 rgba(255, 0, 64, 0.46),
       3px 0 0 rgba(0, 224, 255, 0.46),
       var(--fcm-fx-outline);
-  }
-  86% {
+}
+.fcm-name-fx--chroma-split[data-fcm-chroma="c"] {
     text-shadow:
       0 0 2px color-mix(in srgb, var(--fcm-fx-color) 40%, transparent),
       -1px -1px 0 rgba(255, 0, 64, 0.36),
       1px 1px 0 rgba(0, 224, 255, 0.36),
       var(--fcm-fx-outline);
-  }
 }
 
 .fcm-name-fx--chroma-split {
@@ -113,8 +103,39 @@
     -1px 0 0 rgba(255, 0, 64, 0.28),
     1px 0 0 rgba(0, 224, 255, 0.28),
     var(--fcm-fx-outline);
-  animation: fcm-chroma-shift var(--fcm-chroma-duration, 12s) steps(1, end) infinite;
-  animation-delay: var(--fcm-effect-delay, 0s);
+  /* Visible-only scheduler changes the shadow at four boundaries per cycle. */
+}
+
+/* Shared username hover styling otherwise interpolates every scheduled shadow
+   change for 120ms, defeating the discrete scheduler. Keep hover color/background
+   feedback, but apply the CRT's deliberately stepped shadow immediately. */
+.username-chip.fcm-name-fx--chroma-split {
+  transition-property: color, background;
+}
+
+/* Appearance previews are not children of the observed chat viewport. Preserve
+   their sample motion without starting the retained-feed CSS animation again.
+   The desktop shell budgets this preview with its shared ambient clock. */
+.fcm-name-fx--chroma-split:not(.username-chip) {
+  animation: fcm-chroma-preview 12s steps(1, end) infinite;
+}
+@keyframes fcm-chroma-preview {
+  0%, 90%, 100% {
+    text-shadow: 0 0 2px color-mix(in srgb, var(--fcm-fx-color) 38%, transparent),
+      -1px 0 0 rgba(255, 0, 64, 0.28), 1px 0 0 rgba(0, 224, 255, 0.28), var(--fcm-fx-outline);
+  }
+  82% {
+    text-shadow: 0 0 2px color-mix(in srgb, var(--fcm-fx-color) 42%, transparent),
+      -2px 1px 0 rgba(255, 0, 64, 0.46), 2px -1px 0 rgba(0, 224, 255, 0.46), var(--fcm-fx-outline);
+  }
+  84% {
+    text-shadow: 0 0 2px color-mix(in srgb, var(--fcm-fx-color) 42%, transparent),
+      -3px 0 0 rgba(255, 0, 64, 0.46), 3px 0 0 rgba(0, 224, 255, 0.46), var(--fcm-fx-outline);
+  }
+  86% {
+    text-shadow: 0 0 2px color-mix(in srgb, var(--fcm-fx-color) 40%, transparent),
+      -1px -1px 0 rgba(255, 0, 64, 0.36), 1px 1px 0 rgba(0, 224, 255, 0.36), var(--fcm-fx-outline);
+  }
 }
 
 /* ── Overseer: animated ──────────────────────────────────────────────────── */

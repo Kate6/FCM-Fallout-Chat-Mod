@@ -915,16 +915,17 @@ are labels only: moderators see `[Your server]` for their current room and
 IDs on the current authenticated desktop staff subscription (two requests/30s).
 It checks the activity index atomically and returns
 `server:moderation:expired { channelIds }` containing only requested expired IDs.
-An absent activity entry or one at least an hour old is expired; membership
-keepalives preserve quiet occupied rooms. Authorization is checked before and
+An absent activity entry or one at least an hour old is expired. The index is updated by an
+actual Server message (or an authorized split-history copy), not by roster membership keepalives;
+this keeps moderation bookkeeping out of the global room-assignment lock. Authorization is checked before and
 after the read. Redis failures do not produce an expiry response. This is
 cosmetic preference cleanup, not room deletion, membership or history authority.
 
 Display numbers are allocated atomically using Redis INCR, shared across backend
-instances, never used as authority. Their room mapping lasts two hours after last
-membership refresh/message (longer than one-hour history retention). The allocation
-sequence does not expire. World keepalives preserve the label for continuously
-occupied rooms. A Redis dataset reset also resets this temporary numbering.
+instances, never used as authority. Their room mapping lasts two hours after the room is
+indexed by message/history activity (longer than one-hour history retention). The allocation
+sequence does not expire. Ordinary roster keepalives do not allocate or refresh a moderator
+label. A Redis dataset reset also resets this temporary numbering.
 
 Every snapshot/live delivery validates the current socket, Redis session, account
 ban/kick state and fresh database moderation role before and after data I/O. Idle

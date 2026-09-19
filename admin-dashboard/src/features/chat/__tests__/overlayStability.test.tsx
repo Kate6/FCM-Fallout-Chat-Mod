@@ -198,6 +198,14 @@ describe('overlay lifecycle and navigation', () => {
         id: 'server:r:old:1', channelId: 'server:r:old', serverDisplayId: '2', username: 'Bob', source: 'server', timestamp: '2026-09-17T12:00:00Z', content: 'Older room page is visible',
       }] } });
     });
+    const newest = await screen.findByText('Live 499');
+    expect(document.querySelectorAll('[data-fcm-message-line]')).toHaveLength(100);
+    expect(screen.queryByText('Older room page is visible')).toBeNull();
+    const list = newest.closest('.fcm-scrollbar')!;
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 10000 });
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    fireEvent.wheel(list, { deltaY: -100 });
+    for (let page = 0; page < 5; page++) { list.scrollTop = 0; fireEvent.scroll(list); }
     expect(await screen.findByText('Older room page is visible')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh Server history' })).toBeNull();
   });
@@ -345,6 +353,35 @@ describe('overlay lifecycle and navigation', () => {
     expect(container.querySelectorAll('.fcm-name-fx--shimmer')).toHaveLength(2);
   });
 
+  it('keeps the reading boundary on live append, then resets to 100 on return to latest', async () => {
+    await mount();
+    const socket = sockets[0];
+    act(() => {
+      socket.open();
+      socket.emit({ type: 'chat:history', payload: { messages: Array.from({ length: 1500 }, (_, i) => ({
+        id: `window-${i}`, content: `Window row ${i}`, username: 'Bob', user_id: 'bob', channel_id: 'general',
+        created_at: new Date(Date.UTC(2026, 8, 16, 12, 0, i)).toISOString(),
+      })) } });
+    });
+    const last = await screen.findByText('Window row 1499');
+    expect(document.querySelectorAll('[data-fcm-message-line]')).toHaveLength(100);
+    const list = last.closest('.fcm-scrollbar')!;
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 10000 });
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    list.scrollTop = 500;
+    fireEvent.wheel(list, { deltaY: -100 });
+    act(() => socket.emit({ type: 'chat:message', payload: {
+      id: 'window-live', content: 'Latest live row', username: 'Bob', userId: 'bob', channelId: 'general',
+      timestamp: '2026-09-17T12:00:00Z', source: 'game',
+    } }));
+    expect(screen.getByText('Window row 1400')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-fcm-message-line]')).toHaveLength(101);
+    act(() => window.dispatchEvent(new Event('fcm-scroll-bottom')));
+    expect(document.querySelectorAll('[data-fcm-message-line]')).toHaveLength(100);
+    expect(screen.queryByText('Window row 1400')).toBeNull();
+    expect(screen.getByText('Latest live row')).toBeInTheDocument();
+  });
+
   it('keeps a pending older-page request when an unrelated history reply arrives', async () => {
     const { container } = await mount();
     const socket = sockets[0];
@@ -365,6 +402,12 @@ describe('overlay lifecycle and navigation', () => {
     fireEvent.wheel(list, { deltaY: -100 });
     fireEvent.scroll(list);
     const lazyRequests = () => socket.sent.filter(frame => frame.type === 'chat:history' && frame.payload.offset === 300);
+    expect(lazyRequests()).toHaveLength(0);
+    expect(document.querySelectorAll('[data-fcm-message-line]')).toHaveLength(200);
+    fireEvent.scroll(list);
+    expect(lazyRequests()).toHaveLength(0);
+    expect(document.querySelectorAll('[data-fcm-message-line]')).toHaveLength(300);
+    fireEvent.scroll(list);
     expect(lazyRequests()).toHaveLength(1);
     act(() => socket.emit({ type: 'chat:history', payload: { messages: [{
       id: 'trading-late', channel_id: 'trading', content: 'Delayed Trading history', username: 'Bob', created_at: '2026-09-15T12:00:00Z',

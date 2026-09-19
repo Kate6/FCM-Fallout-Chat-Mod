@@ -55,6 +55,8 @@ const os = require('os');
 // here so the logger below can use resolveLogLevel/shouldRotateLog.
 const overlayCore = require('./overlay-core');
 const { LocalBridgeRelay } = require('./local-bridge-relay');
+const { startLocalPerformance } = require('./local-performance');
+let stopLocalPerformance = () => {};
 const { discoverBridgePaths } = require('./local-bridge-paths');
 
 // Portable identity is build metadata, never a filename heuristic. Configure all
@@ -994,6 +996,10 @@ function notifyGameRequired() {
 
 // ─── Foreground-aware z-order state ───────────────────────────────────────────
 const { spawn, exec } = require('child_process');
+const { WindowsFocusWorker } = require('./windows-focus-worker');
+const { buildForegroundScript, parseGamePresenceLine, isGamePresenceFresh } = require('./windows-foreground-script');
+const windowsFocusWorker = process.platform === 'win32'
+  ? new WindowsFocusWorker({ spawn, ownerPid: process.pid, log: diag }) : null;
 const { GAME_PROCESSES, isGameProcess, isGameClass } = overlayCore;
 let zorderProc = null;            // long-lived PowerShell foreground poller (win32)
 let fgPoller = null;              // active-window poller child (KDE-Wayland / X11 / Hyprland)
@@ -1029,6 +1035,11 @@ let _cachedGameDisplayId = null;   // FO76's Electron display id (null = output 
 let _desiredRuleInstalled = null;  // latest state requested by game/display probes
 let _appliedRuleInstalled = null;  // last state confirmed by a successful helper command
 let gameScanTimer = null;          // interval handle for the process scanner
+let lastWindowsGamePresenceAt = 0;
+let windowsGameScanPending = false;
+function hasFreshWindowsGamePresence() {
+  return !!zorderProc && !fgFailClosed && isGamePresenceFresh(lastWindowsGamePresenceAt, Date.now());
+}
 let _scanCount = 0;                // diagnostic: number of game scans run
 let _lastDiagFound = null;         // diagnostic: last logged detection state
 let _inputGrabWarned = false;      // diagnostic: warned once about gamescope exclusive input grab
@@ -1039,10 +1050,15 @@ const PRESENCE_FLIP_SCANS_OFF = 3; // scans an EXIT must persist (held longer so
 
 function scanForGame() {
   if (process.platform === 'win32') {
+    // The existing native helper checks process names at the same 2.5s cadence.
+    // Retain tasklist only for startup, stale data, or blocked/crashed helpers.
+    if (hasFreshWindowsGamePresence() || windowsGameScanPending) return;
+    windowsGameScanPending = true;
     // On Windows: use tasklist (already available; no extra dependencies).
     // tasklist /FI filters by name; "No tasks" means not running.
     // Run one query per known exe name in parallel; resolve true if any matches.
     let _found = false;
+    let _failed = false;
     let _pending = GAME_PROCESSES.length;
     for (const proc of GAME_PROCESSES) {
       const exe = proc + '.exe';
@@ -1050,8 +1066,13 @@ function scanForGame() {
         `tasklist /FI "IMAGENAME eq ${exe}" /FO CSV /NH`,
         { windowsHide: true, timeout: 4000 },
         (err, stdout) => {
+          if (err) _failed = true;
           if (!err && stdout.toLowerCase().includes(exe.toLowerCase())) _found = true;
-          if (--_pending === 0) onGamePresenceChanged(_found);
+          if (--_pending === 0) {
+            windowsGameScanPending = false;
+            // A late fallback result cannot overwrite a newer native sample.
+            if (!hasFreshWindowsGamePresence()) onGamePresenceChanged(_found ? true : _failed ? null : false);
+          }
         }
       );
     }
@@ -1488,6 +1509,7 @@ let isDragging = false;
 const relaySockets = new Map();
 const localBridge = new LocalBridgeRelay({
   relayHttp: RELAY_HTTP,
+  onTiming: timing => stopLocalPerformance.observeBridge?.(timing),
   discover: environment => discoverBridgePaths({ environment, documents: app.getPath('documents') }),
   emit: (id, frame) => sendToRenderer('proxy:ws:message', { id, data: JSON.stringify(frame) }),
 });
@@ -2627,6 +2649,7 @@ ipcMain.on('window:set-opacity', (_evt, v) => {
 //     tool isn't installed — blur is still applied as a fallback).
 let pendingGameFocusReturn = null;
 function cancelGameFocusReturn(reason = 'unspecified', ownerPid = null) {
+  windowsFocusWorker?.cancel(reason);
   if (pendingGameFocusReturn) {
     diag('[return-to-game] cancelling reason=' + reason + ' ownerPid=' + ownerPid + ' helperPid=' + pendingGameFocusReturn.pid);
     try { pendingGameFocusReturn.kill(); } catch { /* already exited */ }
@@ -2657,46 +2680,7 @@ function returnFocusToGame() {
   sendToRenderer('overlay:blur-input');
 
   if (process.platform === 'win32') {
-    // blur() alone does NOT reliably foreground the game on Windows (focus lands
-    // on the desktop instead of the always-on-top overlay's predecessor). Spawn a
-    // one-shot helper that finds Fallout76's window and SetForegroundWindow()s it.
-    // The synthetic ALT tap is the standard workaround for Windows' foreground-
-    // lock (which otherwise blocks a background process from stealing foreground).
-    const ps = [
-      "$ErrorActionPreference='SilentlyContinue'",
-      'Add-Type @"',
-      'using System;using System.Runtime.InteropServices;',
-      'public class FG{',
-      ' [DllImport("user32")] public static extern IntPtr GetForegroundWindow();',
-      ' [DllImport("user32")] public static extern int GetClassName(IntPtr h,System.Text.StringBuilder b,int n);',
-      ' [DllImport("user32")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);',
-      ' [DllImport("user32")] public static extern bool SetForegroundWindow(IntPtr h);',
-      ' [DllImport("user32")] public static extern bool ShowWindow(IntPtr h,int n);',
-      ' [DllImport("user32")] public static extern void keybd_event(byte k,byte s,uint f,IntPtr e);',
-      '}',
-      '"@',
-      "$p=Get-Process Fallout76,Project76_GamePass -EA SilentlyContinue | ?{$_.MainWindowHandle -ne 0} | select -First 1",
-      '$fg=[FG]::GetForegroundWindow();[uint32]$owner=0;[void][FG]::GetWindowThreadProcessId($fg,[ref]$owner)',
-      '$class=New-Object System.Text.StringBuilder 256;[void][FG]::GetClassName($fg,$class,256)',
-      // Check at activation time: a slow PowerShell startup must not pull focus
-      // back after the user has switched to another application. Desktop/zero
-      // are the desktop fallback Windows can choose when the overlay hides.
-      `if($p -and ($owner -eq ${process.pid} -or $owner -eq $p.Id -or $owner -eq 0 -or $class.ToString() -eq 'Progman' -or $class.ToString() -eq 'WorkerW')){$h=$p.MainWindowHandle;`,
-      '[FG]::keybd_event(0x12,0,0,[IntPtr]::Zero);[FG]::keybd_event(0x12,0,2,[IntPtr]::Zero);',
-      '[FG]::ShowWindow($h,9);[FG]::SetForegroundWindow($h)}',
-    ].join('\n');
-    try {
-      const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', ps], { windowsHide: true });
-      pendingGameFocusReturn = child;
-      const timeout = setTimeout(() => { if (pendingGameFocusReturn === child) cancelGameFocusReturn('timeout'); }, 3000);
-      timeout.unref?.();
-      child.on('exit', (code, signal) => {
-        clearTimeout(timeout);
-        if (pendingGameFocusReturn === child) pendingGameFocusReturn = null;
-        diag('[return-to-game] win32 helper exited code=' + code + ' signal=' + signal);
-      });
-      child.on('error', (e) => diag('[return-to-game] win32 activate failed: ' + String(e && e.message || e)));
-    } catch (e) { diag('[return-to-game] win32 spawn threw: ' + String(e && e.message || e)); }
+    windowsFocusWorker.request();
   }
 
   if (IS_LINUX) {
@@ -4313,31 +4297,11 @@ function _runForegroundPoll(available, tried) {
 // lines stop again).
 function spawnWindowsForegroundPoller() {
   if (process.platform !== 'win32' || isQuitting) return;
+  lastWindowsGamePresenceAt = 0;
   // Match our window owner, not the executable/product name (portable builds
   // have a different name). Otherwise the poller cancels our own focus handoff.
   // Other processes keep their real names so switching apps still cancels it.
-  const ps = `
-$sig = @'
-using System;
-using System.Runtime.InteropServices;
-public class Fg {
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
-}
-'@
-Add-Type $sig
-while ($true) {
-  try {
-    $h = [Fg]::GetForegroundWindow()
-    $pid2 = 0
-    [void][Fg]::GetWindowThreadProcessId($h, [ref]$pid2)
-    Write-Output ('FCM_OWNER_PID=' + $pid2)
-    $p = Get-Process -Id $pid2 -ErrorAction SilentlyContinue
-    if ($pid2 -eq ${process.pid}) { Write-Output 'fallout-chat-mod' }
-    elseif ($p) { Write-Output $p.ProcessName } else { Write-Output '' }
-  } catch { Write-Output '' }
-  Start-Sleep -Milliseconds 100
-}`;
+  const ps = buildForegroundScript(process.pid);
   pollerStartedAt = Date.now();
   lastForegroundAt = Date.now(); // grace: give the poller FG_STALE_MS to emit its first line before the watchdog trips
   pollerEverEmitted = false;
@@ -4353,6 +4317,16 @@ while ($true) {
         const line = buf.slice(0, nl).trim();
         buf = buf.slice(nl + 1);
         if (!line) continue;
+        const gamePresence = parseGamePresenceLine(line);
+        if (gamePresence !== undefined) {
+          if (gamePresence === null) lastWindowsGamePresenceAt = 0;
+          else {
+            if (!lastWindowsGamePresenceAt) diag('[game-scan] native worker presence active');
+            lastWindowsGamePresenceAt = Date.now();
+            onGamePresenceChanged(gamePresence);
+          }
+          continue; // Presence is not foreground identity or a watchdog heartbeat.
+        }
         if (/^FCM_OWNER_PID=\d+$/.test(line)) {
           foregroundOwnerPid = Number(line.slice('FCM_OWNER_PID='.length));
           continue;
@@ -4385,6 +4359,7 @@ while ($true) {
 // meanwhile fails closed so the hotkeys are released regardless of WHY it failed.
 function handleWindowsPollerDown(reason, detail) {
   zorderProc = null;
+  lastWindowsGamePresenceAt = 0;
   if (isQuitting) return;
   const kind = overlayCore.classifyPollerExit({ msSinceStart: Date.now() - pollerStartedAt, everEmitted: pollerEverEmitted });
   const backoff = overlayCore.nextPollerBackoffMs(pollerRestartCount);
@@ -5098,6 +5073,9 @@ if (!_gotSingleInstanceLock) {
 }
 
 app.whenReady().then(() => {
+  windowsFocusWorker?.start();
+  stopLocalPerformance = startLocalPerformance({ enabled: process.env.FCM_PROFILE_LOCAL === '1',
+    metrics: () => app.getAppMetrics(), log: diag });
   // Startup diagnostics — first lines of every session's log. Critical for
   // diagnosing Linux/Proton installs we can't access directly.
   try {
@@ -5212,6 +5190,9 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  windowsFocusWorker?.dispose();
+  stopLocalPerformance();
+  cancelGameFocusReturn('shutdown');
   localBridge.dispose();
   persistBounds();
   if (IS_LINUX) restorePanelHiding();

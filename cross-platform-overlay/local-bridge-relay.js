@@ -5,9 +5,10 @@ const { bridgeEnvironment, watchExports, generation } = require('./local-bridge-
 /** One desktop owner. Renderer IPC can request history or send chat, but it can
  * neither submit local evidence nor select the legacy account-wide bridge. */
 class LocalBridgeRelay {
-  constructor({ relayHttp, discover, emit, watch = watchExports }) {
+  constructor({ relayHttp, discover, emit, watch = watchExports, onTiming }) {
     this.environment = bridgeEnvironment(relayHttp);
     this.discover = discover; this.emit = emit; this.watch = watch;
+    this.onTiming = onTiming;
     this.token = null; this.gameRunning = false; this.owner = null;
     this.watcher = null; this.expected = null; this.binding = null;
     this.epoch = 0;
@@ -51,6 +52,7 @@ class LocalBridgeRelay {
     const owner = this.owner, epoch = this.epoch;
     const current = () => epoch === this.epoch && this.owner === owner && this.token === owner.token && this.gameRunning;
     this.watcher = this.watch({ environment: this.environment,
+      onTiming: this.onTiming,
       discover: () => this.discover(this.environment),
       onSnapshot: snapshot => {
         if (!current()) return;

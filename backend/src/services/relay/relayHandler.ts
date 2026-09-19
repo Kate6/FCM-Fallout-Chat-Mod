@@ -91,6 +91,7 @@ const WORLD_LEAVE_SENTINEL_PREFIX = 'FCMCTL/1/LEAVE';
 // ROSTER control: observed nearby character names (the HUD publishes no worldId —
 // rooms are derived from sightings). Body is a pipe-separated bounded name list.
 const WORLD_ROSTER_SENTINEL_PREFIX = 'FCMCTL/1/ROSTER:';
+const ROSTER_SELF_PREFIX = '@self:';
 // Explicit UI-reload recovery. Static history is replayed immediately; server-room
 // history is held until the next authenticated roster/world bind confirms the room.
 const HISTORY_RESYNC_SENTINEL = 'FCMCTL/1/RESYNC';
@@ -433,14 +434,20 @@ function isWorldLeaveControl(body: string, actorUserId: string): boolean {
     && /^[0-9a-f]{64}$/i.test(fields[2]);
 }
 
-function parseWorldRosterControl(body: string): string[] | null {
-  const prefix = body.startsWith(WORLD_ROSTER_SENTINEL_PREFIX)
-    ? WORLD_ROSTER_SENTINEL_PREFIX
+interface ParsedRosterControl { names: string[]; ownAliases: string[] }
+function parseWorldRosterControl(body: string): ParsedRosterControl | null {
+  const prefix = body.startsWith(WORLD_ROSTER_SENTINEL_PREFIX) ? WORLD_ROSTER_SENTINEL_PREFIX
     : (body.startsWith(LEGACY_WORLD_ROSTER_SENTINEL_PREFIX) ? LEGACY_WORLD_ROSTER_SENTINEL_PREFIX : null);
   if (!prefix) return null;
   const namesField = body.slice(prefix.length);
-  if (namesField.length > MAX_ROSTER_CONTROL_BYTES) return null;
-  return namesField.length > 0 ? namesField.split(prefix === WORLD_ROSTER_SENTINEL_PREFIX ? '|' : '\x1F') : [];
+  if (Buffer.byteLength(namesField, 'utf8') > MAX_ROSTER_CONTROL_BYTES) return null;
+  const fields = namesField.length > 0 ? namesField.split(prefix === WORLD_ROSTER_SENTINEL_PREFIX ? '|' : '\x1F') : [];
+  if (prefix !== WORLD_ROSTER_SENTINEL_PREFIX) return { names: fields, ownAliases: [] };
+  const ownAliases = fields.filter(name => name.startsWith(ROSTER_SELF_PREFIX)).map(name => name.slice(ROSTER_SELF_PREFIX.length));
+  const names = fields.filter(name => !name.startsWith(ROSTER_SELF_PREFIX));
+  if (ownAliases.length > 4 || names.length > 24
+    || [...ownAliases, ...names].some(name => !name || name.length > 64)) return null;
+  return { names, ownAliases };
 }
 
 /** Per-identity limit prevents a modified client from forcing room recomputation. */
@@ -1215,18 +1222,21 @@ async function handleSend(ws: WebSocket, frame: Record<string, unknown>): Promis
     }
   }
   if (slug === 'server' && (body.startsWith(WORLD_ROSTER_SENTINEL_PREFIX) || body.startsWith(LEGACY_WORLD_ROSTER_SENTINEL_PREFIX))) {
-    const names = parseWorldRosterControl(body);
-    if (names) {
+    const roster = parseWorldRosterControl(body);
+    if (roster) {
       if (!(await checkWorldControlRateLimit(identity.userId))) {
         await deliver(errEnvelope('rate_limited', 'World controls are temporarily rate limited'));
         return;
       }
-      await observeNativeRoster(identity.userId, identity.fo76Name, names, requestId);
+      await observeNativeRoster(identity.userId, identity.fo76Name, roster.names, requestId, roster.ownAliases);
       if (isBackgroundBridge) await renewBridgeLease(identity.linkedUserId!, identity.userId, requestId);
       else await clearBridgeLease(identity.userId);
       sendControlAck(ws);
       return;
     }
+    await deliver(errEnvelope(Buffer.byteLength(body, 'utf8') > MAX_ROSTER_CONTROL_BYTES
+      ? 'message_too_long' : 'invalid_request', 'Invalid roster control'));
+    return;
   }
   if (slug === 'server' && body === HISTORY_RESYNC_SENTINEL) {
     if (!(await checkWorldControlRateLimit(identity.userId))) {

@@ -1,9 +1,16 @@
 # FCMChatWidget build, install, and verification
 
-**Widget version:** 2.10.110. Reapplies newly resolved supporter cosmetics to retained messages
-from the same authenticated sender IDs while leaving same-name foreign rows unchanged. It retains
-2.10.109's distinction between contiguous queue-retirement markers and actual unread cursor gaps.
+**Widget version:** 2.10.111. This private candidate adds bounded roster-visible local-name evidence
+for mutual Server-room inference while retaining the token-owned authenticated identity and
+message attribution. The additive v1 field remains harmless against an older relay. Fresh native
+acceptance is pending; 2.10.110 remains the current production release.
 This is the explicit opt-in HUD-mod track. The desktop overlay never installs or modifies it.
+
+The complete 58-case Ruffle suite and local Haxe/source/package/SWF/BA2/emoji gates pass. The
+tested normalized SWF SHA-256 is `042b025c1f99c794c86605f513d8b6028f4523a16f2ac8cdc7639af20af2557c`;
+the matching one-entry BA2 SHA-256 is
+`caf02743ff07d36489aa2c351f28eaf137f44c4fb856ad209f6a6ea017a2d61e`. This is automated evidence,
+not native two-client acceptance or publication approval.
 
 ## Status and scope
 

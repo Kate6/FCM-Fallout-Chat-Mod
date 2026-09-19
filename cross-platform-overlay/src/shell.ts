@@ -49,6 +49,9 @@ import {
 import { createFontPicker } from './font-picker';
 import { normalizeFontId, resolveFontFamily, SYSTEM_FONT, MONOSPACE_FONT, type FontId } from '../../admin-dashboard/src/features/chat/overlayFonts';
 import { mountSupporterAppearance } from './supporterAppearance';
+import { observeAmbientMotion } from './ambient-motion';
+
+let statusMotion: ReturnType<typeof observeAmbientMotion> | undefined;
 
 // ── Settings model (desktop-parity superset) ──────────────────────────────────
 
@@ -1920,6 +1923,9 @@ export function applyOnboardingSettings(patch: Partial<ShellSettings>) {
 // ── Boot ───────────────────────────────────────────────────────────────────────
 
 export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }) {
+  statusMotion?.dispose();
+  const motionRoot = document.getElementById('root');
+  statusMotion = motionRoot ? observeAmbientMotion(motionRoot, document.body) : undefined;
   // `?resetSettings=1` wipes persisted shell/web settings. A sessionStorage flag
   // prevents Vite HMR reloads from re-clearing within the same session.
   try {
@@ -1971,6 +1977,7 @@ export function initShell(opts: { onSettingsChange: (s: ShellSettings) => void }
   // ChatOverlay.tsx also listens to onVisibility (WS reconnect gate). A
   // second listener is fine; idle-collapse must stay shell-owned, not shared.
   window.relayBridge.onVisibility?.((isVisible) => {
+    statusMotion?.setVisible(isVisible);
     if (shouldResetIdleOnVisibility(isVisible)) markActivity();
   });
 

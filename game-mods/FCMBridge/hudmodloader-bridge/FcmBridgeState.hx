@@ -7,7 +7,7 @@ class FcmBridgeState {
     public var inWorld(default, null):Bool = false;
     public var observedAt(default, null):Float = -60000;
     var roster:FcmRoster = new FcmRoster();
-    var snapshots:Array<{key:String, revision:Int, names:Array<String>, at:Float, blocked:Bool}> = [];
+    var snapshots:Array<{key:String, revision:Int, names:Array<String>, selfName:String, at:Float, blocked:Bool}> = [];
     var loading:Bool = false;
     var waiting:Bool = false;
     var lastNames:String = "";
@@ -79,11 +79,11 @@ class FcmBridgeState {
         }
         var names = observation.names.copy();
         if (previous == null) {
-            previous = {key:key, revision:observation.revision, names:names, at:observation.at, blocked:false};
+            previous = {key:key, revision:observation.revision, names:names, selfName:observation.selfName, at:observation.at, blocked:false};
             snapshots.push(previous);
         } else {
             previous.revision = observation.revision; previous.names = names;
-            previous.at = observation.at; previous.blocked = false;
+            previous.selfName = observation.selfName; previous.at = observation.at; previous.blocked = false;
         }
         roster.replace(key, names, observation.at);
         observedAt = Math.max(observedAt, observation.at);
@@ -93,6 +93,14 @@ class FcmBridgeState {
     public static function cleanName(name:String):String return FcmHudRosterReader.cleanName(name);
     public function fresh(now:Float):Bool { return inWorld && now - observedAt < 30000; }
     public function names(now:Float):Array<String> { return roster.sessionNames(now, 30000, lastNames); }
+    /** Prefer a local name from the same fresh roster source peers are selected from. */
+    public function rosterSelfName(now:Float, fallback:String):String {
+        var source = roster.sessionSource(now, 30000, lastNames);
+        for (entry in snapshots) if (!entry.blocked && now - entry.at < 30000
+                && entry.key == source && entry.selfName.length > 0) return entry.selfName;
+        for (entry in snapshots) if (!entry.blocked && now - entry.at < 30000 && entry.selfName.length > 0) return entry.selfName;
+        return cleanName(fallback);
+    }
     /** Timestamp of the evidence actually selected by the existing roster policy.
      * A fresh auxiliary list cannot renew an older primary map/player roster.
      * Union fallback is conservatively limited by its oldest contributing source. */

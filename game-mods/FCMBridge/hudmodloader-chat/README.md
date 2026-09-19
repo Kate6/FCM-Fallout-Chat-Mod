@@ -3,6 +3,12 @@
 FCMChatWidget is the optional HUDModLoader chat widget for Fallout 76. It uses ZFE or xScal's
 native chat bridge and FCM's `/relay`. It is independent of the desktop overlay.
 
+**Current private candidate: 2.10.111 (native-unverified).** Roster controls add a bounded
+`@self:` evidence field containing the local name exposed by the same HUD roster peers see.
+The relay uses it only for mutual room inference; authenticated identity and message attribution
+remain token-owned. The additive v1 field is safe during a rolling update because older relays
+treat it as a nonmatching peer name. Fresh two-client native acceptance is still required.
+
 **Current production release: 2.10.110 (2026-09-16).** Once an authoritative
 self-echo or acknowledgement supplies the local sender's cosmetics, retained rows for the same
 authenticated sender IDs are repainted with the current star, color and tag. Same-name rows from

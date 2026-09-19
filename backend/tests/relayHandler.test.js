@@ -755,6 +755,7 @@ describe('worldIdService', () => {
   test('setWorldId stores worldId with 60s TTL', async () => {
     await setWorldId('user-abc', 'world-xyz');
     expect(redisMock.set).toHaveBeenCalledWith('relay:world:user-abc', 'world-xyz', { EX: 60 });
+    expect(redisMock.eval).not.toHaveBeenCalled();
   });
 
   test('getWorldId retrieves stored value', async () => {
@@ -2802,6 +2803,8 @@ describe('roster-derived world rooms', () => {
   const ROSTER_SENTINEL = 'FCMCTL/1/ROSTER:';
 
   const makeRosterBody = (_userId, names) => ROSTER_SENTINEL + names.join('|');
+  const makeRosterEvidenceBody = (selfNames, names) => ROSTER_SENTINEL
+    + [...selfNames.map(name => `@self:${name}`), ...names].join('|');
 
   let srv;
   beforeAll(async () => { srv = await makeServer(); }, 10000);
@@ -2954,6 +2957,24 @@ describe('roster-derived world rooms', () => {
     expect(solo).toMatchObject({ success: true });
 
     wsA.close(); wsB.close(); wsC.close();
+  });
+
+  test('roster self evidence groups peers whose linked account names differ from HUD-visible names', async () => {
+    const a = await registerAndLink('AccountAlice', 'fcm-v2-a');
+    const b = await registerAndLink('AccountBob', 'fcm-v2-b');
+    expect(await sendRaw(a, makeRosterEvidenceBody(['VisibleAlice'], ['VisibleBob']))).toMatchObject({ success: true });
+    expect(await sendRaw(b, makeRosterEvidenceBody(['VisibleBob'], ['VisibleAlice']))).toMatchObject({ success: true });
+    expect(_worldStore[`relay:world:${a.rawId}`]).toBe(_worldStore[`relay:world:${b.rawId}`]);
+  });
+
+  test('roster self evidence is bounded and still requires a mutual sighting', async () => {
+    const a = await registerAndLink('AccountOne', 'fcm-v2-one');
+    const b = await registerAndLink('AccountTwo', 'fcm-v2-two');
+    expect(await sendRaw(a, makeRosterEvidenceBody(['VisibleOne'], ['VisibleTwo']))).toMatchObject({ success: true });
+    expect(await sendRaw(b, makeRosterEvidenceBody(['VisibleTwo'], ['SomeoneElse']))).toMatchObject({ success: true });
+    expect(_worldStore[`relay:world:${a.rawId}`]).not.toBe(_worldStore[`relay:world:${b.rawId}`]);
+    expect(await sendRaw(a, makeRosterEvidenceBody(Array(5).fill('alias'), [])))
+      .toMatchObject({ success: false, error: { code: 'invalid_request' } });
   });
 
   test('oversized roster control is rejected before it can create a room assignment', async () => {

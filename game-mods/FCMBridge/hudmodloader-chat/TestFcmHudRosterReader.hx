@@ -10,13 +10,15 @@ class TestFcmHudRosterReader {
             var data:Dynamic = switch key {
                 case "TeamMarkers": {Markers:rows};
                 case "VoiceChatAreaData": {participants:rows};
-                case "MapMenuData": {MarkerData:[{markerType:"PlayerRemote",text:"PeerA"}, {markerType:"Location",text:"NotAPlayer"}]};
-                case "PublicTeamsData": {publicTeams:[{members:[{playerName:"PeerA"}, {playerName:"Self"}]}]};
+                case "MapMenuData": {MarkerData:[{markerType:"PlayerRemote",text:"PeerA"}, {markerType:"PlayerLocal",text:"VisibleSelf"}, {markerType:"Location",text:"NotAPlayer"}]};
+                case "PublicTeamsData": {publicTeams:[{members:[{playerName:"PeerA"}, {playerName:"VisibleSelf", isSelf:true}]}]};
                 default: rows;
             };
             var observation = reader.provider(key, ready(data), "Self", 12);
             check(observation.reason == "" && observation.names.join("|") == "PeerA", key + " uses common normalization");
             check(observation.at == 12 && observation.revision > 0, key + " retains observation metadata");
+            if (key == "MapMenuData" || key == "PublicTeamsData")
+                check(observation.selfName == "VisibleSelf", key + " retains roster-visible local identity evidence");
         }
         for (length in [Math.NaN, Math.POSITIVE_INFINITY, -1.0, 1.5, 2049.0]) {
             check(reader.provider("PlayerListData", ready({length:length}), "Self", 0).reason == "invalid list", "reject invalid lengths");
@@ -43,6 +45,13 @@ class TestFcmHudRosterReader {
         var push = reader.provider("PlayerListData", data, "Self", 23, true);
         check(push.revision != changed.revision, "validated fresh push advances revision");
         check(push.at == 23, "a fresh push renews observation time");
+        var identityReader = new FcmHudRosterReader();
+        var selfBefore = identityReader.provider("MapMenuData", ready({MarkerData:[
+            {markerType:"PlayerRemote", text:"PeerA"}, {markerType:"PlayerLocal", text:"VisibleSelf"}]}), "Self", 23);
+        var selfChanged = identityReader.provider("MapMenuData", ready({MarkerData:[
+            {markerType:"PlayerRemote", text:"PeerA"}, {markerType:"PlayerLocal", text:"ChangedVisibleSelf"}]}), "Self", 23.5);
+        check(selfChanged.selfName == "ChangedVisibleSelf" && selfChanged.revision != selfBefore.revision,
+            "roster-visible local identity participates in observation revisions");
         reader.clear();
         check(reader.provider("PlayerListData", data, "Self", 24).revision > push.revision, "detach cannot reuse revision");
         var control = String.fromCharCode(0);

@@ -333,6 +333,13 @@ test('native to native retains shared room assignment and clears pending resync 
   expect(await getWorldId('user_a')).toBeNull(); expect(hooks.clearResync).toHaveBeenCalledWith('user_a');
 });
 
+test('native roster self evidence converges with a desktop export when account labels differ', async () => {
+  const desktopPeer = desktop();
+  await desktopPeer.local.observe(snapshot({ ownName: 'VisibleAlice', names: ['VisibleBob'] }));
+  await observeNativeRoster('user_b', 'AccountBob', ['VisibleAlice'], 'hud-alias', ['VisibleBob']);
+  expect(await getWorldId(desktopPeer.local.actorId)).toBe(await getWorldId('user_b'));
+});
+
 test('native survivor retains history when roster loss precedes native leave', async () => {
   await observeNativeRoster('user_a', 'Alice', ['Bob'], 'hud-a');
   await observeNativeRoster('user_b', 'Bob', ['Alice'], 'hud-b');

@@ -179,6 +179,11 @@ class TestFcmCommand {
             !FcmCommand.shouldSendRoster(false, true, 60000, true));
         check("first roster is sent once",
             FcmCommand.shouldSendRoster(true, false, 0, false));
+        check("roster control carries bounded self evidence separately from peers",
+            FcmCommand.rosterControlBody(["AccountSelf", "Visible|Self", "AccountSelf"], "PeerA|PeerB")
+                == "FCMCTL/1/ROSTER:@self:AccountSelf|@self:VisibleSelf|PeerA|PeerB");
+        check("roster control fails closed without self evidence",
+            FcmCommand.rosterControlBody([], "Peer") == "");
         check("bare true after a successful clear is an empty native buffer",
             FcmCommand.nativeInputBufferIsClear("true", "true"));
         check("a rejected clear does not admit an empty native buffer",

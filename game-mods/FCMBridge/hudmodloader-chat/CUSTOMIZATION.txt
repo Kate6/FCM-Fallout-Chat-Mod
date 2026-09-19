@@ -68,6 +68,15 @@ provider sizing. Background opacity accepts 0-1. Colors accept #RRGGBB.
 Input height alone does not enlarge the font. The row grows to fit larger text.
 Legacy autoHideSec=0 also disables auto-hide; enabling it supplies 60 seconds.
 
+Manual /hide, F11 Hide chat, and the hide key stay hidden until the Open Chat key
+is pressed in an allowed HUD mode. New messages still wake inactivity auto-hide,
+but not manual hide. Escape or leaving a menu does not undo manual hide.
+For existing INIs, append InspectMode,ExamineConfirmMode,MessageMode to
+hideInHUDModes to suppress item inspection, examine/scrap confirmation, and
+modal-message HUD modes; preserve the rest of your list. The supplied INI includes
+all three. Sticky manual hide requires the updated widget BA2, not just the INI edit.
+Actual scrap/confirmation mode transitions require native testing.
+
 PUBLIC-EVENT AUTO-BROADCAST (INI only, default OFF)
 autoBroadcastWorldEvents=true enables announcing public events; the default
 false never subscribes and pays no cost. broadcastEventsMode=allow (default)

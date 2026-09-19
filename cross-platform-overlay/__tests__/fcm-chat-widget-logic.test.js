@@ -389,8 +389,8 @@ describe('server-room acknowledgement gating', () => {
     // a NUL constant cannot be split() on under GFx, and that is what caused the 2026-08
     // send outage. The frame now survives serialisation untouched.
     const body = worldControlBody('roster', ['Ada', 'Beck']);
-    expect(body).toBe('FCMCTL/1/ROSTER:Ada|Beck');
-    expect(jsonEscapeGuarded(body)).toBe('FCMCTL/1/ROSTER:Ada|Beck');
+    expect(body).toBe('FCMCTL/1/ROSTER:@self:Self|Ada|Beck');
+    expect(jsonEscapeGuarded(body)).toBe('FCMCTL/1/ROSTER:@self:Self|Ada|Beck');
   });
 
   it('world and leave frames are printable too', () => {

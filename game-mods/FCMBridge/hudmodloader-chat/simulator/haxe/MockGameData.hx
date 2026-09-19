@@ -24,7 +24,7 @@ class MockGameData {
             return switch (key) {
                 case "AccountInfoData": {accountName:"Simulator76", displayName:"Simulator76", isLoggedIn:true};
                 case "MapMenuData": {MarkerData:[
-                    {markerType:"PlayerLocal", text:"Simulator76", playerLevel:100},
+                    {markerType:"PlayerLocal", text:"VisibleSimulator", playerLevel:100},
                     {markerType:"PlayerRemote", text:"HarnessPeer", playerLevel:50}
                 ]};
                 case "MenuStackData": {menuStackA:[]};

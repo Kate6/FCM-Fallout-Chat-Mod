@@ -260,7 +260,7 @@ class FCMServerBridge extends MovieClip {
     }
     function exportState(now:Float, inactive:Bool = false, sampled:Bool = true):Void {
         if (api == null) return;
-        if (sampled) exporter.update(now, state, displayName, api.provider, api.save, inactive);
+        if (sampled) exporter.update(now, state, state.rosterSelfName(now, displayName), api.provider, api.save, inactive);
         else exporter.heartbeat(now, api.provider, api.save);
         if (conflict) return;
         status = !exporter.lastSuccess ? "Storage unavailable - retrying"

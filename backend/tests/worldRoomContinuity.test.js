@@ -84,6 +84,16 @@ test('disconnected components cannot keep sharing the old room', async () => {
   expect(rooms.get('a')).not.toBe(rooms.get('b'));
   expect(rooms.get('a')).not.toBe(old); expect(rooms.get('b')).not.toBe(old);
 });
+test('roster-only self aliases bridge account-name differences without weakening mutual sighting', async () => {
+  await setRoster('a', 'AccountAlice', ['VisibleBob'], 'a', undefined, ['VisibleAlice']);
+  await setRoster('b', 'AccountBob', ['VisibleAlice'], 'b', undefined, ['VisibleBob']);
+  const rooms = await computeRooms();
+  expect(rooms.get('a')).toBe(rooms.get('b'));
+
+  await setRoster('b', 'AccountBob', ['SomeoneElse'], 'b', undefined, ['VisibleBob']);
+  const separated = await computeRooms();
+  expect(separated.get('a')).not.toBe(separated.get('b'));
+});
 test('world generation change and leave/rejoin do not inherit old history', async () => {
   await setRoster('a', 'Alice', [], 'old'); const old = (await computeRooms()).get('a');
   await setRoster('a', 'Alice', [], 'new');

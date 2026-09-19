@@ -28,6 +28,12 @@ class TestFcmConfig {
     }
 
     static function main():Void {
+        var visibilityDefaults = new FcmConfig();
+        check("inspection hidden by default", visibilityDefaults.hideInHUDModes.indexOf("InspectMode") >= 0);
+        check("examine confirmations hidden by default", visibilityDefaults.hideInHUDModes.indexOf("ExamineConfirmMode") >= 0);
+        check("modal messages hidden by default", visibilityDefaults.hideInHUDModes.indexOf("MessageMode") >= 0);
+        eqs("custom visibility list remains authoritative",
+            FcmConfig.parse("[FCMChat]\nhideInHUDModes=ContainerMode\n").hideInHUDModes.join(","), "ContainerMode");
         check("menu above frame shifts down", FcmMenuPlacement.shift(-100, 210, 1080) == 108);
         check("menu below frame shifts up", FcmMenuPlacement.shift(1000, 210, 1080) == -138);
         check("menu inside frame stays put", FcmMenuPlacement.shift(300, 210, 1080) == 0);

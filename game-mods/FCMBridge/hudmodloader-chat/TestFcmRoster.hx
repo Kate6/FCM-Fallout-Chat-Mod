@@ -8,9 +8,11 @@ class TestFcmRoster {
             {markerType:"PlayerRemote", text:"Bob", playerLevel:30}]};
         check("map roster excludes local and non-player markers",
             FcmRoster.readNames("MapMenuData", map, "Local").join("|") == "Alice|Bob");
+        check("map roster retains its UI-visible local name", FcmRoster.lastSelfName == "Local");
         check("public team roster uses nested members",
             FcmRoster.readNames("PublicTeamsData", {publicTeams:[{members:[
-                {playerName:"Alice"}, {playerName:"Local"}, {playerName:"Carol"}]}]}, "Local").join("|") == "Alice|Carol");
+                {playerName:"Alice"}, {playerName:"VisibleLocal", isSelf:true}, {playerName:"Carol"}]}]}, "AccountLocal").join("|") == "Alice|Carol");
+        check("team roster retains flagged local name despite account mismatch", FcmRoster.lastSelfName == "VisibleLocal");
         check("restored map reader accepts a valid empty list", FcmRoster.readNames("MapMenuData", {MarkerData:[]}, "Local").length == 0);
         check("restored map reader rejects a missing list", FcmRoster.readNames("MapMenuData", {}, "Local") == null);
         check("restored map reader rejects coerced lengths", FcmRoster.readNames("MapMenuData", {MarkerData:{length:"1"}}, "Local") == null);
@@ -26,6 +28,8 @@ class TestFcmRoster {
             };
             var native = FcmRoster.readNative(key, data, "Local");
             check("native child decoder accepts " + key, native.valid && native.skipped == 0 && native.names.join("|") == "Peer");
+            if (key != "MapMenuData")
+                check("native child decoder retains roster-format self name " + key, native.selfName == "Local");
             check("valid decode finishes phase " + key, FcmRoster.readPhase == "decoder complete");
         }
         var malformed = FcmRoster.readNative("PlayerListData", {length:"2"}, "Local");

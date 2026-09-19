@@ -15,6 +15,7 @@ class MockXscal {
     public static var authPollCount(default, null):Int = 0;
     public static var connectCount(default, null):Int = 0;
     public static var ordinarySendCount(default, null):Int = 0;
+    public static var lastRosterBody(default, null):String = "";
     static var pressed:Map<Int, Bool> = new Map();
     static var registered:Map<Int, Bool> = new Map();
     static var cursor:Int = 0;
@@ -141,6 +142,7 @@ class MockXscal {
                 serverControlCount++;
                 if (body == "FCMCTL/1/LEAVE") leaveControlCount++;
                 if (StringTools.startsWith(body, "FCMCTL/1/ROSTER:")) {
+                    lastRosterBody = body;
                     var target:String = Std.string(Reflect.field(args, "targetUserId"));
                     var separator:Int = target.indexOf(";");
                     var requestId:String = separator >= 0 ? target.substr(separator + 1) : "";

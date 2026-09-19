@@ -1,4 +1,4 @@
-# FCM Server Bridge 0.2.3
+# FCM Server Bridge 0.2.4
 
 Invisible, optional HUDModLoader child. Sign into the desktop overlay only.
 No bridge login/code/pairing, chat connection, input editor or helper service.
@@ -41,7 +41,7 @@ cd ../hudmodloader-chat
 for suite in test-*.hxml; do haxe "$suite" || exit 1; done
 npm test --prefix simulator
 cd ../hudmodloader-bridge
-python3 package.py --target dev --output ../../../_dev-test-builds/server-bridge-0.2.3/FCM-Server-Bridge-0.2.3-DEV.zip
+python3 package.py --target dev --output ../../../_dev-test-builds/server-bridge-0.2.4/FCM-Server-Bridge-0.2.4-DEV.zip
 ```
 
 Also run parent native-adapter/auth/source checks and affected backend, overlay and
@@ -82,6 +82,11 @@ and the visible HUD is unchanged. Pure and isolated Ruffle tests cover malformed
 replies and recovery. The 2026-09-17 laptop check verified active, advancing ZFE exports;
 the user reported it working. Full mixed-client room/message/travel acceptance remains
 pending; see the dated evidence linked from the architecture guide.
+
+0.2.4 prefers the fresh local-player name exposed by the same accepted roster source over
+`AccountInfoData` when writing `ownName`, with the account name retained as a fallback. This
+aligns bridge evidence with the name peers actually observe without treating either value as
+authentication. Freshness, generation, mutual-sighting and bounded-export rules are unchanged.
 
 Prior native-network implementation and E1014 investigations:
 [NATIVE-NETWORK-HISTORY.md](NATIVE-NETWORK-HISTORY.md). Previous acceptance never

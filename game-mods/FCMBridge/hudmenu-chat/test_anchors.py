@@ -840,7 +840,9 @@ if widget_src:
     check("blank worldId ignored; fresh roster session remains authoritative" in widget_src,
           "FCMChatWidget keeps a fresh roster room when legacy worldId is blank")
     check('WORLD_ROSTER_PREFIX:String = "FCMCTL/1/ROSTER:"' in widget_src
-          and 'var body:String = WORLD_ROSTER_PREFIX + namesField;' in widget_src,
+          and 'var body:String = FcmCommand.rosterControlBody(aliases, namesField);' in widget_src
+          and '"FCMCTL/1/ROSTER:" + fields.join("|")' in open(
+              os.path.join(os.path.dirname(WIDGET_HX), "FcmCommand.hx"), encoding="utf-8").read(),
           "FCMChatWidget sends printable roster controls")
     check('function refreshRosterSnapshots' in widget_src
           and 'refreshRosterSnapshots(_rosterManager);' in widget_src
