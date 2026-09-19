@@ -905,12 +905,20 @@ try {
   await expect(page.getByText('Window fixture 1499', { exact: true })).toBeVisible();
   await expect(page.locator('[data-fcm-message-line]')).toHaveCount(100);
   await expect(page.getByText('Window fixture 1399', { exact: true })).toHaveCount(0);
-  const anchorBefore = await page.evaluate(() => {
+  const anchorBefore = await page.evaluate(async () => {
     const first = document.querySelector('[data-fcm-message-line]').closest('[data-msg-id]');
     const list = first.closest('.fcm-scrollbar');
     list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    // Let the intent observer cancel any pending bottom-pin work before the
+    // synthetic scroll. On loaded CI runners, doing both in one task can race
+    // the render-window effect rebind and leave the feed at its 100-row tail.
+    await new Promise(resolve => requestAnimationFrame(() => resolve()));
     list.scrollTop = 0;
     const anchor = { id: first.getAttribute('data-msg-id'), top: first.getBoundingClientRect().top };
+    list.dispatchEvent(new Event('scroll'));
+    // A second frame-bound event mirrors the browser's coalesced native scroll
+    // delivery and makes this acceptance gesture deterministic under Xvfb.
+    await new Promise(resolve => requestAnimationFrame(() => resolve()));
     list.dispatchEvent(new Event('scroll'));
     return anchor;
   });
