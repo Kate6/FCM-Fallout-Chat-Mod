@@ -2,7 +2,7 @@ import { nextConversation, type NavigationSlot } from './channelNavigation';
 import { isOlderHistoryBatch } from './historyPagination';
 import { loadPartyDirectory, readPublicPartyDirectory, partyRecoveryInterval } from './partyAvailability';
 import { FONT_OPTIONS, FONT_SAMPLE, normalizeFontId, resolveFontFamily, OVERLAY_SETTINGS_EVENT, type FontId } from './overlayFonts';
-import { INACTIVE_BRIDGE, readBridgeState, mergeBridgeRows, clearBridgeRows, bridgeSendPayload, type BridgeState } from './bridgeFeed';
+import { INACTIVE_BRIDGE, readBridgeState, mergeBridgeRows, clearBridgeRows, bridgeReplayRowsInMainFeed, bridgeSendPayload, type BridgeState } from './bridgeFeed';
 import { serverRoomLabel, readModeratorRows, mergeModeratorRows, normalizeMutedRooms, readMutedRoomPreferences, shouldMarkChannelUnread } from './serverModeration';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { messageWindowStart, previousMessagePage } from './messageRenderWindow';
@@ -4546,6 +4546,10 @@ export default function ChatOverlay() {
   });
   const [bridgeState, setBridgeState] = useState<BridgeState>(INACTIVE_BRIDGE);
   const bridgeStateRef = useRef<BridgeState>(INACTIVE_BRIDGE);
+  // IDs restored by bridge:history remain in the canonical collection so the
+  // Server subtab can show its full room history. General uses this marker only
+  // to clip replay rows to the static feed's currently loaded time horizon.
+  const bridgeReplayIdsRef = useRef<Set<string>>(new Set());
   const channelsRaw = useMemo(() => {
     if (!staticChannels || !overlayShell || isPublicMode || bridgeState.status !== 'ready') return staticChannels;
     const parent = staticChannels.find(c => c.name.toLowerCase() === 'fallout 76') ?? staticChannels[0];
@@ -5276,6 +5280,7 @@ export default function ChatOverlay() {
       moderatorRequestedCursor.current = null;
       setModeratorCursor(null); setModeratorUnavailable(false);
       clearInterval(bridgeWatch);
+      bridgeReplayIdsRef.current.clear();
       bridgeStateRef.current = INACTIVE_BRIDGE;
       setBridgeState(INACTIVE_BRIDGE);
       setMessages(clearBridgeRows);
@@ -5470,7 +5475,10 @@ export default function ChatOverlay() {
               if (frame.type === 'bridge:state') {
                 const next = readBridgeState(frame.payload, !!overlayShell && !isPublicMode);
                 const previous = bridgeStateRef.current;
-                if (next.status !== 'ready' || previous.status !== 'ready' || next.bindingId !== previous.bindingId) setMessages(clearBridgeRows);
+                if (next.status !== 'ready' || previous.status !== 'ready' || next.bindingId !== previous.bindingId) {
+                  bridgeReplayIdsRef.current.clear();
+                  setMessages(clearBridgeRows);
+                }
                 bridgeStateRef.current = next;
                 setBridgeState(next);
                 return;
@@ -5487,8 +5495,13 @@ export default function ChatOverlay() {
                   const r = row as Record<string, unknown>;
                   return typeof r.id === 'string' && typeof r.channelId === 'string' && typeof r.content === 'string' && typeof r.username === 'string';
                 }) as ChatMessage[] : [];
+                const belongsToCurrentBridge = state.status === 'ready'
+                  && frame.payload?.bindingId === state.bindingId && frame.payload?.channelId === state.channelId;
+                if (belongsToCurrentBridge && (frame.type === 'bridge:history' || frame.payload?.historyReplay === true)) {
+                  for (const row of rows) bridgeReplayIdsRef.current.add(row.id);
+                }
                 setMessages(prev => bridgeStateRef.current === state ? mergeBridgeRows(prev, rows, state, frame.payload ?? {}, MESSAGE_CAP) : prev);
-                if (state.status === 'ready' && frame.payload?.bindingId === state.bindingId && frame.payload?.channelId === state.channelId) {
+                if (belongsToCurrentBridge) {
                   for (const row of rows) markLiveUnread(row, frame.type === 'bridge:history' || frame.payload?.historyReplay === true);
                 }
                 return;
@@ -7427,7 +7440,7 @@ export default function ChatOverlay() {
       const combined = moderationEnabled
         ? [...new Map([...messages, ...moderatorHistoryPage, ...moderatorRows].map(row => [row.id, row])).values()].sort((a, b) => (a.timestamp ?? '').localeCompare(b.timestamp ?? ''))
         : messages;
-      return combined
+      const eligible = combined
         .filter(m =>
           ((moderationEnabled && m.channelId.startsWith('server:')) || shouldShowInMainFeed(m, {
             feedParentId: feedParent.id,
@@ -7443,6 +7456,7 @@ export default function ChatOverlay() {
           !hiddenChannelIds.has(m.channelId) &&
           notBlocked(m)
         );
+      return bridgeReplayRowsInMainFeed(eligible, bridgeReplayIdsRef.current);
     }
     return messages.filter(m => m.channelId === activeSubId && notBlocked(m));
   }, [messages, moderatorRows, moderatorHistoryPage, moderationEnabled, roomMutes, activeSubId, isMainFeedView, feedParent, activeMainId, partyView, pmView, blockedIds, user?.id, joinedParties, isPublicMode, publicPartyIdKey, isMod, hiddenChannelIds, settings.mutedPartyIds, privateMessages]);

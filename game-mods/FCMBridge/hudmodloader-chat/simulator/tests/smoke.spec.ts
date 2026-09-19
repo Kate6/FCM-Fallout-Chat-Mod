@@ -22,7 +22,7 @@ test.afterEach(async ({ page, request }) => {
 test('loads the exact production widget artifact and records browser key delivery', async ({ page }) => {
   await page.goto('/?mode=artifact');
   await expect(page.locator('#status')).toHaveAttribute('data-state', 'ready', { timeout: 20_000 });
-  await expect(page.locator('#widget-version')).toHaveText('2.10.111');
+  await expect(page.locator('#widget-version')).toHaveText('2.10.112');
   await page.locator('#focus-stage').click();
   await page.keyboard.press('Insert');
   await page.keyboard.press('ArrowUp');
@@ -124,6 +124,14 @@ test('packages independent tab ranges, file-key precedence, ZFE synchronization,
 });
 
 for (const provider of ['xscal', 'zfe']) {
+  test(`slots late Server history chronologically through ${provider}`, async ({ page }) => {
+    await page.goto(`/?mode=harness&provider=${provider}&scenario=server-history-chronology`);
+    await expect(page.locator('#log')).toContainText(/SERVER-HISTORY-CHRONOLOGY (PASS|FAIL)/, { timeout: 25_000 });
+    const log = await page.locator('#log').textContent();
+    expect(log).toContain(`SERVER-HISTORY-CHRONOLOGY PASS ${provider} general=overlap-slotted,old-hidden server=complete,chronological`);
+    expect(log).not.toContain('SERVER-HISTORY-CHRONOLOGY FAIL');
+  });
+
   test(`backfills retained own-message cosmetics through ${provider}`, async ({ page }) => {
     await page.goto(`/?mode=harness&provider=${provider}&scenario=cosmetics-history`);
     await expect(page.locator('#log')).toContainText(/COSMETICS-HISTORY (PASS|FAIL)/, { timeout: 25_000 });

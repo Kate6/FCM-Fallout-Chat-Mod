@@ -71,7 +71,10 @@ Both transports use the same room history and `serverMessageService`: moderation
 account attribution, publication and canonical `server:<room>:<sequence>` IDs.
 History/live/self-echo merge by ID, not message text. General is a view of canonical
 Server rows, not another publication destination. Server messages do not enter
-static General or Discord.
+static General or Discord. When a previously visited room restores retained history,
+the Server subtab keeps the complete replay. General includes only replay rows whose
+original timestamps fall inside the static feed history currently loaded there, in
+timestamp order, so an older room backlog does not replace the current General view.
 
 ## Local export contract
 
@@ -111,10 +114,14 @@ file cannot activate Server: require advancement after attachment, fresh evidenc
 and a current authenticated/game lifetime. Logout, account change, exit, hop,
 missing advancement or expiry retire stale authority. Never copy native credentials
 into the overlay or borrow another device's account-wide lease.
-Reads run at most once per second without overlap. Discovery retries every ten seconds;
-an independent watchdog revokes a writer that stops advancing for twelve seconds, including
-while discovery or a read stalls. Only known Steam manifests/process locations and exact
-provider paths are inspected; no recursive filesystem or network scanning.
+Reads run at most once per second without overlap. Discovery retries every ten seconds only
+until it finds a non-empty bounded candidate set; those exact paths are pinned for the current
+authenticated game/watcher lifetime. Game exit, authentication/socket replacement, or overlay
+restart creates a new watcher and therefore performs fresh discovery. This avoids repeatedly
+launching the Windows process-metadata query during play while retaining game-before-overlay
+startup recovery. An independent watchdog revokes a writer that stops advancing for twelve
+seconds, including while discovery or a read stalls. Only known Steam manifests/process
+locations and exact provider paths are inspected; no recursive filesystem or network scanning.
 
 ## Authenticated transport
 

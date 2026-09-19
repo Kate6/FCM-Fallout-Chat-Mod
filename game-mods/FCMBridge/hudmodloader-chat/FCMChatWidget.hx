@@ -28,6 +28,9 @@ private typedef ChatRecord = {
     var localSendId:String;
     var pendingAt:Float;
     var sendAccepted:Bool;
+    var createdAt:String;
+    var arrivalOrder:Int;
+    var serverReplay:Bool;
     @:optional var linkUrl:String;
 }
 
@@ -77,7 +80,7 @@ class FCMChatWidget extends MovieClip {
     // 2.10.0 is the first build that reports clientVersion to the relay. The relay
     // treats "no version reported" as "oldest possible client" and gates any new wire
     // field on this, so the version bump IS the capability signal.
-    static inline var VERSION:String  = "2.10.111"; // Add roster-visible self evidence without changing authenticated identity
+    static inline var VERSION:String  = "2.10.112"; // Slot restored Server history chronologically without flooding General
     static inline var SETTINGS_PATH:String = "settings.ini";
     // This is a top-level ZFE command, not a relay operation. ZFE owns the DPAPI/local auth file
     // and must clear it; the SWF is not allowed to write arbitrary files from the HUD domain.
@@ -264,6 +267,7 @@ class FCMChatWidget extends MovieClip {
     var _feedMaxScrollY:Float = 0;
     var _selectedRowIndex:Int = -1;
     var _nextSendSequence:Int = 1;
+    var _nextRecordOrder:Int = 1;
     var _lastEchoMatchMode:String = "";
     var _newWhileScrolled:Int    = 0;
     // Loader versions differ in whether they emit key-down, key-up, or both. Feed/channel
@@ -4775,7 +4779,10 @@ class FCMChatWidget extends MovieClip {
             var messageId:String    = extractJsonString(obj, "messageId");
             var transportMessageId:String = FcmConfig.hudTransportMessageId(hudTransport);
             if (transportMessageId.length > 0) messageId = transportMessageId;
-            if (channel == "server" && !_serverSession.acceptsMessage(messageId, FcmConfig.hudTransportValue(hudTransport, "h"))) {
+            var historyRoom:String = FcmConfig.hudTransportValue(hudTransport, "h");
+            var serverReplay:Bool = channel == "server" && historyRoom.length > 0;
+            var createdAt:String = extractJsonString(obj, "createdAt");
+            if (channel == "server" && !_serverSession.acceptsMessage(messageId, historyRoom)) {
                 if (allowServerDeferral) _serverSession.defer(obj);
                 updateCursorFromEvent(obj);
                 if (!allowServerDeferral) zfeLog("info", "world", "discarded server row outside confirmed room");
@@ -4838,7 +4845,7 @@ class FCMChatWidget extends MovieClip {
             // cosmetics, but appending a second canonical row would duplicate the message when
             // the event arrives after the optimistic row.
             if (reconcileOwnEcho(messageId, senderUserId, channel, body, displayName, tag,
-                    supporterStar, starColor, nameColor)) {
+                    supporterStar, starColor, nameColor, createdAt, serverReplay)) {
                 ownEchoMatchedCount++;
                 if (_lastEchoMatchMode == "id") ownEchoIdMatchCount++;
                 else ownEchoFallbackMatchCount++;
@@ -4858,6 +4865,7 @@ class FCMChatWidget extends MovieClip {
                 tag: tag, supporterStar: supporterStar, starColor: starColor, body: displayBody,
                 messageId: messageId, senderUserId: senderUserId, pending: false,
                 localSendId: "", pendingAt: 0, sendAccepted: false, linkUrl: transportLinkUrl,
+                createdAt: createdAt, arrivalOrder: _nextRecordOrder++, serverReplay: serverReplay,
             });
             while (_records.length > _cfg.maxMessages) _records.shift();
             if (_bScrolling && FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], channel)) _newWhileScrolled++;
@@ -5048,7 +5056,8 @@ class FCMChatWidget extends MovieClip {
      * FcmEcho decision table (stable id, identity, then bounded legacy fallback).
      */
     function reconcileOwnEcho(messageId:String, senderUserId:String, channel:String, body:String,
-            displayName:String, tag:String, supporterStar:Bool, starColor:String, nameColor:String = ""):Bool {
+            displayName:String, tag:String, supporterStar:Bool, starColor:String, nameColor:String = "",
+            createdAt:String = "", serverReplay:Bool = false):Bool {
         _lastEchoMatchMode = "";
         var normalized:String = body;
         var pending:Array<FcmEcho.FcmPendingEcho> = [];
@@ -5094,6 +5103,8 @@ class FCMChatWidget extends MovieClip {
         rec.localSendId = "";
         rec.pendingAt = 0;
         rec.sendAccepted = false;
+        rec.createdAt = createdAt;
+        rec.serverReplay = serverReplay;
         rememberOwnCosmetics(rec.tag, rec.supporterStar, rec.starColor, rec.color, rec.senderUserId);
         if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], channel)) requestRender();
         return true;
@@ -5183,6 +5194,7 @@ class FCMChatWidget extends MovieClip {
             body: body,
             messageId: messageId, senderUserId: senderUserId, pending: true,
             localSendId: localSendId, pendingAt: flash.Lib.getTimer(), sendAccepted: false,
+            createdAt: "", arrivalOrder: _nextRecordOrder++, serverReplay: false,
         });
         while (_records.length > _cfg.maxMessages) _records.shift();
         if (_bScrolling && FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], channel)) _newWhileScrolled++;
@@ -6060,10 +6072,21 @@ class FCMChatWidget extends MovieClip {
         // arrival (_needsLink) is the authoritative "not linked" signal.
         if (_needsLink) { setLogText(linkHint()); return; }
 
+        var oldestStaticAt:String = "";
+        for (rec in _records) {
+            if (rec.channel == "server" || rec.createdAt == null || rec.createdAt.length == 0) continue;
+            if (oldestStaticAt.length == 0 || rec.createdAt < oldestStaticAt) oldestStaticAt = rec.createdAt;
+        }
         var visibleRecords:Array<ChatRecord> = [];
         for (rec in _records) {
-            if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], rec.channel)) visibleRecords.push(rec);
+            var activeChannel:String = CHAN_SLUGS[_chanIdx];
+            if (FcmCommand.channelVisible(activeChannel, rec.channel)
+                    && FcmFeedPlan.replayVisibleInFeed(activeChannel, rec.channel,
+                        rec.serverReplay, rec.createdAt, oldestStaticAt)) visibleRecords.push(rec);
         }
+        visibleRecords.sort(function(a:ChatRecord, b:ChatRecord):Int {
+            return FcmFeedPlan.compareChronology(a.createdAt, a.arrivalOrder, b.createdAt, b.arrivalOrder);
+        });
         zfeLog("info", "render", "records=" + _records.length + " shown=" + visibleRecords.length
             + " layout=row-local tags=enabled tab=" + CHAN_SLUGS[_chanIdx]);
         if (visibleRecords.length == 0) {

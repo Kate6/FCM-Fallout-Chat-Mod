@@ -221,7 +221,11 @@ filtering cannot inherit the wrong owner after device relinking. Older history w
 attribution is omitted from the desktop projection.
 
 The client merges history/live by exact canonical ID, including duplicate rows within a batch.
-Distinct IDs with identical text remain distinct. General and Server filter the same records.
+Distinct IDs with identical text remain distinct. General and Server filter the same canonical
+records, but their history windows intentionally differ: Server exposes the complete retained
+room replay, while General admits replay rows only within its loaded static-feed time horizon and
+slots those rows by their original timestamp. This prevents a prior room's older backlog from
+appearing as a new burst in General without copying or discarding the Server history.
 Room changes/reconnects remove old server records immediately and reject delayed frames from old
 bindings. Server sends are never held in the offline outbox. Standard UUID history pagination,
 legacy presence REST panels and global typing events are not used for bridge rooms.

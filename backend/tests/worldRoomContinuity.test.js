@@ -42,6 +42,86 @@ test('session age survives observations but resets on generation change', async 
   } finally { clock.mockRestore(); }
 });
 
+test('a verified HUD reload may rotate its request nonce without rotating room affinity', async () => {
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+  try {
+    await setRoster('a', 'Alice', ['Bob'], 'first');
+    const first = await computeRooms();
+    const before = await readRoster('a');
+    clock.mockReturnValue(2000);
+    await setRoster('a', 'Alice', ['Bob'], 'replacement', undefined, [], { preserveExistingSession: true });
+    const after = await readRoster('a');
+    expect(after).toMatchObject({ requestId: 'replacement', session: before.session,
+      roomKey: first.get('a'), sessionStartedAt: 1000 });
+    expect((await computeRooms()).get('a')).toBe(first.get('a'));
+  } finally { clock.mockRestore(); }
+});
+
+test('verified HUD reloads preserve a continuously connected multi-user room', async () => {
+  const users = ['alice', 'bob', 'carol', 'dave', 'erin'];
+  for (const user of users) {
+    await setRoster(user, user, users.filter(peer => peer !== user), `first-${user}`);
+  }
+  const before = await computeRooms();
+  const room = before.get('alice');
+  expect(new Set(before.values())).toEqual(new Set([room]));
+
+  // A UI reload can reconstruct every active widget without anyone leaving the
+  // Fallout server. Each verified replacement nonce must retain the component.
+  for (const user of users) {
+    await setRoster(user, user, users.filter(peer => peer !== user), `reload-${user}`, undefined, [],
+      { preserveExistingSession: true });
+    expect(new Set((await computeRooms()).values())).toEqual(new Set([room]));
+  }
+});
+
+test('a replacement HUD cannot erase fresh roster evidence before its data sources recover', async () => {
+  await setRoster('a', 'Alice', ['Bob', 'Carol'], 'first-a');
+  await setRoster('b', 'Bob', ['Alice', 'Carol'], 'first-b');
+  await setRoster('c', 'Carol', ['Alice', 'Bob'], 'first-c');
+  const room = (await computeRooms()).get('a');
+  const before = await readRoster('a');
+
+  // A reconstructed HUDMenu initially reports an empty MapMenuData snapshot. The
+  // backend must leave its fresh evidence and TTL untouched and wait for recovery.
+  await expect(setRoster('a', 'Alice', [], 'reload-a', undefined, [],
+    { recoverHudReplacement: true })).resolves.toBe(false);
+  expect(await readRoster('a')).toEqual(before);
+  expect(new Set((await computeRooms()).values())).toEqual(new Set([room]));
+
+  // Once the replacement sees any prior peer, the existing roster-overlap
+  // heuristic proves continuity and the delivery nonce may rotate safely.
+  await expect(setRoster('a', 'Alice', ['Bob'], 'reload-a', undefined, [],
+    { recoverHudReplacement: true })).resolves.toBe(true);
+  expect(await readRoster('a')).toMatchObject({ requestId: 'reload-a', session: before.session,
+    roomKey: room, sessionStartedAt: before.sessionStartedAt });
+  expect(new Set((await computeRooms()).values())).toEqual(new Set([room]));
+});
+
+test('simultaneous empty snapshots from reconstructed HUDs leave the whole room intact', async () => {
+  const users = ['alice', 'bob', 'carol', 'dave', 'erin'];
+  for (const user of users) await setRoster(user, user, users.filter(peer => peer !== user), `first-${user}`);
+  const room = (await computeRooms()).get('alice');
+  const before = new Map(await Promise.all(users.map(async user => [user, await readRoster(user)])));
+
+  for (const user of users) {
+    await expect(setRoster(user, user, [], `reload-${user}`, undefined, [],
+      { recoverHudReplacement: true })).resolves.toBe(false);
+    expect(await readRoster(user)).toEqual(before.get(user));
+    expect(new Set((await computeRooms()).values())).toEqual(new Set([room]));
+  }
+});
+
+test('a disjoint replacement roster remains a new world generation', async () => {
+  await setRoster('a', 'Alice', ['Bob'], 'first');
+  const oldRoom = (await computeRooms()).get('a');
+  const oldSession = (await readRoster('a')).session;
+  await expect(setRoster('a', 'Alice', ['Carol'], 'replacement', undefined, [],
+    { recoverHudReplacement: true })).resolves.toBe(true);
+  expect((await readRoster('a')).session).not.toBe(oldSession);
+  expect((await computeRooms()).get('a')).not.toBe(oldRoom);
+});
+
 test('pre-upgrade active sessions retain priority without resetting their age', async () => {
   const room = 'r:ffffffff-ffff-4fff-8fff-ffffffffffff';
   values.set('relay:roster:a', JSON.stringify({ name: 'alice', seen: [], session: 'old', requestId: 'old', roomKey: room }));

@@ -36,6 +36,19 @@ export function clearBridgeRows<T extends Row>(rows: T[]): T[] {
   return rows.some(row => row.channelId.startsWith('server:')) ? rows.filter(row => !row.channelId.startsWith('server:')) : rows;
 }
 
+/** Keep replay storage canonical while limiting General to its loaded time span.
+ * The dedicated Server view still reads the unfiltered collection. */
+export function bridgeReplayRowsInMainFeed<T extends Row>(rows: T[], replayIds: ReadonlySet<string>): T[] {
+  let oldestLoadedTimestamp: string | null = null;
+  for (const row of rows) {
+    if (row.channelId.startsWith('server:') || !row.timestamp) continue;
+    if (oldestLoadedTimestamp === null || row.timestamp < oldestLoadedTimestamp) oldestLoadedTimestamp = row.timestamp;
+  }
+  if (oldestLoadedTimestamp === null) return rows;
+  return rows.filter(row => !replayIds.has(row.id)
+    || (typeof row.timestamp === 'string' && row.timestamp >= oldestLoadedTimestamp));
+}
+
 export function bridgeSendPayload<T extends { channelId?: string }>(payload: T, state: BridgeState): (T & { bridgeBindingId?: string }) | null {
   if (!payload.channelId?.startsWith('server:')) return payload;
   return state.status === 'ready' && payload.channelId === state.channelId

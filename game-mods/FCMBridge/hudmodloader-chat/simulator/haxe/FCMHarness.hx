@@ -73,6 +73,7 @@ class FCMHarness extends Sprite {
             if (scenario == "typing-renewal") TypingRenewalScenario.start(widget, provider);
             if (scenario == "ultrawide") UltrawideScenario.start(widget, provider);
             if (scenario == "cosmetics-history") CosmeticsHistoryScenario.start(widget, provider);
+            if (scenario == "server-history-chronology") ServerHistoryChronologyScenario.start(widget, provider);
         } catch (error:Dynamic) {
             flash.Lib.trace("HARNESS widget construction failed: " + Std.string(error));
             SimLog.emit("HARNESS widget construction failed: " + Std.string(error));

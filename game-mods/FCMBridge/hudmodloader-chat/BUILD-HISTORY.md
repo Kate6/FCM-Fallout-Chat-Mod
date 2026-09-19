@@ -1,5 +1,15 @@
 # Archived HUD build notes
 
+## Server-history chronology candidate 2.10.112 (2026-09-19)
+
+- Preserves original relay `createdAt` values and the existing authorized-history carrier marker
+  on canonical HUD records. The message timestamp is used for ordering only; it is not rendered.
+- General excludes restored Server rows older than its loaded static-history horizon and slots the
+  overlapping replay among existing rows chronologically. The Server subtab retains the full
+  replay, and live current-room Server rows remain visible in General.
+- Pure planning tests and compiled xScal/ZFE scenarios cover the projection and ordering. Native
+  verification remains required before release.
+
 ## Roster-visible self evidence, private candidate 2.10.111 (2026-09-19)
 
 - Adds up to four bounded `@self:` values to the existing printable v1 roster control. These are

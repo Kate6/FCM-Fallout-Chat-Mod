@@ -62,6 +62,28 @@ class TestFcmFeedPlan {
         check("out-of-range input clamps first",
             FcmFeedPlan.nextSliceSize(99, 8.0) == FcmFeedPlan.MAX_SLICE_ROWS);
 
+        // Server replay is stored completely, but General projects only the
+        // chronological overlap with its loaded static history.
+        check("older replay stays out of General",
+            !FcmFeedPlan.replayVisibleInFeed("global", "server", true,
+                "2026-09-16T11:00:00Z", "2026-09-16T12:00:00Z"));
+        check("overlapping replay slots into General",
+            FcmFeedPlan.replayVisibleInFeed("global", "server", true,
+                "2026-09-16T12:05:00Z", "2026-09-16T12:00:00Z"));
+        check("Server tab retains complete replay",
+            FcmFeedPlan.replayVisibleInFeed("server", "server", true,
+                "2026-09-16T11:00:00Z", "2026-09-16T12:00:00Z"));
+        check("live Server row remains visible in General",
+            FcmFeedPlan.replayVisibleInFeed("global", "server", false,
+                "2026-09-16T11:00:00Z", "2026-09-16T12:00:00Z"));
+        check("original timestamps order replay between static rows",
+            FcmFeedPlan.compareChronology("2026-09-16T12:05:00Z", 3,
+                "2026-09-16T12:10:00Z", 2) < 0
+            && FcmFeedPlan.compareChronology("2026-09-16T12:05:00Z", 3,
+                "2026-09-16T12:00:00Z", 1) > 0);
+        check("missing timestamps retain arrival order",
+            FcmFeedPlan.compareChronology("", 4, "", 5) < 0);
+
         // Coalescer: bursts collapse into one tick.
         var coalescer = new FcmRenderCoalescer();
         check("first request schedules the tick", coalescer.request());

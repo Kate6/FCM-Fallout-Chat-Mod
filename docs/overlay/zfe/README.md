@@ -26,11 +26,18 @@ data. 0.2.3 reuses `FcmJson` for runtime-info/write acknowledgements and forbids
 exports and the user reported it working. Full mixed-client shared-room/message/travel
 acceptance remains pending; the overlay log did not independently confirm room assignment.
 
-**Visible HUD 2.10.111 private candidate:** adds bounded roster-visible `@self:` evidence to the
-existing v1 roster control so account-label differences do not split mutually visible users.
-Authentication and sender attribution remain token-owned, and mutual sightings are still
-mandatory. Automated gates pass; the candidate is installed locally for native testing but the
-compatible backend has not been deployed. 2.10.110 remains the current public release.
+**Visible HUD 2.10.112 private candidate:** uses original relay timestamps to slot delayed
+current-room Server history into General chronologically. Replay older than General's loaded
+static-history horizon appears only in the complete Server subtab, preventing a previously visited
+room's backlog from arriving as a tail burst. Live Server rows remain in General. The candidate
+retains 2.10.111's roster-visible `@self:` evidence; authentication, sender attribution, mutual
+sightings and room gates are unchanged. Native acceptance remains pending. 2.10.110 remains the
+current public release.
+
+The complete 60-case Ruffle suite and local source/artifact/package gates pass. The exact tested
+2.10.112 BA2 is installed on the desktop with the existing settings and single visible-widget
+loader entry preserved. Native reconnect acceptance is still pending; no public release or
+backend deployment was performed for this HUD-only correction.
 
 **Current production HUD release (2026-09-16):** visible FCMChatWidget **2.10.110** reapplies an authoritative
 supporter projection to retained rows from the same authenticated sender IDs, fixing old feed rows
@@ -221,6 +228,10 @@ and `raids`. Tabs filter one retained record list; each row keeps its source cha
 identity. Sending from General still sends to `global`. No message is copied or rebroadcast.
 Private, system, and unknown channels do not enter the combined view. SERVER rows require a
 confirmed current room and are removed on leaving it; static-channel history remains.
+When a confirmed room restores retained Server history after the static feeds, the widget slots
+replay whose original timestamp overlaps General's loaded static-history horizon into that feed in
+chronological order. Older replay remains available in the Server subtab without flooding General.
+The timestamp controls projection/order only and is not rendered in the HUD.
 
 Replay rejection precedes pending-send reconciliation. A retained canonical row rejects the
 same channel/message ID even after bounded-cache eviction. Different nonempty ACK/event IDs
@@ -444,8 +455,10 @@ state separately what is in source, built locally, tested in-game, installed, an
 ## Retained Server history compatibility
 
 The current candidate accepts authorized carried Server history through the
-existing `FCMHUD/1;` metadata carrier, with the confirmed room in `h`. Both ZFE and
-xScal use the same validation; authentication and world-exit gates are unchanged.
+existing `FCMHUD/1;` metadata carrier, with the confirmed room in `h`. That marker identifies
+replay separately from live Server traffic so General can apply its bounded history horizon while
+the Server tab retains every authorized row. Both ZFE and xScal use the same validation;
+authentication and world-exit gates are unchanged.
 See [Server room continuity](../../realtime/server-room-continuity.md) for the
 backend/overlay/HUD rollout order, tests and native-acceptance limitation.
 

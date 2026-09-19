@@ -632,10 +632,20 @@ function markServerHistoryResyncPending(userId: string): void {
   pendingServerHistoryResyncs.set(userId, now + HISTORY_RESYNC_BIND_WINDOW_MS);
 }
 
-function consumeServerHistoryResyncPending(userId: string): boolean {
+function hasServerHistoryResyncPending(userId: string): boolean {
   const expiresAt = pendingServerHistoryResyncs.get(userId);
+  if (expiresAt === undefined) return false;
+  if (expiresAt <= Date.now()) {
+    pendingServerHistoryResyncs.delete(userId);
+    return false;
+  }
+  return true;
+}
+
+function consumeServerHistoryResyncPending(userId: string): boolean {
+  const pending = hasServerHistoryResyncPending(userId);
   pendingServerHistoryResyncs.delete(userId);
-  return expiresAt !== undefined && expiresAt > Date.now();
+  return pending;
 }
 
 /** Private settings replies follow the same authenticated device's subscriber across replicas. */
@@ -777,7 +787,8 @@ async function handleWorldJoin(identity: RelayToken, worldId: string, requestId 
   await backfillWorldToUser(identity.userId, worldId, requestId);
 }
 
-registerNativeRoomHooks({ consumeResync: consumeServerHistoryResyncPending,
+registerNativeRoomHooks({ hasResync: hasServerHistoryResyncPending,
+  consumeResync: consumeServerHistoryResyncPending,
   clearResync: userId => { pendingServerHistoryResyncs.delete(userId); },
   rebind: rebindLocalSubscribers, backfill: backfillWorldToUser });
 

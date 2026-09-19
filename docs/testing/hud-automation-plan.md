@@ -2,6 +2,25 @@
 
 Latest drop-in bridge evidence: [rollout, fallback and diagnostic candidates](bridge-drop-in-acceptance-2026-09-16.md).
 
+2026-09-19 Server-history chronology candidate: HUD 2.10.112 preserves the relay `createdAt`
+and authorized replay marker on canonical records. A pure Haxe regression covers General's
+static-history horizon and deterministic ordering. The compiled `server-history-chronology`
+scenario runs through both native-provider adapters and proves that General hides an older replay
+row, slots an overlapping replay row between static messages, retains live Server chat, and that
+the Server subtab shows the complete replay chronologically. This does not certify native GFx
+rendering; an in-game reconnect to a previously visited room remains required.
+All 60 Ruffle cases passed in 4.2 minutes, along with all 22 widget Haxe suites, compiler
+diagnostics, native API/auth, source/anchor/package/SWF/BA2/emoji gates and 196 overlay HUD-logic
+tests. SWF SHA-256: `0f39b1b9ab0e90e86e4a8b608fbc135ae0c5b2cc081901ef1a427c878f742abc`.
+BA2 SHA-256: `9e952bdf3a461be3acad16a87d9f1434095998d9b6a098dcf0ec100fdf0fb0b8`.
+The Prod-target unified tester package is
+`/home/devotek/Downloads/FCM-HUD-2.10.112-PROD-Server-History-Chronology-Test-2026-09-19.zip`
+(SHA-256 `e4b3694ba944c94ec3b428abec5c51ee468a3d746a2c867c35394ff165245676`). With Fallout 76
+closed, its BA2 and version marker were installed locally; the active settings and loader file are
+byte-identical to their pre-install copies. Rollback is under
+`.extender-backups/before-server-history-chronology-VF9wPF/` in the game root. This candidate is
+not published and still requires the native reconnect check.
+
 2026-09-19 roster-visible identity candidate: HUD 2.10.111 adds bounded additive `@self:`
 evidence to the existing v1 roster control; background bridge 0.2.4 selects the fresh local name
 from its accepted roster source for export. Authentication, sender attribution, mutual sightings,

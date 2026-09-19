@@ -8,7 +8,9 @@
  * Redis relay:roster:<relayUserId> stores the account name, observed names, a
  * server-generated session UUID and the current HUD request ID, expiring in 120s.
  * Initial room keys use a root session UUID. Coordinated room affinity survives
- * peer departure, but not a new observation session, expiry or component split.
+ * peer departure. A recovering native HUD replacement cannot erase fresh graph
+ * evidence with its startup-empty snapshot; ordinary new observation sessions,
+ * expiry and component splits discard affinity.
  */
 
 import { getRedisClient } from '../../config/redis';
@@ -38,10 +40,17 @@ export interface RosterEntry {
   expiresAt?: number;
 }
 
+interface SetRosterOptions {
+  /** Authenticated history-recovery marker accompanies this HUD replacement. */
+  preserveExistingSession?: boolean;
+  /** Apply native HUDMenu reconstruction safeguards; desktop exports use generations instead. */
+  recoverHudReplacement?: boolean;
+}
+
 export function normalizeRosterName(name: string): string { return name.trim().toLowerCase().slice(0, MAX_NAME_LENGTH); }
 
 export async function setRoster(relayUserId: string, ownName: string, seenNames: string[], requestId = '', expiresAt?: number,
-  ownAliases: string[] = []): Promise<void> {
+  ownAliases: string[] = [], options: SetRosterOptions = {}): Promise<boolean> {
   try {
     const redis = await getRedisClient();
     const seen = [...new Set(seenNames
@@ -52,7 +61,23 @@ export async function setRoster(relayUserId: string, ownName: string, seenNames:
     const aliases = [...new Set(ownAliases.map(normalizeRosterName)
       .filter(alias => alias.length > 0 && alias !== name))].slice(0, 4);
     const previous = await readRoster(relayUserId);
-    const session = previous && previous.requestId === requestId ? previous.session : randomUUID();
+    const replacement = previous !== null && previous.requestId !== requestId;
+    // HUDMenu is reconstructed after raid stages and score screens. Its first
+    // MapMenuData snapshot is commonly empty even though Fallout has not changed
+    // worlds. Do not let that absence of evidence delete a fresh mutual-sighting
+    // graph. Returning without a write also preserves the original Redis TTL, so
+    // an indefinitely blank replacement cannot keep stale membership alive.
+    if (options.recoverHudReplacement && replacement && seen.length === 0 && previous.seen.length > 0) return false;
+    const overlapsPrevious = options.recoverHudReplacement && replacement && seen.length > 0
+      && seen.some(seenName => previous.seen.includes(seenName));
+    // A replacement HUD MovieRoot deliberately rotates its request nonce. That
+    // nonce still fences delivery, but it is not evidence that Fallout changed
+    // worlds. Preserve backend-owned affinity only when authenticated RESYNC or
+    // overlapping roster evidence establishes continuity; ordinary nonce changes
+    // remain a fail-closed new observation session.
+    const continuingSession = previous !== null
+      && (previous.requestId === requestId || options.preserveExistingSession || overlapsPrevious);
+    const session = continuingSession ? previous.session : randomUUID();
     const roomKey = previous?.session === session ? previous.roomKey : undefined;
     // Missing age belongs to a pre-upgrade active session, older than new ones.
     const sessionStartedAt = previous?.session === session ? previous.sessionStartedAt ?? 0 : Date.now();
@@ -60,6 +85,7 @@ export async function setRoster(relayUserId: string, ownName: string, seenNames:
       ...(roomKey ? { roomKey } : {}), ...(expiresAt === undefined ? {} : { expiresAt }) });
     await redis.set(`${KEY_PREFIX}${relayUserId}`, value, expiresAt === undefined
       ? { EX: TTL_SECONDS } : { PX: Math.max(1, Math.ceil(expiresAt - Date.now())) });
+    return true;
   } catch (err) {
     logger.warn({ err, relayUserId }, '[worldRoster] setRoster failed');
     throw err;

@@ -145,7 +145,11 @@ function watchExports({ environment, discover, onSnapshot, onInactive, now = Dat
     const passStarted = now();
     try {
       const time = now();
-      if (time - discoveredAt >= 10000) {
+      // A non-empty result is fixed for this game/watcher lifetime. On Windows,
+      // discovery queries process metadata through PowerShell/WMI; relaunching it
+      // every ten seconds caused a recurring ~1s I/O/process spike in live xScal
+      // profiling. Missing startup paths still retry until the provider roots exist.
+      if (!candidates.length && time - discoveredAt >= 10000) {
         candidates = (await discover()).slice(0, 64); discoveredAt = time;
       }
       const rows = await Promise.all(candidates.map(async c => {
