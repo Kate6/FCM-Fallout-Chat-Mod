@@ -767,8 +767,8 @@ are no per-letter animations or animated shadows. Retained names outside the vie
 pause, as do names when the document/native overlay reports hidden.
 
 Appearance previews outside the chat viewport retain a separate stepped Chroma
-preview animation; the desktop ambient scheduler budgets it too. Reduced motion
-disables the preview animation. Chat usernames never use that CSS fallback.
+preview animation on the website/dashboard. The desktop overlay freezes that
+preview on its first frame. Chat usernames never use that CSS fallback.
 The message scheduler also explicitly observes shell collapse/full-hide classes:
 opacity-hidden content can still geometrically intersect a visible one-pixel
 native window, so document/intersection visibility alone is insufficient.
@@ -779,16 +779,15 @@ It does not run a CSS animation or per-frame JavaScript loop. The visibility
 observer cancels timers on offscreen/hidden names, motion opt-out and teardown;
 reduced-motion users retain the static shadow.
 
-The desktop shell additionally samples repeating typing, unread, glow, CRT,
-glitch and shimmer animations with one shared 10 Hz timer (`ambient-motion.ts`).
-CSS remains the source of their keyframes, colors, delays and durations; the
-shell pauses the browser's continuously ticking animations and advances their
-current time at that bounded cadence. Website/dashboard behavior is unchanged.
-Hidden/offscreen cosmetics and full-hide stop advancing; collapsed tabs can
-still pulse unread dots. Reduced motion stops the timer. Short collapse,
-full-hide and interaction transitions are not rate-limited. Chroma username
-chips exclude text-shadow from their hover transition to keep shadow changes
-discrete. These are renderer-only controls, with no chat-state/network changes.
+The desktop shell freezes repeating typing, unread, glow, CRT, glitch, shimmer,
+and preview animations on their first frame (`ambient-motion.ts`). This avoids
+recurring renderer/compositor work while the transparent window is above a game;
+the static colors, shadows, outlines, typing label, and unread marker remain.
+Website/dashboard animation behavior is unchanged. Short collapse, full-hide,
+and interaction transitions are not selected and continue normally. Chroma
+username chips exclude text-shadow from their hover transition to keep shadow
+changes discrete. These are renderer-only controls, with no chat-state/network
+or provider changes.
 
 Animated effects compose with the opacity-aware halo; static names keep the existing
 multi-layer `textOutline`. The effect halo becomes lighter with transparent overlay chrome,

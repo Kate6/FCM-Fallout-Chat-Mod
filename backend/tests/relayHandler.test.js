@@ -2848,6 +2848,15 @@ describe('roster-derived world rooms', () => {
     ws.close();
     return res;
   }
+  async function sendRoster(user, requestId, names) {
+    const { ws, msgs } = await connectWs(srv.port);
+    const res = await waitForMsg(ws, msgs, () => send(ws, {
+      op: 'send', token: user.token, channel: 'server',
+      targetUserId: `FCMSESSION/1;${requestId}`, body: makeRosterBody(user.rawId, names),
+    }));
+    ws.close();
+    return res;
+  }
 
   test('background bridge nonce owns its lease; muted readers can renew; stale leave cannot clear a new world', async () => {
     const a = await registerAndLink('Background', 'fcm-background');
@@ -2915,6 +2924,10 @@ describe('roster-derived world rooms', () => {
     const replay = msgs.slice(from).filter((m) => m.op === 'event');
     expect(replay[0].event.body).toBe(`FCMCTL/1/SERVER-READY:first|${firstRoom}`);
     expect(replay.some((m) => m.event?.body === 'current room history')).toBe(true);
+    expect(await sendRaw(a, 'FCMCTL/1/RESYNC')).toMatchObject({ success: true });
+    await bind('reload'); // replacement MovieRoot, no game-world LEAVE
+    expect(_worldStore[`relay:world:${a.rawId}`]).toBe(firstRoom);
+    expect(msgs.some((m) => m.event?.body === `FCMCTL/1/SERVER-READY:reload|${firstRoom}`)).toBe(true);
     await bind('second'); // fresh HUD session, even when LEAVE could not be sent
     expect(_worldStore[`relay:world:${a.rawId}`]).not.toBe(firstRoom);
     const stale = await connectWs(srv.port);
@@ -2957,6 +2970,37 @@ describe('roster-derived world rooms', () => {
     expect(solo).toMatchObject({ success: true });
 
     wsA.close(); wsB.close(); wsC.close();
+  });
+
+  test('score-screen HUD replacement waits for roster recovery without splitting peers', async () => {
+    const a = await registerAndLink('ReloadAlice', 'fcm-reload-a');
+    const b = await registerAndLink('ReloadBob', 'fcm-reload-b');
+    const { ws: wsA, msgs: msgsA } = await connectWs(srv.port);
+    await waitForMsg(wsA, msgsA, () => send(wsA, { op: 'subscribe', token: a.token, cursor: 0 }));
+
+    expect(await sendRoster(a, 'first-a', ['ReloadBob'])).toMatchObject({ success: true });
+    expect(await sendRoster(b, 'first-b', ['ReloadAlice'])).toMatchObject({ success: true });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const room = _worldStore[`relay:world:${a.rawId}`];
+    expect(_worldStore[`relay:world:${b.rawId}`]).toBe(room);
+    const before = JSON.parse(_worldStore[`relay:roster:${a.rawId}`]);
+
+    const from = msgsA.length;
+    expect(await sendRoster(a, 'reload-a', [])).toMatchObject({ success: true });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(JSON.parse(_worldStore[`relay:roster:${a.rawId}`])).toEqual(before);
+    expect(_worldStore[`relay:world:${a.rawId}`]).toBe(room);
+    expect(_worldStore[`relay:world:${b.rawId}`]).toBe(room);
+    expect(msgsA.slice(from).some(frame =>
+      frame.event?.body?.startsWith('FCMCTL/1/SERVER-READY:reload-a|'))).toBe(false);
+
+    expect(await sendRoster(a, 'reload-a', ['ReloadBob'])).toMatchObject({ success: true });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(_worldStore[`relay:world:${a.rawId}`]).toBe(room);
+    expect(_worldStore[`relay:world:${b.rawId}`]).toBe(room);
+    expect(msgsA.slice(from).some(frame =>
+      frame.event?.body === `FCMCTL/1/SERVER-READY:reload-a|${room}`)).toBe(true);
+    wsA.close();
   });
 
   test('roster self evidence groups peers whose linked account names differ from HUD-visible names', async () => {

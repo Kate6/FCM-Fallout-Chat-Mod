@@ -5,10 +5,27 @@ affinity on each live roster session. Peer departure no longer changes the
 survivor's canonical room/history key simply because the departed peer was the
 union-find root. A new mutual member can join an existing room without renaming it.
 
-Affinity is internal Redis metadata, never supplied by clients. Roster refreshes
-preserve it only for the same request/session generation. Leave, expiry and new
-generations discard it. Coordination writes use XX and KEEPTTL: they neither
-recreate an expired roster nor extend observation freshness.
+Affinity is internal Redis metadata, never supplied by clients. Ordinary roster
+refreshes preserve it for the same request/session generation. HUDMenu is also
+reconstructed by normal game transitions such as raid-stage and score-screen
+completion. A replacement starts with a new delivery request nonce and can publish
+an empty MapMenuData snapshot before the game's UI data sources recover.
+
+For the native HUD path only, a changed nonce plus an empty roster no longer replaces
+a fresh nonempty roster. The relay leaves the prior mutual-sighting evidence and its
+original Redis TTL untouched and deliberately withholds `SERVER-READY`; therefore a
+permanently blank or dead client cannot renew stale membership. The widget's normal
+retry supplies a later roster. If that nonempty roster overlaps the prior roster, the
+existing same-world heuristic keeps the backend session, room affinity and age while
+adopting the new delivery nonce. A disjoint nonempty roster remains a new world
+generation. This works whether or not the separate history-recovery `FCMCTL/1/RESYNC`
+was necessary.
+
+An explicit leave, expired/missing roster, disjoint replacement, or desktop export
+world-generation change still discards affinity. RESYNC cannot recreate a cleared or
+expired roster and never extends observation freshness. Coordination writes use XX
+and KEEPTTL for the same reason. No HUD, bridge, overlay protocol, or client binary
+changes are required.
 
 If surviving members of an old room split into disconnected components, none of
 those components inherits that shared room. They receive independent rooms until
@@ -62,7 +79,11 @@ change. Older backend instances must be drained before relying on continuity,
 since they do not maintain the new optional room metadata.
 
 Regression coverage: `worldRoomContinuity.test.js` covers either peer departing,
-component splits and generation/leave boundaries; `localExportBridge.test.js`
+component splits, generation/leave boundaries, a single HUD replacement, five
+simultaneous startup-empty replacements and disjoint replacement; `relayHandler.test.js`
+covers withheld confirmation during recovery, overlapping replacement bind, the
+authenticated RESYNC marker and history confirmation.
+`localExportBridge.test.js`
 covers all four mixed provider pairings, canonical publication/history and peer
 departure. Delayed-departure tests cover all four mixed labels (native providers
 share the same backend protocol), bridge↔bridge and HUD↔HUD, preservation of IDs
@@ -106,6 +127,27 @@ provisional messages, delayed mutual discovery, rendered desktop replay and uniq
 message IDs from both senders. Native provider labels exercise the common native
 coordinator contract here, not separate extender binaries. Existing native/Ruffle
 acceptance still applies; a fresh two-client game test is required after deployment.
+
+### HUD MovieRoot replacement continuity (2026-09-19)
+
+A local xScal session attached a second `MovieRoot` at 00:02:19 elapsed and the new
+widget immediately sent `names=0` under a new request nonce. During the later room
+incident the same widget instance remained alive, the Fallout process did not exit,
+and its populated local roster remained stable while three relay confirmations moved
+it through different rooms in about 0.62 seconds. This confirms that another member's
+topology update can repartition the entire component; it does not establish a
+physical Fallout world hop.
+
+This lifecycle is consistent with current HUD mod behavior documented by other
+maintainers: the [BuffsMeter author notes](https://www.nexusmods.com/fallout76/mods/2821)
+that HUDMenu resets at each raid-stage completion, while the
+[HUDChallenges author](https://www.nexusmods.com/fallout76/mods/2860?tab=description)
+documents that an Overlay-layer build survives that transition at the cost of
+different HUD data and rendering behavior. FCM remains on HUDMenu and makes its room
+protocol tolerant of that expected reconstruction rather than changing render layers.
+
+The exact native multi-client incident still requires post-deployment acceptance.
+No client artifact is required for this backend-only correction.
 
 ### Client replay validation (follow-up candidate)
 

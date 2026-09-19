@@ -296,7 +296,10 @@ try {
   await newestName.scrollIntoViewIfNeeded();
   await expect(newestName).not.toHaveAttribute('data-fcm-motion-paused');
   await expect(newestName).toHaveCSS('animation-name', 'fcm-shimmer-highlight');
-  await expect(newestName).toHaveCSS('animation-play-state', 'running');
+  assert.equal(await newestName.evaluate(name => name.getAnimations()[0].playState), 'paused');
+  assert.equal(await newestName.evaluate(name => name.getAnimations()[0].currentTime), 0);
+  await page.waitForTimeout(220);
+  assert.equal(await newestName.evaluate(name => name.getAnimations()[0].currentTime), 0);
   await expect(newestName.locator('.fcm-shimmer-letter').first()).toHaveCSS('animation-name', 'none');
   // Sample the same animation at its resting/highlight times. No game inputs.
   const shimmerPaint = await newestName.evaluate(name => {
@@ -322,7 +325,7 @@ try {
   await expect(newestName).toHaveCSS('animation-name', 'none');
   await newestName.evaluate(name => name.classList.remove('fcm-no-name-motion'));
   await expect(newestName).toHaveCSS('animation-name', 'fcm-shimmer-highlight');
-  console.log('PASS retained offscreen name effects pause while visible effects stay animated');
+  console.log('PASS desktop name effects retain static styling with no recurring animation');
   const originalNameClass = await newestName.getAttribute('class');
   const chromaName = page.locator('[data-msg-id="general-79"] .fcm-name-fx--chroma-split');
   await newestName.evaluate(name => {
@@ -369,20 +372,26 @@ try {
     const shadows = await preview.evaluate(element => {
       const animation = element.getAnimations()[0];
       const paused = animation.playState;
+      const initial = animation.currentTime;
       animation.currentTime = 10000;
       const burst = getComputedStyle(element).textShadow;
       animation.currentTime = 11000;
-      return { paused, burst, rest: getComputedStyle(element).textShadow };
+      const rest = getComputedStyle(element).textShadow;
+      animation.currentTime = 0;
+      return { paused, initial, burst, rest };
     });
     assert.equal(shadows.paused, 'paused');
+    assert.equal(shadows.initial, 0);
     assert.notEqual(shadows.burst, shadows.rest);
+    await page.waitForTimeout(220);
+    assert.equal(await preview.evaluate(element => element.getAnimations()[0].currentTime), 0);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect(preview).toHaveCSS('animation-name', 'none');
   } finally {
     await page.evaluate(() => document.querySelector('#appearance-chroma-check')?.remove());
     await page.emulateMedia({ reducedMotion: 'no-preference' });
   }
-  console.log('PASS appearance preview retains budgeted chroma motion and reduced-motion fallback');
+  console.log('PASS appearance preview retains static chroma styling and reduced-motion fallback');
   const initialConnections = connectionCount;
   await composer().fill('draft survives appearance changes');
   const tabRow = page.locator('[data-fcm-subtab-row="channels"]');
@@ -633,8 +642,8 @@ try {
   assert.equal(await page.locator('[data-msg-id^="perf-hidden-"]').evaluateAll(rows => new Set(rows.map(row => row.getAttribute('data-msg-id'))).size), 100);
   console.log('PASS 100 hidden messages survive show without duplicates or a visibility reconnect');
 
-  // Use relay-driven typing, not a mocked scheduler: the original CSS keyframes
-  // must still paint, but not run continuously on the native compositor.
+  // Use relay-driven typing, not a mocked scheduler: the label/dots remain visible,
+  // but the desktop overlay must not advance their CSS animation while in-game.
   for (let cycle = 0; cycle < 3; cycle++) {
     for (const socket of relay.clients) socket.send(JSON.stringify({ type: 'chat:typing', payload: {
       userId: 'bob', username: 'Bob', channelId: 'general',
@@ -643,16 +652,18 @@ try {
     await expect(dot).toBeVisible();
     assert.equal(await dot.evaluate(el => el.getAnimations()[0].playState), 'paused');
     const paint = await dot.evaluate(el => getComputedStyle(el).opacity);
-    await expect.poll(() => dot.evaluate(el => getComputedStyle(el).opacity)).not.toBe(paint);
+    await page.waitForTimeout(220);
+    assert.equal(await dot.evaluate(el => getComputedStyle(el).opacity), paint);
+    assert.equal(await dot.evaluate(el => el.getAnimations()[0].currentTime), 0);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect.poll(() => dot.evaluate(el => el.getAnimations()[0].currentTime)).toBe(0);
     const frozenTime = await dot.evaluate(el => el.getAnimations()[0].currentTime);
     await page.waitForTimeout(220);
     assert.equal(await dot.evaluate(el => el.getAnimations()[0].currentTime), frozenTime);
     await page.emulateMedia({ reducedMotion: 'no-preference' });
-    await expect.poll(() => dot.evaluate(el => el.getAnimations()[0].currentTime)).not.toBe(frozenTime);
+    await expect.poll(() => dot.evaluate(el => el.getAnimations()[0].currentTime)).toBe(0);
   }
-  console.log('PASS relay typing paints at bounded cadence and suspends for reduced motion');
+  console.log('PASS relay typing remains visible and static without a recurring paint cadence');
 
   // User-visible unread dots are live-only, close to the corresponding label,
   // clear on click, and keep the theme color with reduced-motion support.
@@ -667,8 +678,10 @@ try {
   await expect(unreadDot).toHaveCSS('animation-name', 'fcm-unread-pulse');
   await expect(unreadDot).toHaveAttribute('data-fcm-status-motion', 'fcm-unread-pulse');
   assert.equal(await unreadDot.evaluate(el => el.getAnimations()[0].playState), 'paused');
+  assert.equal(await unreadDot.evaluate(el => el.getAnimations()[0].currentTime), 0);
   const unreadOpacity = await unreadDot.evaluate(el => getComputedStyle(el).opacity);
-  await expect.poll(() => unreadDot.evaluate(el => getComputedStyle(el).opacity)).not.toBe(unreadOpacity);
+  await page.waitForTimeout(220);
+  assert.equal(await unreadDot.evaluate(el => getComputedStyle(el).opacity), unreadOpacity);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(unreadDot).toHaveCSS('animation-name', 'none');
   await page.emulateMedia({ reducedMotion: 'no-preference' });

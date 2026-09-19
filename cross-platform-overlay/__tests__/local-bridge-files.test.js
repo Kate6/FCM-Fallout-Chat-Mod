@@ -111,6 +111,18 @@ describe('monotonic evidence and writer liveness', () => {
 });
 
 describe('bounded asynchronous watcher lifecycle', () => {
+  it('pins non-empty provider paths for the game session instead of relaunching discovery', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const rows = [{ root: '/game', relative: 'x.json', provider: 'xscal' }];
+    const discover = vi.fn().mockResolvedValue(rows);
+    const read = vi.fn().mockResolvedValue(null);
+    const watcher = watchExports({ environment: 'dev', discover, read,
+      onSnapshot: vi.fn(), onInactive: vi.fn() });
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(discover).toHaveBeenCalledOnce();
+    expect(read.mock.calls.length).toBeGreaterThan(20);
+    watcher.stop();
+  });
   it('handles missing files, prefers an advancing provider, fails closed on two writers, and stops', async () => {
     vi.useFakeTimers(); vi.setSystemTime(0);
     const rows = [{ root: '/game', relative: 'z.json', provider: 'zfe' }, { root: '/game', relative: 'x.json', provider: 'xscal' }];

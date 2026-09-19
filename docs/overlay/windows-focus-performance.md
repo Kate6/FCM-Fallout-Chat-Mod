@@ -265,6 +265,55 @@ Further native acceptance findings (2026-09-19):
   nor sent input. VM integration tests exercise fallback, errors, stale results,
   fragmented worker output and separation from foreground/keybind handling.
 
+## xScal stutter follow-up: zero recurring decorative paint
+
+An xScal user report included a clean xScal 0.2.16 initialization and successful
+D3D11 dispatch, with no provider errors or repeated hook initialization. Its
+overlay log also showed healthy foreground/presence workers: no watchdog failure,
+tasklist fallback loop, focus-worker timeout or crash. The submitted logs did not
+contain frame times or opt-in `[local-perf]` samples, so they cannot by themselves
+attribute the reported game hitch to a specific process.
+
+The remaining known recurring desktop paint source was the shared 100ms ambient
+animation sampler described above. That design reduced average CPU relative to
+continuous browser animation, but still assigned Web Animation current times ten
+times per second and therefore could not provide a zero-wakeup idle guarantee.
+The desktop overlay now holds approved repeating decorative animations on their
+first frame instead. Static supporter styling, typing labels and unread markers
+remain; website/dashboard animations and short interaction/collapse transitions
+are unchanged. Mutation observation only catches newly created CSS animations;
+there is no animation interval, animation-frame loop or geometry polling. Unit
+coverage requires zero timers through visibility, collapse, reduced-motion,
+settings-preview, repeated mount and teardown states. Native A/B game-frame
+acceptance is still required before calling the user-reported stutter resolved.
+
+Live testing with Fallout76 and the repaired portable then exposed a separate
+periodic cost: every 15-second local-profiler window contained a bridge read pass
+lasting about 1.0–1.1 seconds (the startup window peaked at 1.428 seconds), while
+Electron CPU stayed below one percent per process and event-loop maxima settled at
+33–35ms. Tracing the timed boundary showed that `watchExports()` repeated path
+discovery every ten seconds even after it had four valid candidate paths. Windows
+discovery launches PowerShell and queries `Win32_Process`, so this preserved a
+recurring process/WMI workload during play.
+
+Provider paths are now pinned after the first non-empty discovery for the current
+watcher/game lifetime. Empty discovery still retries every ten seconds for startup
+ordering. Game exit, auth/socket replacement or overlay restart creates a fresh
+watcher and performs discovery again. Exact provider files continue to be read once
+per second, without overlap, and all expiry/freshness behavior is unchanged. Unit
+coverage runs the watcher for 30 simulated seconds and requires one discovery with
+continued reads; the existing empty-first test still requires retry and recovery.
+
+The repaired portable was then profiled live for 21 consecutive 15-second windows
+while Fallout76 remained open. The expected first discovery took 1.511 seconds and
+the startup event-loop maximum was 220ms. Across windows 2–21, bridge-pass maxima
+fell to 11–25ms, event-loop maxima settled at 35–39ms, and each sampled Electron
+process stayed below 0.9% CPU. Working sets stabilized or declined after warm-up,
+and no watchdog, worker-exit, worker-timeout, game-scan or uncaught errors appeared.
+This confirms removal of the recurring discovery spike. The laptop does not have a
+native frame-time recorder installed, so subjective in-game acceptance and a future
+PresentMon-class capture remain the final evidence for the reporter's visible hitch.
+
 The first 37-minute soak completed with cleanup, but is diagnostic rather than a
 final acceptance run: boundary-only visibility sampling could miss a wake and
 re-hide within one interval. The final recorder counts every collapse/full-hide

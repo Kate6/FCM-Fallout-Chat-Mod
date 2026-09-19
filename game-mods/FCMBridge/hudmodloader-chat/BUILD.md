@@ -1,16 +1,18 @@
 # FCMChatWidget build, install, and verification
 
-**Widget version:** 2.10.111. This private candidate adds bounded roster-visible local-name evidence
-for mutual Server-room inference while retaining the token-owned authenticated identity and
-message attribution. The additive v1 field remains harmless against an older relay. Fresh native
-acceptance is pending; 2.10.110 remains the current production release.
+**Widget version:** 2.10.112. This private candidate slots delayed retained Server rows into
+General by their original relay timestamp, excludes replay older than General's loaded history
+horizon, and keeps the complete chronological replay in the Server subtab. It retains 2.10.111's
+bounded roster-visible local-name evidence and token-owned authenticated identity/message
+attribution. Fresh native acceptance is pending; 2.10.110 remains the current production release.
 This is the explicit opt-in HUD-mod track. The desktop overlay never installs or modifies it.
 
-The complete 58-case Ruffle suite and local Haxe/source/package/SWF/BA2/emoji gates pass. The
-tested normalized SWF SHA-256 is `042b025c1f99c794c86605f513d8b6028f4523a16f2ac8cdc7639af20af2557c`;
+The complete 60-case Ruffle suite and local Haxe/source/package/SWF/BA2/emoji gates pass. The
+tested normalized SWF SHA-256 is `0f39b1b9ab0e90e86e4a8b608fbc135ae0c5b2cc081901ef1a427c878f742abc`;
 the matching one-entry BA2 SHA-256 is
-`caf02743ff07d36489aa2c351f28eaf137f44c4fb856ad209f6a6ea017a2d61e`. This is automated evidence,
-not native two-client acceptance or publication approval.
+`9e952bdf3a461be3acad16a87d9f1434095998d9b6a098dcf0ec100fdf0fb0b8`. The provider-paired compiled
+regression verifies the complete General/Server projection described above. This is automated
+evidence, not native two-client acceptance or publication approval.
 
 ## Status and scope
 

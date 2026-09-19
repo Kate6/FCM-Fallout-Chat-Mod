@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readBridgeState, mergeBridgeRows, clearBridgeRows, bridgeSendPayload, INACTIVE_BRIDGE } from '../bridgeFeed';
+import { readBridgeState, mergeBridgeRows, clearBridgeRows, bridgeSendPayload, bridgeReplayRowsInMainFeed, INACTIVE_BRIDGE } from '../bridgeFeed';
 
 const state = readBridgeState({ status: 'ready', channelId: 'server:r:one', bindingId: 'user_a/nonce/r:one' }, true);
 const frame = { channelId: 'server:r:one', bindingId: 'user_a/nonce/r:one' };
@@ -43,5 +43,21 @@ describe('private bridge feed', () => {
     expect(bridgeSendPayload({ channelId: frame.channelId }, INACTIVE_BRIDGE)).toBeNull();
     expect(bridgeSendPayload({ channelId: 'server:r:old' }, state)).toBeNull();
     const general = { channelId: 'general' }; expect(bridgeSendPayload(general, state)).toBe(general);
+  });
+  it('slots replayed Server rows into the loaded General horizon while Server retains all history', () => {
+    const general = [
+      { id: 'general:1', channelId: 'general', timestamp: '2026-09-12T00:00:03Z' },
+      { id: 'general:2', channelId: 'general', timestamp: '2026-09-12T00:00:05Z' },
+    ];
+    const server = [row(1), row(4), row(6)];
+    const canonical = [...general, ...server].sort((a, b) => (a.timestamp ?? '').localeCompare(b.timestamp ?? ''));
+    const replayIds = new Set(server.map(message => message.id));
+
+    expect(bridgeReplayRowsInMainFeed(canonical, replayIds).map(message => message.id)).toEqual([
+      'general:1', 'server:r:one:4', 'general:2', 'server:r:one:6',
+    ]);
+    expect(server.map(message => message.id)).toEqual([
+      'server:r:one:1', 'server:r:one:4', 'server:r:one:6',
+    ]);
   });
 });

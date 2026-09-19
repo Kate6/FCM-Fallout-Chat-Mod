@@ -936,8 +936,10 @@ if widget_src:
           "FCMChatWidget resolves visible names locally to immutable relay record IDs")
     check('tsHtml' not in widget_src
           and 'showTimestamps' not in widget_src
-          and 'createdAt:String' not in widget_src,
-          "FCMChatWidget never renders or depends on message timestamps")
+          and 'createdAt:String' in widget_src
+          and 'FcmFeedPlan.replayVisibleInFeed' in widget_src
+          and 'FcmFeedPlan.compareChronology' in widget_src,
+          "FCMChatWidget uses timestamps only for replay projection and chronological order")
 
 try:
     widget_ini_src = open(WIDGET_INI, encoding="utf-8").read()

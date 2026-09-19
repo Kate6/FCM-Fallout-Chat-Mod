@@ -90,4 +90,27 @@ class FcmFeedPlan {
         if (sliceMs > 12 && size > MIN_SLICE_ROWS) return size - 1;
         return size;
     }
+
+    /** General shows only the part of a restored Server snapshot that overlaps
+     * its loaded static history. The Server tab always retains the full replay. */
+    public static function replayVisibleInFeed(active:String, channel:String, serverReplay:Bool,
+            createdAt:String, oldestStaticAt:String):Bool {
+        if (active != "global" || channel != "server" || !serverReplay) return true;
+        if (oldestStaticAt == null || oldestStaticAt.length == 0) return true;
+        return createdAt != null && createdAt.length > 0 && createdAt >= oldestStaticAt;
+    }
+
+    /** ISO-8601 UTC timestamps sort lexically. Missing timestamps are current
+     * optimistic rows and stay after dated history, with arrival order as the
+     * deterministic tie-breaker. */
+    public static function compareChronology(aCreatedAt:String, aArrival:Int,
+            bCreatedAt:String, bArrival:Int):Int {
+        var a:String = aCreatedAt == null ? "" : aCreatedAt;
+        var b:String = bCreatedAt == null ? "" : bCreatedAt;
+        if (a.length == 0 && b.length > 0) return 1;
+        if (b.length == 0 && a.length > 0) return -1;
+        if (a < b) return -1;
+        if (a > b) return 1;
+        return aArrival < bArrival ? -1 : (aArrival > bArrival ? 1 : 0);
+    }
 }

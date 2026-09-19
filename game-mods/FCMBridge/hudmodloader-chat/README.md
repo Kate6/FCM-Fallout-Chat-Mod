@@ -3,11 +3,17 @@
 FCMChatWidget is the optional HUDModLoader chat widget for Fallout 76. It uses ZFE or xScal's
 native chat bridge and FCM's `/relay`. It is independent of the desktop overlay.
 
-**Current private candidate: 2.10.111 (native-unverified).** Roster controls add a bounded
-`@self:` evidence field containing the local name exposed by the same HUD roster peers see.
-The relay uses it only for mutual room inference; authenticated identity and message attribution
-remain token-owned. The additive v1 field is safe during a rolling update because older relays
-treat it as a nonmatching peer name. Fresh two-client native acceptance is still required.
+**Current private candidate: 2.10.112 (native-unverified).** When retained Server history arrives
+after the static feeds, the widget now uses each message's original relay timestamp to place the
+overlapping rows chronologically in General. Replay older than General's loaded history horizon is
+kept out of General, while the Server subtab retains the complete replay. Live Server rows remain
+part of General. The candidate retains 2.10.111's bounded roster-visible `@self:` evidence;
+authenticated identity and message attribution remain token-owned. Fresh native acceptance is
+still required.
+
+The complete 60-case Ruffle suite and local source/artifact/package gates pass. With Fallout 76
+closed, the exact tested BA2 and 2.10.112 marker were installed locally; settings and loader
+registration were preserved. This is ready for the bounded native reconnect test, not published.
 
 **Current production release: 2.10.110 (2026-09-16).** Once an authoritative
 self-echo or acknowledgement supplies the local sender's cosmetics, retained rows for the same

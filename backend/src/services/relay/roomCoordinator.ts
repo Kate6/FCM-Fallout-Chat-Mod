@@ -7,6 +7,7 @@ import { clearWorldId, getWorldId, setWorldId } from './worldIdService';
 import { publishRebind } from './serverChat';
 
 interface NativeRoomHooks {
+  hasResync?(userId: string): boolean;
   consumeResync(userId: string): boolean;
   clearResync(userId: string): void;
   rebind(userId: string, room: string | null): void;
@@ -69,7 +70,13 @@ export async function clearRoomMembership(userId: string, assertCurrent: () => P
 export async function observeNativeRoster(userId: string, ownName: string, names: string[], requestId: string,
   ownAliases: string[] = []): Promise<void> {
   await coordinateRooms(async assertCurrent => {
-    await setRoster(userId, ownName, names, requestId, undefined, ownAliases);
+    const preserveExistingSession = nativeHooks?.hasResync?.(userId) ?? false;
+    const stored = await setRoster(userId, ownName, names, requestId, undefined, ownAliases,
+      { preserveExistingSession, recoverHudReplacement: true });
+    // A replacement HUD's initial empty snapshot is not a new solo-world
+    // observation. Keep the old graph until its original TTL while withholding
+    // SERVER-READY; the widget retries after its data sources recover.
+    if (!stored) return;
     await applyRoomAssignments(userId, assertCurrent);
   });
 }

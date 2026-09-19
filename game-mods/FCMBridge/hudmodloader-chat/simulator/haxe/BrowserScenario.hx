@@ -22,7 +22,8 @@ class BrowserScenario {
                 var row = widget.buildFeedMessageRow({user:"Peer",body:"A friendly label",channel:"global",
                     color:"FFFFFF",starColor:"",tag:"",messageId:"",senderUserId:"",supporterStar:false,
                     pending:false,localSendId:"",pendingAt:0,sendAccepted:false,
-                    linkUrl:"https://example.org/path?one=two#anchor"}, 500);
+                    linkUrl:"https://example.org/path?one=two#anchor",createdAt:"",arrivalOrder:1,
+                    serverReplay:false}, 500);
                 widget._feedRows = [row]; widget._selectedRowIndex = 0;
                 if (row.textField.text.indexOf("https://example.org/") < 0) throw "destination hidden";
                 if (!row.textField.selectable || !row.textField.mouseEnabled || !row.view.mouseChildren || !widget._feedLayer.mouseChildren) throw "copy fallback disabled";

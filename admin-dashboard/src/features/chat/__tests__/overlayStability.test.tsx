@@ -353,6 +353,32 @@ describe('overlay lifecycle and navigation', () => {
     expect(container.querySelectorAll('.fcm-name-fx--shimmer')).toHaveLength(2);
   });
 
+  it('limits restored Server backlog in General but keeps the complete Server subtab', async () => {
+    await mount();
+    const socket = sockets[0];
+    act(() => {
+      socket.open();
+      socket.emit({ type: 'chat:history', payload: { messages: [
+        { id: 'general-start', content: 'General horizon start', username: 'Bob', user_id: 'bob', channel_id: 'general', created_at: '2026-09-16T12:00:00Z' },
+        { id: 'general-end', content: 'General horizon end', username: 'Bob', user_id: 'bob', channel_id: 'general', created_at: '2026-09-16T12:10:00Z' },
+      ] } });
+      socket.emit({ type: 'bridge:state', payload: { status: 'ready', channelId: 'server:r:room', bindingId: 'alice/nonce/r:room' } });
+      socket.emit({ type: 'bridge:history', payload: {
+        channelId: 'server:r:room', bindingId: 'alice/nonce/r:room', historyReplay: true,
+        messages: [
+          { id: 'server:r:room:1', channelId: 'server:r:room', username: 'Old', content: 'Prior Server backlog', source: 'server', timestamp: '2026-09-16T11:00:00Z' },
+          { id: 'server:r:room:2', channelId: 'server:r:room', username: 'Recent', content: 'Server row inside General horizon', source: 'server', timestamp: '2026-09-16T12:05:00Z' },
+        ],
+      } });
+    });
+
+    await screen.findByText('Server row inside General horizon');
+    expect(screen.queryByText('Prior Server backlog')).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: 'Server channel' }));
+    expect(await screen.findByText('Prior Server backlog')).toBeInTheDocument();
+    expect(screen.getByText('Server row inside General horizon')).toBeInTheDocument();
+  });
+
   it('keeps the reading boundary on live append, then resets to 100 on return to latest', async () => {
     await mount();
     const socket = sockets[0];

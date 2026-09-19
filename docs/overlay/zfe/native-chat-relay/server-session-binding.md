@@ -56,11 +56,15 @@ additive fields as unmatched peer names, permitting a HUD-first rolling update. 
 to 1–64 lowercase alphanumeric/hyphen characters, identifies a HUD session, and is not an
 authentication credential. The existing relay token remains the actor identity.
 
-The relay stores the request ID with the roster. New/missing rosters or a changed request ID
-receive a fresh server-generated session UUID; keepalives retain it. A connected component's
-room uses the root member's session UUID rather than their permanent user ID. Legacy roster
-entries lacking session metadata are replaced on their next heartbeat. Store failures propagate
-instead of returning a successful membership acknowledgement.
+The relay stores the request ID with the roster. New/missing rosters or a disjoint changed-request
+roster receive a fresh server-generated session UUID; keepalives retain it. HUDMenu can be
+reconstructed at raid/score transitions, so a changed native-HUD request with an initially empty
+roster cannot erase an existing fresh nonempty roster. The relay preserves the old evidence without
+renewing its TTL and withholds `SERVER-READY` until a retry supplies data. An overlapping nonempty
+retry adopts the new delivery request while retaining the backend session and room; a disjoint retry
+remains a new world. A connected component's room uses the root member's session UUID rather than
+their permanent user ID. Legacy roster entries lacking session metadata are replaced on their next
+heartbeat. Store failures propagate instead of returning a successful membership acknowledgement.
 
 After storing and rebinding membership, the relay sends a normal system `chat.message`:
 
