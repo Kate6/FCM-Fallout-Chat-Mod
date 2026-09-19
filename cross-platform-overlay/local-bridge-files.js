@@ -129,7 +129,7 @@ class ExportCursor {
  * At most one bounded read pass runs at once; discovery is retried for startup
  * ordering. No export content, names, tokens or identifiers are logged. */
 function watchExports({ environment, discover, onSnapshot, onInactive, now = Date.now,
-  read = readBoundedFile, intervalMs = 1000, setTimer = setTimeout, clearTimer = clearTimeout }) {
+  read = readBoundedFile, intervalMs = 1000, setTimer = setTimeout, clearTimer = clearTimeout, onTiming }) {
   let stopped = false, timer, expiryTimer, busy = false, candidates = [], discoveredAt = -Infinity, selected = '', published = '';
   const cursors = new Map();
   function expire() {
@@ -142,6 +142,7 @@ function watchExports({ environment, discover, onSnapshot, onInactive, now = Dat
   async function tick() {
     if (stopped || busy) return;
     busy = true;
+    const passStarted = now();
     try {
       const time = now();
       if (time - discoveredAt >= 10000) {
@@ -176,7 +177,13 @@ function watchExports({ environment, discover, onSnapshot, onInactive, now = Dat
       const known = new Set(candidates.map(c => path.join(c.root, c.relative)));
       for (const key of cursors.keys()) if (!known.has(key)) cursors.delete(key);
     } catch { if (!stopped && selected) onInactive(); selected = ''; published = ''; }
-    finally { busy = false; if (!stopped) timer = setTimer(tick, intervalMs); }
+    finally {
+      busy = false;
+      if (!stopped) {
+        try { onTiming?.({ durationMs: Math.max(0, now() - passStarted), candidates: candidates.length }); } catch { /* Diagnostics never affect delivery. */ }
+        timer = setTimer(tick, intervalMs);
+      }
+    }
   }
   expiryTimer = setTimer(expire, intervalMs);
   void tick();

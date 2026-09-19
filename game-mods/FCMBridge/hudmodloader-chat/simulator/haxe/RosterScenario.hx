@@ -17,6 +17,9 @@ class RosterScenario {
                 if (!widget._serverSessionReady) return;
                 timer.stop();
                 check("actual native adapter matches requested provider", widget._api.provider == provider);
+                check("roster control carries local UI identity as separate evidence",
+                    MockXscal.lastRosterBody.indexOf("@self:VisibleSimulator") >= 0
+                    && MockXscal.lastRosterBody.indexOf("HarnessPeer") >= 0);
                 run(widget);
                 flash.Lib.trace("ROSTER-SCENARIO PASS " + provider + " preserved=tab,history,nonce controls=unchanged hop=clear,rebind expiry=leave mainMenu=leave");
             } catch (error:Dynamic) {

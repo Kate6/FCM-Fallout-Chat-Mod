@@ -19,6 +19,8 @@ const metadata = JSON.parse(extractFile(archive, 'package.json').toString());
 if (metadata.fcmChannel !== 'qa' || metadata.fcmPortable) throw new Error('Only non-portable Dev/QA packages may be profiled');
 const seconds = Number(process.env.FCM_PROFILE_SECONDS || 15);
 if (!Number.isInteger(seconds) || seconds < 5 || seconds > 300) throw new Error('Duration must be 5–300 seconds');
+const messageCount = Number(process.env.FCM_PROFILE_MESSAGES || 1500);
+if (!Number.isInteger(messageCount) || messageCount < 1 || messageCount > 5000) throw new Error('Message count must be 1–5000');
 const effectId = process.env.FCM_PROFILE_EFFECT || null;
 if (effectId && !['shimmer', 'glow-pulse', 'crt-phosphor', 'glitch', 'chroma-split'].includes(effectId)) throw new Error('Unsupported fixture effect');
 const profile = await mkdtemp(`${tmpdir()}/fcm-idle-profile-`);
@@ -44,7 +46,7 @@ relay.on('connection', socket => socket.on('message', raw => {
   const frame = JSON.parse(raw.toString());
   if (frame.type !== 'chat:history') return;
   const channelId = frame.payload.channelId;
-  socket.send(JSON.stringify({ type: 'chat:history', payload: { messages: channelId === 'general' ? Array.from({ length: 250 }, (_, index) => ({
+  socket.send(JSON.stringify({ type: 'chat:history', payload: { messages: channelId === 'general' ? Array.from({ length: messageCount }, (_, index) => ({
     id: `${channelId}-${index}`, channel_id: channelId, user_id: 'bob', username: 'Bob',
     content: `Static fixture ${index}`, source: 'game', effectId,
     created_at: new Date(Date.UTC(2026, 8, 16, 12, 0, index)).toISOString(),
@@ -75,7 +77,7 @@ try {
   // OAuth is served by the fixture; do not open a browser outside the owned app.
   await app.evaluate(({ shell }) => { shell.openExternal = async () => {}; });
   const page = await app.firstWindow();
-  await page.getByText('Static fixture 249', { exact: true }).waitFor({ timeout: 30_000 });
+  await page.getByText(`Static fixture ${messageCount - 1}`, { exact: true }).waitFor({ timeout: 30_000 });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Performance.enable');
   await cdp.send('Profiler.enable');
@@ -85,7 +87,7 @@ try {
   console.log(JSON.stringify({ kind: 'environment', platform: platform(), os: release(), cpu: cpus()[0]?.model,
     desktop: process.env.XDG_CURRENT_DESKTOP || 'unreported', displays,
     packageSha256: createHash('sha256').update(await readFile(archive)).digest('hex'),
-    seconds, warmupSeconds: 60, effectId }));
+    seconds, messageCount, warmupSeconds: 60, effectId }));
   for (const visible of [true, false]) {
     await app.evaluate(({ BrowserWindow, ipcMain }, visible) => {
       const window = BrowserWindow.getAllWindows()[0];

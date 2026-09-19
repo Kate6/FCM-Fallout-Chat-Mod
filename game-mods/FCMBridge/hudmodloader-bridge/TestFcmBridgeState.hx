@@ -99,6 +99,8 @@ class TestFcmBridgeState {
         observe(state, "PlayerListData", ready(data), "Self", 10);
         state.settle(10);
         check(state.fresh(10) && state.names(10).join("|") == "Other", "roster normalized and bounded to unique peers");
+        check(state.rosterSelfName(10, "AccountSelf") == "Self",
+            "same-source local roster name overrides account handle for grouping evidence");
         check(!state.session.accept("FCMCTL/1/SERVER-READY:stale|r:old", 10), "stale room confirmation rejected");
         check(state.session.accept("FCMCTL/1/SERVER-READY:nonce-1|r:one", 10), "matching room confirmation accepted");
         menu(state, ready({menuStackA:[{menuName:"LoadingMenu"}]}));

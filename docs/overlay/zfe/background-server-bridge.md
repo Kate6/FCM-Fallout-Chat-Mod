@@ -1,7 +1,10 @@
 # Drop-in Server bridge: one room across HUD and overlay
 
-Current Dev candidate: **FCMServerBridge 0.2.3**, installed on the laptop. Native ZFE
-export recovery verified on 2026-09-17; user reports it working. Full mixed-client
+Current source candidate: **FCMServerBridge 0.2.4**, native-unverified and not installed.
+The laptop retains 0.2.3, whose native ZFE export recovery was verified on 2026-09-17.
+0.2.4 selects a fresh local-player name from the same accepted roster source for exported
+`ownName`, falling back to `AccountInfoData`. This changes grouping evidence only; overlay
+authentication and account attribution remain authoritative. Full mixed-client
 room/message/travel acceptance remains pending.
 The 0.2.2 laptop screenshot showed `__SFCodeObj parse E1014` with a fresh roster.
 0.2.3 uses the unchanged visible HUD's bounded `FcmJson` reader for both runtime-info
@@ -55,8 +58,8 @@ for generation, expiry and split boundaries.
 
 Native HUD ROSTER controls and authenticated desktop `bridge:observe` enter one
 room coordinator and the same `worldRosterService`. Provider and UI type are not
-room namespaces. Account names are normalized identically for roster evidence;
-Discord/display names never authenticate a roster or choose a room.
+room namespaces. Account and roster-visible self names are normalized identically for
+roster evidence; neither authenticates an account or changes message attribution.
 
 Mutual roster sightings establish a shared canonical `r:` room. No authoritative
 Fallout world ID is available. One-sided/missing sightings can leave players in
@@ -89,7 +92,8 @@ Schema 1 exports:
 - `environment`, `provider`, `build`, `sessionId`, `worldGeneration`.
 - Monotonic `sequence` for writes, `observationSequence` for fresh roster evidence.
 - `state`: active / holding / inactive; `observationAgeMs`.
-- `ownName` plus at most 24 roster `names`, each at most 64 characters.
+- `ownName` from the fresh selected roster source when available, otherwise AccountInfo,
+  plus at most 24 roster `names`; each is at most 64 characters.
 
 Maximum UTF-8 document: 8 KiB. No tokens, linking codes, account authentication,
 room selection or credentials. Storage namespaces are organization, not security;

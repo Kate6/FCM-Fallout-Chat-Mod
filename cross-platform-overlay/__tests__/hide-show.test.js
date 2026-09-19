@@ -83,6 +83,7 @@ describe('owned focus-return helper', () => {
     const children = [];
     const c = vm.createContext({
       pendingGameFocusReturn: null, gameRunning: true, IS_LINUX: false,
+      windowsFocusWorker: { cancel: vi.fn(), request: vi.fn() },
       process: { platform: 'win32', pid: 1234 }, clickThrough: true, modalInteractive: false,
       mainWindow: { isDestroyed: () => false, isFocused: () => true, blur: vi.fn() },
       sendToRenderer: vi.fn(), diag: vi.fn(), setMouseIgnore: vi.fn(), setTimeout, clearTimeout,
@@ -103,13 +104,10 @@ describe('owned focus-return helper', () => {
     expect(c.sendToRenderer).toHaveBeenCalledWith('overlay:blur-input');
     expect(c.setMouseIgnore).toHaveBeenCalledWith(true, true);
     c.cancelGameFocusReturn();
-    expect(children[0].kill).toHaveBeenCalledOnce();
+    expect(c.windowsFocusWorker.cancel).toHaveBeenCalled();
     c.returnFocusToGame();
-    children[0].emit('exit', 0);
-    expect(c.pendingGameFocusReturn).toBe(children[1]);
-    vi.advanceTimersByTime(3000);
-    expect(children[1].kill).toHaveBeenCalledOnce();
-    expect(c.pendingGameFocusReturn).toBeNull();
+    expect(c.windowsFocusWorker.request).toHaveBeenCalledTimes(2);
+    expect(children).toHaveLength(0);
   });
 
   it('does not spawn or blur when the game stopped or another window owns focus', () => {

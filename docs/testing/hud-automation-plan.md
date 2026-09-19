@@ -2,7 +2,70 @@
 
 Latest drop-in bridge evidence: [rollout, fallback and diagnostic candidates](bridge-drop-in-acceptance-2026-09-16.md).
 
+2026-09-19 roster-visible identity candidate: HUD 2.10.111 adds bounded additive `@self:`
+evidence to the existing v1 roster control; background bridge 0.2.4 selects the fresh local name
+from its accepted roster source for export. Authentication, sender attribution, mutual sightings,
+freshness and generation checks are unchanged. A pre-fix backend test reproduced separation when
+account labels differed; the focused backend integration now covers the corrected convergence and
+one-sided rejection. The first complete Ruffle run exposed a damaged Public Teams row being
+accepted as empty during local-name extraction; the reader was corrected to reject the entire
+snapshot, both provider scenarios passed in isolation, and the complete 58-case suite then passed.
+All 22 Haxe suites, compiler diagnostics, native API/auth, source/anchor/package/SWF/BA2/emoji,
+bridge state/export/package, backend TypeScript build, 200 focused backend integrations, 470
+backend TypeScript units, 1,273 overlay units/build and 469 dashboard units/build passed. The
+full backend Jest run reached 1,591 passes and 9 skips but remains red on five unrelated local-env
+expectations because this checkout's `.env.local` deliberately enables supporter/dev secrets;
+all affected room/bridge suites pass. SWF SHA-256:
+`042b025c1f99c794c86605f513d8b6028f4523a16f2ac8cdc7639af20af2557c`; BA2 SHA-256:
+`caf02743ff07d36489aa2c351f28eaf137f44c4fb856ad209f6a6ea017a2d61e`.
+With Fallout 76 closed, that BA2 and the 2.10.111 version marker were installed locally; loader
+registration and settings were not changed. Rollback:
+`.extender-backups/before-server-room-self-alias-FRjINqxK/`. The Prod-target tester package is
+`/home/devotek/Downloads/FCM-HUD-2.10.111-PROD-Server-Room-Fix-2026-09-19.zip`, SHA-256
+`d577f999425e5247984c4f4a4dcdb4c3e1743d06d18d4a6fe20194747643d23d`. No backend deployment or
+public release was performed; end-to-end Prod room convergence requires the compatible backend.
+
 ## Required change-to-install flow
+
+The compiled `visibility` scenario runs on both xScal and ZFE in the complete required Ruffle
+suite. It exercises `/hide`, F11 Hide chat, the configured hide key, Escape, incoming-message
+retention, explicit reopening, Container → Inspect → ExamineConfirm → Message → Inspect → Container → All,
+blocked editor acquisition, and distinct inactivity wake behavior. A pre-fix run failed on both
+providers at "manual hide survives menu exit". Pure config tests require all three inspection/
+prompt defaults and preserve explicit custom lists. This is widget-policy evidence, not proof of native game
+mode emission. Manual acceptance must inspect weapons/armor, enter/exit crafting and scrap
+confirmations, receive a message while manually hidden, press Escape, then explicitly reopen.
+Repeat with ZFE and xScal; do not automate game input.
+
+2026-09-19 examine-confirmation candidate: all 58 Ruffle cases passed, including the
+`ExamineConfirmMode` visibility/input-blocking transition on both xScal and ZFE. All 22 widget
+Haxe suites, compiler diagnostics, native API/auth, package/source-anchor/BA2/SWF and emoji checks
+also passed. SWF SHA-256: `0f44d202f0032e179674002a223cf151505edf4597159521900d7ea5eef27d6c`.
+BA2 SHA-256: `a394724c7263e41dbe1f2d441575f6d9ec9e43b8625321fb42a6ae9a1c82e507`.
+This remains native-unverified until the rebuilt BA2 and an active INI containing
+`ExamineConfirmMode` hide the widget during a real weapon-scrap confirmation.
+With Fallout 76 closed, the tested BA2 was installed at
+`/mnt/ExtraStorage/SteamLibrary/steamapps/common/Fallout76/Data/FCMChatWidget.ba2`, and only
+`ExamineConfirmMode` was appended to the active INI's existing `hideInHUDModes` value. The
+installed BA2 and its decoded SWF match the hashes above; `hudmodloader.ini` remains the single
+`FCMChatWidget` entry and the version stamp remains 2.10.110. Rollback copies are under
+`.extender-backups/before-examine-confirm-XCXIXJgv/` in that game root.
+The unified website-format Prod tester package is
+`FCM-HUD-2.10.110-PROD-ExamineConfirm-Test-2026-09-19.zip` (SHA-256
+`9334bbaee188433444ea0d17d163652338ccaee4e2d10ea591b3eab0174d5367`). Its BA2 and decoded
+SWF match the tested artifacts, its target stamps contain no Dev/localhost markers, and it has
+not been published as a release.
+
+2026-09-18 local candidate: all 58 Ruffle cases, 22 widget Haxe suites, native API/auth
+and bridge state/export/package checks, compiler diagnostics, source/BA2/SWF/package/emoji
+checks and 196 overlay HUD-logic tests passed. Harness port 41739 was released. With the
+desktop game closed, installed the tested archive and appended only InspectMode/MessageMode
+to its existing INI. xScal, Prod endpoints, authentication and loader registration were unchanged.
+Backup: game `.extender-backups/before-sticky-hide-wMDt0J/` (includes restore instructions).
+SWF SHA-256: `4cb9fa8e70de1893291e225cc0b24b1098754c84860700ef97cf7474b88f5267`.
+BA2 SHA-256: `cd2bc94db82d98937411844cd7b339218d8da03b48c8319718b43234279d183c`.
+Retains version 2.10.110 as a private test candidate; native acceptance, hosted CI and release
+remain pending. No backend change or production deployment is part of this visibility fix.
 
 Every visible HUD widget or background FCMServerBridge change follows this sequence; shared
 roster/native-adapter changes exercise both consumers. Do not skip directly from source edits to

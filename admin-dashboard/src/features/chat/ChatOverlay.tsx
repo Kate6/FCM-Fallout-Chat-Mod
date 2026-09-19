@@ -4,7 +4,8 @@ import { loadPartyDirectory, readPublicPartyDirectory, partyRecoveryInterval } f
 import { FONT_OPTIONS, FONT_SAMPLE, normalizeFontId, resolveFontFamily, OVERLAY_SETTINGS_EVENT, type FontId } from './overlayFonts';
 import { INACTIVE_BRIDGE, readBridgeState, mergeBridgeRows, clearBridgeRows, bridgeSendPayload, type BridgeState } from './bridgeFeed';
 import { serverRoomLabel, readModeratorRows, mergeModeratorRows, normalizeMutedRooms, readMutedRoomPreferences, shouldMarkChannelUnread } from './serverModeration';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { messageWindowStart, previousMessagePage } from './messageRenderWindow';
 import { createPortal } from 'react-dom';
 // Notification ping (#437). Imported as a module asset so Vite fingerprints it
 // into dist-renderer for BOTH the website and the Electron renderer builds — no
@@ -33,6 +34,7 @@ import { OutboxQueue } from './outboxQueue';
 import { supporterBadge, supporterStarColor, SUPPORTER_STAR_GLYPH } from './supporterBadge';
 import { nameEffectMotion } from './nameEffectMotion';
 import { observeTabLayout } from './observeTabLayout';
+import { observeShellOpacity } from './observeShellOpacity';
 import { observeNameMotion } from './observeNameMotion';
 import { observeScrollIntent } from './observeScrollIntent';
 import { defaultTabTransition, emptyTabPreferences, fallbackTab, hideTab, moveTab, orderedTabs, replacementTab, tabKey, tabPreferenceScope } from './subtabPreferences';
@@ -3697,19 +3699,10 @@ export default function ChatOverlay() {
     } catch { return null; }
   });
   useEffect(() => {
-    const read = () => {
-      try {
-        const alphaVal = getComputedStyle(document.documentElement).getPropertyValue('--fcm-chrome-bg-alpha').trim();
-        const alphaNum = parseFloat(alphaVal);
-        setChromeBgAlpha(isNaN(alphaNum) ? 1.0 : Math.max(0, Math.min(1, alphaNum)));
-        const textVal = getComputedStyle(document.documentElement).getPropertyValue('--fcm-text-opacity').trim();
-        const textNum = parseFloat(textVal);
-        setTextOpacityOverride(isNaN(textNum) ? null : Math.max(0.1, Math.min(1, textNum)));
-      } catch { /* ignore */ }
-    };
-    const obs = new MutationObserver(read);
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
-    return () => obs.disconnect();
+    return observeShellOpacity(document.documentElement, (alpha, text) => {
+      setChromeBgAlpha(alpha);
+      setTextOpacityOverride(text);
+    });
   }, []);
   // Electron desktop-shell parity (null on the website → no visual change).
   const overlayShell = getOverlayShell();
@@ -4382,6 +4375,10 @@ export default function ChatOverlay() {
   // tells the chat:history handler to PREPEND + preserve scroll instead of the
   // normal "merge + maybe pin to bottom" path.
   const lazyLoadingRef = useRef(false);
+  const revealCachedHistoryRef = useRef<() => boolean>(() => false);
+  const revealAllHistoryRef = useRef<() => void>(() => {});
+  const resetRenderWindowRef = useRef<() => void>(() => {});
+  const freezeRenderWindowRef = useRef<() => void>(() => {});
   // The channel a lazy fetch is currently in flight for (history frames for the
   // normal UUID path don't echo channelId, so we match on this + the rows).
   const pendingLazyChannelRef = useRef<string | null>(null);
@@ -4553,10 +4550,10 @@ export default function ChatOverlay() {
     if (!staticChannels || !overlayShell || isPublicMode || bridgeState.status !== 'ready') return staticChannels;
     const parent = staticChannels.find(c => c.name.toLowerCase() === 'fallout 76') ?? staticChannels[0];
     return staticChannels.map(c => c !== parent ? c : { ...c, children: [...(c.children ?? []), {
-      id: bridgeState.channelId, name: isMod ? 'Your server' : 'Server', color: c.color, parentId: c.id,
+      id: bridgeState.channelId, name: 'Server', color: c.color, parentId: c.id,
       allowGifs: false, allowEmojis: true,
     }] });
-  }, [staticChannels, bridgeState, overlayShell, isPublicMode, isMod]);
+  }, [staticChannels, bridgeState, overlayShell, isPublicMode]);
   useEffect(() => { refetchChannelsRef.current = () => refetchChannels(); }, [refetchChannels]);
 
   // Live app version — the LATEST published release from GET /api/version, NOT the
@@ -5739,6 +5736,7 @@ export default function ChatOverlay() {
                   }
                   const cont = messagesContRef.current;
                   const oldScrollHeight = cont ? cont.scrollHeight : 0;
+                  revealAllHistoryRef.current();
                   setMessages(prev => {
                     const seen = new Set(prev.map(m => m.id));
                     const older = batch.filter((m: { id: string }) => !seen.has(m.id));
@@ -6369,6 +6367,7 @@ export default function ChatOverlay() {
   // by a previous tab switch. Otherwise a late retry could steal their position.
   const scrollPinGenerationRef = useRef(0);
   const scrollToBottom = useCallback(() => {
+    resetRenderWindowRef.current();
     const generation = ++scrollPinGenerationRef.current;
     stickToBottomRef.current = true;
     const pin = () => {
@@ -6451,7 +6450,12 @@ export default function ChatOverlay() {
     if (!cont) return;
     return observeScrollIntent(cont, {
       isPinned: () => stickToBottomRef.current && !lazyLoadingRef.current,
-      setPinned: pinned => { stickToBottomRef.current = pinned; },
+      setPinned: pinned => {
+        const wasPinned = stickToBottomRef.current;
+        stickToBottomRef.current = pinned;
+        if (!pinned) freezeRenderWindowRef.current();
+        else if (!wasPinned) resetRenderWindowRef.current();
+      },
       cancelPendingPin: () => {
         scrollPinGenerationRef.current++;
         didInitialScrollRef.current = true;
@@ -6525,7 +6529,9 @@ export default function ChatOverlay() {
     const TOP_THRESHOLD = 60;
     const onScroll = () => {
       if (stickToBottomRef.current || cont.clientHeight === 0) return;
+      freezeRenderWindowRef.current();
       if (cont.scrollTop > TOP_THRESHOLD) return;
+      if (revealCachedHistoryRef.current()) return;
       if (lazyLoadingRef.current) return;
       const ws = wsRef.current;
       if (ws?.readyState !== WebSocket.OPEN) return;
@@ -7441,6 +7447,47 @@ export default function ChatOverlay() {
     return messages.filter(m => m.channelId === activeSubId && notBlocked(m));
   }, [messages, moderatorRows, moderatorHistoryPage, moderationEnabled, roomMutes, activeSubId, isMainFeedView, feedParent, activeMainId, partyView, pmView, blockedIds, user?.id, joinedParties, isPublicMode, publicPartyIdKey, isMod, hiddenChannelIds, settings.mutedPartyIds, privateMessages]);
 
+  // Keep cached history intact; only limit expensive row construction in desktop chat.
+  const renderScope = `${activeMainId}|${activeSubId}|${partyView}|${pmView}`;
+  const [renderWindow, setRenderWindow] = useState<{ scope: string; firstId: string | null; all: boolean }>({
+    scope: '', firstId: null, all: false,
+  });
+  const renderAnchorRef = useRef<{ scope: string; height: number; top: number } | null>(null);
+  const windowMatches = renderWindow.scope === renderScope;
+  const renderStart = overlayShell ? messageWindowStart(visibleMessages,
+    windowMatches ? renderWindow.firstId : null, windowMatches && renderWindow.all) : 0;
+  const renderedMessages = useMemo(() => visibleMessages.slice(renderStart), [visibleMessages, renderStart]);
+  freezeRenderWindowRef.current = () => {
+    if (overlayShell && renderStart > 0 && (!windowMatches || (!renderWindow.firstId && !renderWindow.all))) {
+      setRenderWindow({ scope: renderScope, firstId: visibleMessages[renderStart].id, all: false });
+    }
+  };
+  resetRenderWindowRef.current = () => {
+    renderAnchorRef.current = null;
+    setRenderWindow(previous => previous.scope === renderScope && previous.firstId === null && !previous.all
+      ? previous : { scope: renderScope, firstId: null, all: false });
+  };
+  revealAllHistoryRef.current = () => {
+    if (overlayShell) setRenderWindow({ scope: renderScope, firstId: null, all: true });
+  };
+  revealCachedHistoryRef.current = () => {
+    if (!overlayShell || renderStart === 0) return false;
+    if (renderAnchorRef.current) return true;
+    const cont = messagesContRef.current;
+    if (!cont) return false;
+    renderAnchorRef.current = { scope: renderScope, height: cont.scrollHeight, top: cont.scrollTop };
+    setRenderWindow({ scope: renderScope, firstId: previousMessagePage(visibleMessages, renderStart), all: false });
+    return true;
+  };
+  useLayoutEffect(() => {
+    const anchor = renderAnchorRef.current;
+    renderAnchorRef.current = null;
+    const cont = messagesContRef.current;
+    if (anchor && anchor.scope === renderScope && cont) {
+      cont.scrollTop = anchor.top + cont.scrollHeight - anchor.height;
+    }
+  }, [renderedMessages, renderScope]);
+
   // After a mention-badge click switched channel, run the scroll once the new
   // channel's messages have rendered into the DOM (this effect re-runs whenever
   // the visible set / active sub changes).
@@ -7450,7 +7497,7 @@ export default function ChatOverlay() {
     // Defer one frame so the message nodes (incl. [data-mention-msg]) are painted.
     const id = requestAnimationFrame(() => { jumpIdxRef.current = 0; jumpToMention(); });
     return () => cancelAnimationFrame(id);
-  }, [visibleMessages, activeSubId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visibleMessages, activeSubId, renderStart]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Which visible messages mention me (for jump-to-mention).
   // Also fires on the viewer's configured notification keywords (#422), so the
@@ -7511,6 +7558,11 @@ export default function ChatOverlay() {
   const jumpToMention = () => {
     const cont = messagesContRef.current;
     if (!cont) return;
+    if (renderStart > 0) {
+      pendingJumpRef.current = true;
+      revealAllHistoryRef.current();
+      return;
+    }
     const nodes = cont.querySelectorAll('[data-mention-msg="1"]');
     if (nodes.length === 0) {
       // No DOM nodes — dismiss all visible mention ids so the button goes away.
@@ -8604,7 +8656,7 @@ export default function ChatOverlay() {
     && (!isOnPmTab || pmView !== 'inbox');
 
   const normalFeedRows = useMemo(() =>
-              visibleMessages.map(msg => {
+              renderedMessages.map(msg => {
                 const displayName = isOnPmTab && msg.userId && msg.userId === (user?.id ?? '')
                   ? 'You'
                   : resolveUsername(msg);
@@ -9334,7 +9386,7 @@ export default function ChatOverlay() {
                   </div>
                 );
               })
-  , [visibleMessages, moderationEnabled, bridgeState, resolveUsername, renderContent, scaleGap, msgMentionsMe, shareCardToChat, flattenedChannels, parties, inactiveTab, isMainFeedView, isPublicMode, partyView, activeMainId, activeSubId, hoveredMsg, isMod, primaryColor, primaryText, textAlpha, textRgba, glowEnabled, textOutline, theme, fontSize, lineH, settings, cardShareCooldown, dimText]); // eslint-disable-line react-hooks/exhaustive-deps
+  , [renderedMessages, moderationEnabled, bridgeState, resolveUsername, renderContent, scaleGap, msgMentionsMe, shareCardToChat, flattenedChannels, parties, inactiveTab, isMainFeedView, isPublicMode, partyView, activeMainId, activeSubId, hoveredMsg, isMod, primaryColor, primaryText, textAlpha, textRgba, glowEnabled, textOutline, theme, fontSize, lineH, settings, cardShareCooldown, dimText]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row', alignItems: 'stretch' }}>

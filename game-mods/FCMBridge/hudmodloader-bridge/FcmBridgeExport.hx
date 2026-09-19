@@ -1,6 +1,6 @@
 /** Pure rate/freshness policy. A heartbeat advances sequence, NEVER observationSequence. */
 class FcmBridgeExport {
-    public static inline var VERSION:String = "0.2.3";
+    public static inline var VERSION:String = "0.2.4";
     public var sequence(default, null):Int = 0;
     public var observationSequence(default, null):Int = 1;
     public var lastSuccess(default, null):Bool = false;

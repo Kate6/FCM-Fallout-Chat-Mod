@@ -47,7 +47,11 @@ required nor accepted as proof of authentication.
 
 ## Protocol
 
-Existing `FCMCTL/1/ROSTER`, WORLD and LEAVE bodies remain compatible. A new widget includes
+Existing `FCMCTL/1/ROSTER`, WORLD and LEAVE bodies remain compatible. A new widget may add up to
+four `@self:<local-roster-name>` fields to ROSTER. These are normalized, bounded room evidence and
+never replace the relay-token identity. Mutual matching may use the primary account name or a
+self alias on each side, but each client must still report the other. An older relay treats the
+additive fields as unmatched peer names, permitting a HUD-first rolling update. A new widget includes
 `targetUserId: "FCMSESSION/1;<requestId>"` on ROSTER/WORLD controls. The request ID is bounded
 to 1–64 lowercase alphanumeric/hyphen characters, identifies a HUD session, and is not an
 authentication credential. The existing relay token remains the actor identity.
@@ -91,6 +95,8 @@ retain their original protocol behavior.
 This is **roster-derived grouping, not an authoritative Fallout server ID**. The inspected HUD
 account data has no unique world ID. Mutual sightings are required to join two FCM users;
 missing or unpopulated rosters can therefore leave same-world users in separate solo rooms.
+Roster-visible self aliases reduce false separation when `AccountInfoData` and peer-visible names
+differ, but they remain untrusted evidence and confer no account authority.
 Stale UI data remains a runtime concern. A solo room means no confirmed matching FCM user,
 not an empty Fallout world. Cluster membership changes can change the ephemeral room key;
 history continuity is not guaranteed after the last FCM participant leaves.

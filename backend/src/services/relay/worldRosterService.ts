@@ -25,6 +25,8 @@ const MAX_ACTIVE_ROSTERS = 500;
 export interface RosterEntry {
   userId: string;
   name: string; // own public account name (lowercased)
+  /** HUD-observed self names used only as room-membership evidence, never auth/display identity. */
+  aliases?: string[];
   seen: string[]; // observed HUD player names (lowercased)
   session: string;
   requestId: string;
@@ -38,7 +40,8 @@ export interface RosterEntry {
 
 export function normalizeRosterName(name: string): string { return name.trim().toLowerCase().slice(0, MAX_NAME_LENGTH); }
 
-export async function setRoster(relayUserId: string, ownName: string, seenNames: string[], requestId = '', expiresAt?: number): Promise<void> {
+export async function setRoster(relayUserId: string, ownName: string, seenNames: string[], requestId = '', expiresAt?: number,
+  ownAliases: string[] = []): Promise<void> {
   try {
     const redis = await getRedisClient();
     const seen = [...new Set(seenNames
@@ -46,12 +49,15 @@ export async function setRoster(relayUserId: string, ownName: string, seenNames:
       .filter((n) => n.length > 0 && n.length <= MAX_NAME_LENGTH))]
       .slice(0, MAX_NAMES);
     const name = normalizeRosterName(ownName || '');
+    const aliases = [...new Set(ownAliases.map(normalizeRosterName)
+      .filter(alias => alias.length > 0 && alias !== name))].slice(0, 4);
     const previous = await readRoster(relayUserId);
     const session = previous && previous.requestId === requestId ? previous.session : randomUUID();
     const roomKey = previous?.session === session ? previous.roomKey : undefined;
     // Missing age belongs to a pre-upgrade active session, older than new ones.
     const sessionStartedAt = previous?.session === session ? previous.sessionStartedAt ?? 0 : Date.now();
-    const value = JSON.stringify({ name, seen, session, requestId, sessionStartedAt, ...(roomKey ? { roomKey } : {}), ...(expiresAt === undefined ? {} : { expiresAt }) });
+    const value = JSON.stringify({ name, aliases, seen, session, requestId, sessionStartedAt,
+      ...(roomKey ? { roomKey } : {}), ...(expiresAt === undefined ? {} : { expiresAt }) });
     await redis.set(`${KEY_PREFIX}${relayUserId}`, value, expiresAt === undefined
       ? { EX: TTL_SECONDS } : { PX: Math.max(1, Math.ceil(expiresAt - Date.now())) });
   } catch (err) {
@@ -125,6 +131,8 @@ function isRosterPayload(value: unknown): value is Omit<RosterEntry, 'userId'> {
     && (!('sessionStartedAt' in value) || (typeof value.sessionStartedAt === 'number'
       && Number.isSafeInteger(value.sessionStartedAt) && value.sessionStartedAt >= 0))
     && (!('expiresAt' in value) || (typeof value.expiresAt === 'number' && Number.isFinite(value.expiresAt)))
+    && (!('aliases' in value) || (Array.isArray(value.aliases) && value.aliases.length <= 4
+      && value.aliases.every(alias => typeof alias === 'string' && alias.length > 0 && alias.length <= MAX_NAME_LENGTH)))
     && Array.isArray(value.seen)
     && value.seen.every((name) => typeof name === 'string');
 }
@@ -155,17 +163,19 @@ export async function computeRooms(assertCurrent: () => Promise<void> = async ()
   // roster, so one-sided edges are not enough to merge two private rooms.
   // Index owners by public account name to keep this O(N * MAX_NAMES) instead of
   // comparing every roster pair.
+  const identityNames = (roster: RosterEntry): string[] => [...new Set([roster.name, ...(roster.aliases ?? [])].filter(Boolean))];
   const byName = new Map<string, RosterEntry[]>();
   for (const roster of rosters) {
-    if (!roster.name) continue;
-    const owners = byName.get(roster.name) ?? [];
-    owners.push(roster);
-    byName.set(roster.name, owners);
+    for (const identityName of identityNames(roster)) {
+      const owners = byName.get(identityName) ?? [];
+      owners.push(roster);
+      byName.set(identityName, owners);
+    }
   }
   for (const a of rosters) {
     for (const seenName of a.seen) {
       for (const b of byName.get(seenName) ?? []) {
-        if (a.userId === b.userId || !b.seen.includes(a.name)) continue;
+        if (a.userId === b.userId || !identityNames(a).some(name => b.seen.includes(name))) continue;
         union(a.userId, b.userId);
       }
     }

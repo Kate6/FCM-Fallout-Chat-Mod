@@ -10,7 +10,6 @@
 
 import { getRedisClient } from '../../config/redis';
 import logger from '../../config/logger';
-import { noteModerationRoom } from './serverModeration';
 
 const KEY_PREFIX = 'relay:world:';
 const TTL_SECONDS = 60;
@@ -29,7 +28,6 @@ export async function setWorldId(relayUserId: string, worldId: string, expiresAt
     const redis = await getRedisClient();
     await redis.set(worldKey(relayUserId), worldId, expiresAt === undefined
       ? { EX: TTL_SECONDS } : { PX: Math.max(1, Math.ceil(expiresAt - Date.now())) });
-    await noteModerationRoom(worldId).catch(() => {});
   } catch (err) {
     logger.warn({ err, relayUserId }, '[worldIdService] setWorldId failed');
     throw err;

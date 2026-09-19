@@ -142,8 +142,8 @@ class FcmConfig {
     // Blacklist of HUDMode strings where the widget must stay hidden. Single INI key
     // `hideInHUDModes` (comma-separated) — case-insensitive. Opinionated default hides
     // MainMenu, Pipboy, CAMP build modes, vendor/crafting/repair (ContainerMode) and
-    // the map (MapMenu) so the chat does not cover those UIs.
-    public var hideInHUDModes:Array<String> = ["MainMenu", "Pipboy", "WorkshopMode", "WorkshopNoCrosshairMode", "CampPlacement", "ContainerMode", "MapMenu"];
+    // the map, item inspection/confirmation and modal messages so chat does not cover those UIs.
+    public var hideInHUDModes:Array<String> = ["MainMenu", "Pipboy", "WorkshopMode", "WorkshopNoCrosshairMode", "CampPlacement", "ContainerMode", "MapMenu", "InspectMode", "ExamineConfirmMode", "MessageMode"];
 
     // ── World-event auto-broadcast (global events channel) ───────────────────
     // When true, FCMChatWidget reads RecentActivitiesData (same source HUDChallenges

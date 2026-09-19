@@ -4,7 +4,7 @@ import type { ModerationRow, ModerationPage } from '../../websocket/serverModera
 
 const INDEX = 'relay:server-display:rooms';
 const ACTIVITY = 'relay:server-display:activity';
-const TTL = 7200; // exceeds retained history; refreshed while any membership is alive
+const TTL = 7200; // exceeds retained history; refreshed by indexed message/history activity
 const EXPIRED_MUTES = `local expired = {}
 for i = 2, #ARGV do
   local activity = redis.call('ZSCORE', KEYS[1], ARGV[i])
@@ -51,7 +51,7 @@ export function moderationRow(room: string, displayId: string, e: ServerRoomEven
 }
 export async function moderationHistory(cursor: string | null = null): Promise<ModerationPage> {
   const redis = await getRedisClient();
-  // Equal-score lexical keyset pagination: keepalives cannot reorder rooms.
+  // Equal-score lexical keyset pagination: new message activity cannot reorder rooms.
   const rooms = await redis.zRange(INDEX, cursor ? `(${cursor}` : '-', '+', { BY: 'LEX', LIMIT: { offset: 0, count: 11 } });
   const rows: ModerationRow[] = [];
   // Serial, bounded I/O: do not fan out hundreds of simultaneous Redis requests.

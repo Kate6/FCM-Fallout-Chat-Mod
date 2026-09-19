@@ -4,6 +4,15 @@ import { HOSTED_HISTORY_PER_CHANNEL, mapHistory } from '../scripts/sync-hosted-d
 import { normalizeHudChannel, validateHostedSend } from '../scripts/hosted-dev-bridge.mjs';
 import { applyKeybindsToIni, browserKey, defaultKeybinds, normalizeKeybinds } from '../src/keybinds';
 
+for (const provider of ['xscal', 'zfe']) {
+  test(`sticky manual hide and inspection visibility (${provider})`, async ({ page }) => {
+    await page.goto(`/?mode=harness&provider=${provider}&scenario=visibility`);
+    await expect(page.locator('#log')).toContainText(/VISIBILITY (PASS|FAIL)/, { timeout: 25_000 });
+    await expect(page.locator('#log')).toContainText(`VISIBILITY PASS ${provider}`);
+    await expect(page.locator('#log')).not.toContainText('VISIBILITY FAIL');
+  });
+}
+
 test.afterEach(async ({ page, request }) => {
   await page.evaluate(() => (window as Window & { __FCM_SIM_TEARDOWN__?: () => void }).__FCM_SIM_TEARDOWN__?.()).catch(() => undefined);
   await expect(page.locator('#ruffle-player')).toHaveCount(0);
@@ -13,7 +22,7 @@ test.afterEach(async ({ page, request }) => {
 test('loads the exact production widget artifact and records browser key delivery', async ({ page }) => {
   await page.goto('/?mode=artifact');
   await expect(page.locator('#status')).toHaveAttribute('data-state', 'ready', { timeout: 20_000 });
-  await expect(page.locator('#widget-version')).toHaveText('2.10.110');
+  await expect(page.locator('#widget-version')).toHaveText('2.10.111');
   await page.locator('#focus-stage').click();
   await page.keyboard.press('Insert');
   await page.keyboard.press('ArrowUp');
@@ -70,6 +79,8 @@ test('disables inactivity auto-hide only in the generated simulator config', asy
   const productionConfig = await readFile(new URL('../../FCMChat.ini', import.meta.url), 'utf8');
   expect(simulatorConfig).toContain('autoHideEnabled=false');
   expect(productionConfig).toContain('autoHideEnabled=true');
+  expect(simulatorConfig).toContain('ExamineConfirmMode');
+  expect(productionConfig).toContain('ExamineConfirmMode');
 });
 
 test('validates profiles and writes every simulator INI key without changing production defaults', () => {

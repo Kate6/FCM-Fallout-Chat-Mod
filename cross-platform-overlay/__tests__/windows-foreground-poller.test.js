@@ -12,14 +12,21 @@
 // watchdog (release keys when the poller goes silent), and the diagnostic logging.
 
 import core from '../overlay-core.js';
+import foregroundScript from '../windows-foreground-script.js';
 import { readFileSync } from 'node:fs';
 
 describe('Windows foreground process identity', () => {
   const source = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+  const worker = readFileSync(new URL('../windows-focus-worker.js', import.meta.url), 'utf8');
+  const script = foregroundScript.buildForegroundScript(1234);
   const poller = source.slice(source.indexOf('function spawnWindowsForegroundPoller()'), source.indexOf('function spawnWindowsForegroundPoller()') + 4000);
   it('canonicalizes only the owning Electron PID, independent of portable product name', () => {
-    expect(poller).toContain("if ($pid2 -eq ${process.pid}) { Write-Output 'fallout-chat-mod' }");
-    expect(poller).toContain("elseif ($p) { Write-Output $p.ProcessName }");
+    expect(poller).toContain('buildForegroundScript(process.pid)');
+    expect(script).toContain('if(pid==1234) name="fallout-chat-mod"');
+    expect(script).toContain('name=process.ProcessName');
+    expect(script).toContain('pid!=previous || heartbeat.ElapsedMilliseconds>=1000');
+    expect(script).toContain('Thread.Sleep(100)');
+    expect(script).not.toContain('Get-Process');
   });
   it('retains cancellation when a different application takes foreground', () => {
     expect(poller).toContain("!overlayCore.isOverlayClass(foreground)) cancelGameFocusReturn('windows-other-foreground', foregroundOwnerPid)");
@@ -28,22 +35,53 @@ describe('Windows foreground process identity', () => {
     expect(core.isOverlayClass('Fallout Chat Mod Portable Experimental')).toBe(false);
   });
   it('records bounded owner metadata separately from foreground classification', () => {
-    expect(poller).toContain("Write-Output ('FCM_OWNER_PID=' + $pid2)");
+    expect(script).toContain('Console.WriteLine("FCM_OWNER_PID="+pid)');
     expect(poller).toContain("foregroundOwnerPid = Number(line.slice('FCM_OWNER_PID='.length))");
-    expect(source).toContain("cancelGameFocusReturn('timeout')");
+    expect(worker).toContain("this.stop('request-timeout')");
     expect(source).toContain("cancelGameFocusReturn('show-window')");
     expect(source).toContain("cancelGameFocusReturn('focus-chat')");
-    expect(source).toContain("win32 helper exited code=' + code + ' signal=' + signal");
+    expect(worker).toContain("'[focus-worker] result='");
   });
   it('keeps Windows foreground while the guarded game activation is pending', () => {
     const handoff = source.slice(source.indexOf('function returnFocusToGame()'), source.indexOf("  if (IS_LINUX) {", source.indexOf('function returnFocusToGame()')));
     expect(handoff).toContain("if (process.platform !== 'win32') {\n    try { mainWindow.blur(); } catch { /* ignore */ }\n  }");
     expect(handoff).toContain("sendToRenderer('overlay:blur-input')");
-    expect(handoff).toContain('$owner -eq ${process.pid}');
+    expect(handoff).toContain('windowsFocusWorker.request()');
+    expect(worker).toContain('owner!=${ownerPid}');
   });
 });
 
 const { nextPollerBackoffMs, isForegroundStale, classifyPollerExit } = core;
+
+describe('bounded native game presence', () => {
+  it('parses presence independently from foreground identity and preserves unknown failures', () => {
+    expect(foregroundScript.parseGamePresenceLine('FCM_GAME_RUNNING=1')).toBe(true);
+    expect(foregroundScript.parseGamePresenceLine('FCM_GAME_RUNNING=0')).toBe(false);
+    expect(foregroundScript.parseGamePresenceLine('FCM_GAME_RUNNING=?')).toBe(null);
+    for (const line of ['fallout76', 'FCM_OWNER_PID=42', 'FCM_GAME_RUNNING=11', 'FCM_GAME_RUNNING=']) {
+      expect(foregroundScript.parseGamePresenceLine(line)).toBe(undefined);
+    }
+  });
+  it('expires presence so startup, helper failure and stale observations retain the fallback', () => {
+    expect(foregroundScript.isGamePresenceFresh(10000, 12500)).toBe(true);
+    expect(foregroundScript.isGamePresenceFresh(10000, 16000)).toBe(true);
+    for (const [stamp, now] of [[0, 100], [10000, 16001], [10000, 9999], [NaN, 11000]]) {
+      expect(foregroundScript.isGamePresenceFresh(stamp, now)).toBe(false);
+    }
+  });
+  it('uses a process-only OS snapshot in the existing worker and always closes it', () => {
+    const script = foregroundScript.buildForegroundScript(1234);
+    expect(script).toContain('presence.ElapsedMilliseconds>=2500');
+    expect(script).toContain('"Fallout76.exe",StringComparison.OrdinalIgnoreCase');
+    expect(script).toContain('"Project76_GamePass.exe",StringComparison.OrdinalIgnoreCase');
+    expect(script).toContain('CreateToolhelp32Snapshot(0x00000002,0)');
+    expect(script).toContain('finally { CloseHandle(snapshot); }');
+    expect(script).toContain('entry.size=(uint)Marshal.SizeOf(typeof(ProcessEntry))');
+    expect(script).toContain('if(error!=18) throw');
+    expect(script).toContain('Console.WriteLine("FCM_GAME_RUNNING="');
+    expect(script).not.toMatch(/ReadProcessMemory|SendInput|SetForegroundWindow/);
+  });
+});
 
 describe('nextPollerBackoffMs', () => {
   it('ramps 1s → 2s → 5s for the first three restarts', () => {

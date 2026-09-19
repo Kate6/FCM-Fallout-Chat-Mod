@@ -422,8 +422,15 @@ The widget periodically observes nearby names from approved HUD data sources and
 sends a printable roster control on `channel: 'server'`:
 
 ```text
-FCMCTL/1/ROSTER:<name>|<name>...
+FCMCTL/1/ROSTER:@self:<local-roster-name>|<peer-name>|<peer-name>...
 ```
+
+The optional additive `@self:` fields (maximum four) carry bounded names exposed for the local
+player by the same HUD roster sources peers inspect. They are grouping evidence only: the relay
+token remains the authenticated actor and owns sender attribution. Old relays safely treat these
+fields as unmatched peer names, so the v1 framing supports a HUD-first rolling update. Account
+and roster-visible names may differ without preventing a match once both clients report mutual
+sightings.
 
 It can also send these controls:
 
@@ -465,8 +472,8 @@ ACK/event IDs cannot fall back to sender/body matching. Individual tabs remain f
 General sends still use `global`. Server room validation and row clearing apply to both views.
 
 
-`worldRosterService` stores short-lived rosters and builds connected components
-from mutually observed names. The stable room key feeds the existing Redis
+`worldRosterService` stores short-lived rosters, including bounded self-name aliases, and builds
+connected components from mutually observed names. The stable room key feeds the existing Redis
 history, cross-instance rebind, and subscriber fan-out machinery. A room is
 ephemeral: it has no `channels` row and expires naturally. Normal `server`
 messages are delivered only to subscribers bound to the same current room.
@@ -474,8 +481,9 @@ messages are delivered only to subscribers bound to the same current room.
 The roster scan uses Redis `SCAN`, not `KEYS`, caps active roster processing, and
 normalizes input lengths before it participates in room calculation.
 
-Roster-derived rooms require mutual sightings: A must report B and B must report A. This prevents
-one stale or malicious roster from placing an unrelated player into a shared server room. Live
+Roster-derived rooms require mutual sightings: A must report one of B's identity names and B must
+report one of A's. Self-name aliases do not satisfy the peer side of that test by themselves. This
+prevents one stale or malicious roster from placing an unrelated player into a shared server room. Live
 subscriber fan-out is backpressure-aware; a socket with more than 1 MiB buffered is closed with
 WebSocket status 1013 and removed from the subscriber set. Duplicate or concurrent `subscribe`
 frames on one connection receive `already_subscribed`.

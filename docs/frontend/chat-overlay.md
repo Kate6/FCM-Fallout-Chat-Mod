@@ -118,7 +118,19 @@ custom-image fallback and send checks on 2026-09-18.
 The desktop overlay explicitly opts staff (owner/admin/moderator) into the
 read-only `server:moderation:*` stream. The combined General view merges canonical
 message IDs from ordinary membership and moderation without reposting messages.
-Staff see `[Your server]` for their backend-confirmed room and `[Server · N]` for
+Desktop chat initially constructs only the latest 100 filtered message rows.
+Scrolling upward reveals cached rows in pages of 100 before the existing remote
+history request runs. This is progressive rendering, not history deletion or a
+permanent 100-row maximum: reading older pages grows the rendered range. A stable
+message-ID boundary retains the reader's range across new arrivals; prepending a
+cached page preserves the viewport by its scroll-height delta. Returning to latest
+or switching conversations resets the render window. Explicit mention navigation
+can reveal retained history so older mentions remain reachable. Filtering, unread
+tracking and moderation continue to use the full retained message collection.
+Website/public rendering and native HUD protocols are unchanged.
+
+The channel sub-tab is labeled **Server** for everyone, including staff.
+In message labels, staff see `[Your server]` for their backend-confirmed room and `[Server · N]` for
 other rooms, using backend-assigned temporary numeric display IDs. Regular users
 still see `[Server]` and receive no cross-room stream. Website/public views do not
 opt in. HUD labels follow the same own-room role rule, but cross-room visibility
@@ -132,7 +144,9 @@ the room, delete messages, or grant/revoke backend authority.
 While staff moderation is authorized, the overlay checks saved mutes every 30
 seconds. Backend-confirmed expired rooms disappear from the Unmute list and local
 preferences. Expiry follows the existing room activity index: one hour without a
-message or membership keepalive. Quiet occupied rooms remain; missing history,
+Server message or authorized split-history copy. Roster membership keepalives do not refresh
+the moderator index, so a quiet room can lose its saved mute/temporary label while membership
+itself remains valid. Missing history,
 disconnects, failed checks and authorization loss never imply expiry. Older
 backends without the additive expiry control retain mutes until upgraded.
 
@@ -741,7 +755,7 @@ users, who render byte-identically to before the feature existed.
 - `data-fcm-name` carries the rendered name for the glitch effect's `::before`/`::after`
   copies (`content: attr(...)`).
 
-Effects live in `nameEffects.css` as **pure CSS**. No JS animation library may enter
+Effect keyframes live in `nameEffects.css`. No JS animation library may enter
 this component's import graph — the feed retains a bounded message DOM, and the Electron
 overlay draws on top of a running game. `noMotionInOverlay.test.ts` walks the import
 graph transitively and fails CI if Motion ever becomes reachable from ChatOverlay.
@@ -751,6 +765,30 @@ Shimmer uses one stepped whole-name color highlight per eight-second cycle (0.48
 highlighted), with a stable phase and a fixed outline. Character spans are inert; there
 are no per-letter animations or animated shadows. Retained names outside the viewport
 pause, as do names when the document/native overlay reports hidden.
+
+Appearance previews outside the chat viewport retain a separate stepped Chroma
+preview animation; the desktop ambient scheduler budgets it too. Reduced motion
+disables the preview animation. Chat usernames never use that CSS fallback.
+The message scheduler also explicitly observes shell collapse/full-hide classes:
+opacity-hidden content can still geometrically intersect a visible one-pixel
+native window, so document/intersection visibility alone is insufficient.
+
+Chroma Split preserves the dim resting shadow and three brief offset states, but
+uses four discrete timer boundaries per message-specific 10.5–15.5 second cycle.
+It does not run a CSS animation or per-frame JavaScript loop. The visibility
+observer cancels timers on offscreen/hidden names, motion opt-out and teardown;
+reduced-motion users retain the static shadow.
+
+The desktop shell additionally samples repeating typing, unread, glow, CRT,
+glitch and shimmer animations with one shared 10 Hz timer (`ambient-motion.ts`).
+CSS remains the source of their keyframes, colors, delays and durations; the
+shell pauses the browser's continuously ticking animations and advances their
+current time at that bounded cadence. Website/dashboard behavior is unchanged.
+Hidden/offscreen cosmetics and full-hide stop advancing; collapsed tabs can
+still pulse unread dots. Reduced motion stops the timer. Short collapse,
+full-hide and interaction transitions are not rate-limited. Chroma username
+chips exclude text-shadow from their hover transition to keep shadow changes
+discrete. These are renderer-only controls, with no chat-state/network changes.
 
 Animated effects compose with the opacity-aware halo; static names keep the existing
 multi-layer `textOutline`. The effect halo becomes lighter with transparent overlay chrome,

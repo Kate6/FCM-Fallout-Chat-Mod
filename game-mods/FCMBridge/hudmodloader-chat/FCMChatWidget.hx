@@ -77,7 +77,7 @@ class FCMChatWidget extends MovieClip {
     // 2.10.0 is the first build that reports clientVersion to the relay. The relay
     // treats "no version reported" as "oldest possible client" and gates any new wire
     // field on this, so the version bump IS the capability signal.
-    static inline var VERSION:String  = "2.10.110"; // Backfill learned cosmetics onto retained own-message history
+    static inline var VERSION:String  = "2.10.111"; // Add roster-visible self evidence without changing authenticated identity
     static inline var SETTINGS_PATH:String = "settings.ini";
     // This is a top-level ZFE command, not a relay operation. ZFE owns the DPAPI/local auth file
     // and must clear it; the SWF is not allowed to write arbitrary files from the HUD domain.
@@ -287,6 +287,8 @@ class FCMChatWidget extends MovieClip {
 
     // ── Hide state (CAP-011) ────────────────────────────────────────────────────
     var _hidden:Bool             = false;   // true while the panel is hidden (/hide, F11 menu, hideKey)
+    var _manuallyHidden:Bool     = false;
+    var _autoHidden:Bool         = false;
     // Auto-hide: hide after _cfg.autoHideSec of no activity; reveal on a new message. F11-menu toggleable.
     var _autoHideOn:Bool         = false;
     var _autoHideTimer:Timer     = null;
@@ -1324,7 +1326,7 @@ class FCMChatWidget extends MovieClip {
             _autoHideOn = _cfg.autoHideActive();
             persistConfig();
             if (_autoHideOn) { bumpAutoHide(); }
-            else { if (_autoHideTimer != null) { _autoHideTimer.stop(); _autoHideTimer = null; } if (_hidden) show(); }
+            else { stopAutoHideTimer(); if (_autoHidden && !_manuallyHidden) show(); }
             zfeLog("info", "menu", "auto-hide " + (_autoHideOn ? "on" : "off"));
             // HUDTools does not update the text of an existing button when a menu
             // is rebuilt in place. Close this menu so the next F11 open constructs
@@ -1581,13 +1583,15 @@ class FCMChatWidget extends MovieClip {
     // optional hideKey action. Restore: the open key (INSERT) via openInput() -> show().
     // =========================================================================
 
-    function hide():Void {
+    function hide(manual:Bool = true):Void {
         if (_disposed) return;
         if (_inputOpen) {
             zfeLog("info", "hide", "hide ignored while editor owns input");
             return;
         }
         stopBrowser();
+        if (manual) _manuallyHidden = true;
+        else _autoHidden = true;
         this.visible = false;
         _hidden = true;
         stopAutoHideTimer();
@@ -1604,6 +1608,8 @@ class FCMChatWidget extends MovieClip {
         }
         this.visible = true;
         _hidden = false;
+        _manuallyHidden = false;
+        _autoHidden = false;
         bumpAutoHide();
         zfeLog("info", "hide", "panel restored");
     }
@@ -1652,8 +1658,8 @@ class FCMChatWidget extends MovieClip {
         } else {
             if (_hiddenByHUDMode) {
                 _hiddenByHUDMode = false;
-                if (_hidden) {
-                    // Mode now allows visible — restore even if manual hide was active (mode overrides)
+                if (_hidden && !_manuallyHidden && !_autoHidden) {
+                    // A menu owns only its temporary hide, never a user's hide or idle timeout.
                     this.visible = true;
                     _hidden = false;
                     bumpAutoHide();
@@ -2105,7 +2111,7 @@ class FCMChatWidget extends MovieClip {
     function bumpAutoHide():Void {
         if (_disposed) return;
         stopAutoHideTimer();
-        if (!_autoHideOn || _cfg == null || _cfg.autoHideSec <= 0) return;
+        if (_hidden || !_autoHideOn || _cfg == null || _cfg.autoHideSec <= 0) return;
         _autoHideTimer = new Timer(_cfg.autoHideSec * 1000, 1);
         _autoHideTimer.addEventListener(TimerEvent.TIMER_COMPLETE, function(_) { runAutoHideSafely(); });
         _autoHideTimer.start();
@@ -2115,7 +2121,7 @@ class FCMChatWidget extends MovieClip {
         if (_disposed) return;
         try {
             _autoHideTimer = null;
-            if (_autoHideOn && !_inputOpen && !_hidden) hide();
+            if (_autoHideOn && !_inputOpen && !_hidden) hide(false);
         } catch (err:Dynamic) {
             zfeLog("warn", "hide", "auto-hide callback isolated: " + clip200(Std.string(err)));
         }
@@ -4733,7 +4739,7 @@ class FCMChatWidget extends MovieClip {
                 if (_api != null && _api.provider == FcmNativeApi.XSCAL && _hudLayout.accept(body, _cfg)) {
                     _autoHideOn = _cfg.autoHideActive();
                     rebuildPanel();
-                    if (!_autoHideOn && _hidden) show();
+                    if (!_autoHideOn && _autoHidden && !_manuallyHidden) show();
                     bumpAutoHide();
                 }
                 continue; // Private settings are never rendered as chat or interpreted as a link notice.
@@ -4879,7 +4885,7 @@ class FCMChatWidget extends MovieClip {
         }
         seedOwnCosmeticsFromHistory();
         if (newRecords) {
-            if (_autoHideOn && _hidden) show();   // auto-hide: pop back up on a new message
+            if (_autoHideOn && _autoHidden && !_manuallyHidden) show(); // only wake idle hiding
             requestRender();
             bumpAutoHide();                        // any new message counts as activity
         }
@@ -5438,7 +5444,9 @@ class FCMChatWidget extends MovieClip {
                     now - _lastRosterSentAt, hasSentRoster)) {
                 _lastRosterSentAt = now;
                 _lastRosterSent = namesField;
-                var body:String = WORLD_ROSTER_PREFIX + namesField;
+                var aliases:Array<String> = rosterSelfAliases();
+                var body:String = FcmCommand.rosterControlBody(aliases, namesField);
+                if (body.length == 0) return;
                 var payload:String = '{"channel":"server","targetUserId":"' + _serverSession.target() + '","body":"' + jsonEscape(body) + '"}';
                 try {
                     var raw:String = Std.string(_api.call("chat.v1.sendMessage", payload));
@@ -6788,6 +6796,7 @@ class FCMChatWidget extends MovieClip {
     // Keep a replaceable snapshot per UI provider. The old global _seenNames map merged names
     // forever, so names from the previous world remained in the next ROSTER control until TTL.
     var _rosterSnapshots:FcmRoster = new FcmRoster();
+    var _rosterObservedSelfNames:Array<String> = [];
     // Copy-only timestamps for the direct GFx-safe roster decoder. Never retain
     // a game-owned provider/payload object across a poll or world boundary.
     var _rosterSourceObservations:Array<{key:String, signature:String, at:Float}> = [];
@@ -6829,6 +6838,7 @@ class FCMChatWidget extends MovieClip {
     function resetRosterObservation(reason:String, detach:Bool = false):Void {
         if (detach) unsubscribeRoster();
         _rosterSourceObservations = [];
+        _rosterObservedSelfNames = [];
         setServerSessionReady(false, "");
         _rosterSnapshots = new FcmRoster();
         _serverSession.begin(Std.string(flash.Lib.getTimer()) + "-" + Std.string(Std.random(1000000000)));
@@ -6908,6 +6918,17 @@ class FCMChatWidget extends MovieClip {
         s = StringTools.replace(s, "|", "");
         return StringTools.trim(s);
     }
+    /** Grouping aliases only; the authenticated relay/display identity is unchanged. */
+    function rosterSelfAliases():Array<String> {
+        var aliases:Array<String> = [];
+        var add = function(value:String):Void {
+            var name = bareName(value);
+            if (name.length > 0 && aliases.indexOf(name) < 0 && aliases.length < 4) aliases.push(name);
+        };
+        add(_displayName);
+        for (name in _rosterObservedSelfNames) add(name);
+        return aliases;
+    }
     /** Restore the pre-2.10.103 widget reader, keeping copied observation timestamps
      * and effective-roster session policy separate from native object traversal. */
     function collectRoster(key:String, d:Dynamic, pushed:Bool = false):Void {
@@ -6920,6 +6941,9 @@ class FCMChatWidget extends MovieClip {
             _rosterReadPhase = "map team helper";
             var names = FcmRoster.readNames(key, d, _displayName);
             if (names == null) return; // Invalid/damaged list cannot renew room evidence.
+            var observedSelf = bareName(FcmRoster.lastSelfName);
+            if (observedSelf.length > 0 && _rosterObservedSelfNames.indexOf(observedSelf) < 0
+                    && _rosterObservedSelfNames.length < 3) _rosterObservedSelfNames.push(observedSelf);
             var clean:Array<String> = [];
             for (name in names) {
                 var value = bareName(name);
@@ -6952,7 +6976,16 @@ class FCMChatWidget extends MovieClip {
                 if (e0 == null) continue;
                 if (uiBool(uiField(e0, "isLocalPlayer"))
                         || uiBool(uiField(e0, "isLocal"))
-                        || uiBool(uiField(e0, "isSelf"))) continue;
+                        || uiBool(uiField(e0, "isSelf"))) {
+                    var selfName:String = "";
+                    for (selfField in ["displayName", "characterName", "name", "playerName"]) {
+                        var selfValue:Dynamic = uiField(e0, selfField);
+                        if (selfValue != null && Std.string(selfValue).length > 0) { selfName = bareName(Std.string(selfValue)); break; }
+                    }
+                    if (selfName.length > 0 && _rosterObservedSelfNames.indexOf(selfName) < 0
+                            && _rosterObservedSelfNames.length < 3) _rosterObservedSelfNames.push(selfName);
+                    continue;
+                }
                 var nm:String = "";
                 for (cand in ["displayName", "characterName", "name", "playerName"]) {
                     var v:Dynamic = uiField(e0, cand);

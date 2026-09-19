@@ -255,6 +255,19 @@ class FcmCommand {
         return elapsedSinceSend >= 10000;
     }
 
+    /** Additive membership evidence; old relays safely treat markers as unmatched peer names. */
+    public static function rosterControlBody(selfNames:Array<String>, namesField:String):String {
+        var aliases:Array<String> = [];
+        if (selfNames != null) for (name in selfNames) {
+            var clean = name == null ? "" : StringTools.trim(StringTools.replace(name, "|", ""));
+            if (clean.length > 0 && clean.length <= 64 && aliases.indexOf(clean) < 0 && aliases.length < 4) aliases.push(clean);
+        }
+        if (aliases.length == 0) return "";
+        var fields = [for (alias in aliases) "@self:" + alias];
+        if (namesField != null && namesField.length > 0) fields = fields.concat(namesField.split("|"));
+        return "FCMCTL/1/ROSTER:" + fields.join("|");
+    }
+
     /**
      * `readChatInput` is documented as text, but supported ZFE builds return a
      * bare boolean while the freshly-cleared buffer is empty. Accept that status

@@ -7,7 +7,9 @@ must not add game-memory reads, code injection, or network/port scanning.
 
 ## Current implementation and verification
 
-**Background bridge 0.2.3 Dev candidate:** replaces native networking/linking
+**Background bridge 0.2.4 source candidate:** retains 0.2.3's validated local-export path and
+prefers the roster-visible local name for `ownName`, with AccountInfo as fallback. It is
+native-unverified and not installed; the laptop retains the accepted 0.2.3 build. The bridge replaces native networking/linking
 with provider-scoped local exports. Sign into the overlay only. Visible HUD native
 authentication stays unchanged; both paths share canonical Server rooms/history
 across ZFE/xScal. Full mixed-client and native storage acceptance is required;
@@ -23,6 +25,12 @@ data. 0.2.3 reuses `FcmJson` for runtime-info/write acknowledgements and forbids
 `JsonParser` linkage. The 2026-09-17 laptop check confirmed active, advancing, fresh ZFE
 exports and the user reported it working. Full mixed-client shared-room/message/travel
 acceptance remains pending; the overlay log did not independently confirm room assignment.
+
+**Visible HUD 2.10.111 private candidate:** adds bounded roster-visible `@self:` evidence to the
+existing v1 roster control so account-label differences do not split mutually visible users.
+Authentication and sender attribution remain token-owned, and mutual sightings are still
+mandatory. Automated gates pass; the candidate is installed locally for native testing but the
+compatible backend has not been deployed. 2.10.110 remains the current public release.
 
 **Current production HUD release (2026-09-16):** visible FCMChatWidget **2.10.110** reapplies an authoritative
 supporter projection to retained rows from the same authenticated sender IDs, fixing old feed rows
@@ -350,6 +358,31 @@ Provider hotkeys remain observable globally, but FCM will not acquire the editor
 as T from stealing Fallout's Deposit All action. A held key is latched while blocked, so leaving
 the container does not open chat until a fresh key press. Letter bindings can still overlap
 ordinary gameplay controls outside blocked modes and should be chosen accordingly.
+
+### Inspection, prompts and manual hiding
+
+The current source defaults also block `InspectMode`, `ExamineConfirmMode`, and `MessageMode`,
+names defined in [HUDModLoader's current HUDMenu contract](https://github.com/GitCrazy-wc/hudmodloader/blob/71e2fde134933323777980b5e0fd0c6036c2408f/hudmenu/scripts/Shared/HUDModes.as).
+These cover item inspection, examine/scrap confirmation, and modal-message HUD modes. Bethesda's
+HUD team widget also suppresses itself for `ExamineConfirmMode` in that pinned source. Native
+weapon/armor inspection and scrap-confirmation transitions still require acceptance on the
+current game build; not every on-screen prompt necessarily uses `MessageMode`.
+
+For an existing `Data/FCMChat.ini`, append `InspectMode,ExamineConfirmMode,MessageMode` to your existing
+`hideInHUDModes` list. Explicit custom lists (including an empty list) are preserved, not migrated
+or overwritten. The supplied default is:
+
+```ini
+hideInHUDModes=MainMenu,Pipboy,WorkshopMode,WorkshopNoCrosshairMode,CampPlacement,ContainerMode,MapMenu,InspectMode,ExamineConfirmMode,MessageMode
+```
+
+Manual hiding (`/hide`, F11 **Hide chat**, or the configured hide key) now stays hidden until the
+configured Open Chat key is pressed in an allowed mode. Escape, menu exit, incoming messages,
+and turning off inactivity auto-hide do not undo it. History continues accumulating while hidden.
+Inactivity auto-hide remains separate: incoming messages can wake it, but cannot bypass a blocked
+HUD mode. These changes affect the visible HUD widget on both providers, not the desktop overlay
+or background bridge. Updating the INI adds mode coverage; fixing sticky manual hide also requires
+the rebuilt widget `.ba2`. Source/test candidate only until native acceptance and release.
 
 Both providers use the host's SharedHUDTools editor first. The widget does not dispatch its own
 ControlMap lock events. A legacy ZFE editor fallback has different ownership guarantees and must

@@ -5,8 +5,8 @@
  * Electron overlay, which draws transparently on top of Fallout 76. Motion is
  * JS-driven: pulling it into that import graph would add a per-element animation loop
  * running alongside a live game, and would break the memoization the virtualized feed
- * depends on. Per-message name effects are therefore pure CSS (nameEffects.css)
- * driven by CSS custom properties.
+ * depends on. Per-message name effects use CSS (nameEffects.css), with Chroma
+ * using a visible-only four-boundary timer instead of a per-frame animation loop.
  *
  * Motion IS used, deliberately, in CosmeticsPanel — a low-element-count,
  * interaction-driven dashboard route the overlay never loads. This test encodes

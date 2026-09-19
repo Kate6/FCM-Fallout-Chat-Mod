@@ -16,6 +16,21 @@ mutual sightings justify convergence. This deliberately favors isolation over
 history continuity when world evidence is ambiguous. Roster inference remains
 non-authoritative; there is no trusted game-world ID.
 
+### Roster-visible self names
+
+HUD and account APIs can expose different labels for the same player. A 2.10.111 HUD therefore
+adds bounded `@self:` aliases to the existing printable v1 roster control, and bridge 0.2.4 prefers
+the local name from its fresh selected roster source for exported `ownName`. The coordinator may
+match any normalized primary/alias name, but still requires both clients to report each other.
+Aliases affect grouping only; relay tokens remain the sole actor identity and all sender/account
+attribution is unchanged. One-sided aliases remain isolated, malformed or excess aliases fail
+closed, and freshness/session/generation rules apply to the whole roster record.
+
+The additive v1 encoding supports a HUD-first rolling update: an older backend treats `@self:` as
+an unmatched peer entry rather than chat. A backend-first update accepts old clients with no
+aliases. Automated coverage includes differing account labels, mixed HUD/bridge transport labels
+and one-sided rejection. Fresh two-client native acceptance remains required.
+
 ### Delayed peer departure
 
 A remaining player may report a roster without their peer before the peer's

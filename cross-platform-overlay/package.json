@@ -83,6 +83,9 @@
     "files": [
       "main.js",
       "overlay-core.js",
+      "windows-focus-worker.js",
+      "windows-foreground-script.js",
+      "local-performance.js",
       "local-bridge-files.js",
       "local-bridge-paths.js",
       "local-bridge-relay.js",

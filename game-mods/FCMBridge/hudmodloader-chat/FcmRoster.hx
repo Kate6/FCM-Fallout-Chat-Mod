@@ -2,6 +2,8 @@
 class FcmRoster {
     /** Fixed diagnostic labels only; never provider data, names or identifiers. */
     public static var readPhase:String = "not started";
+    /** Copied local name from the most recent successful map/team read. */
+    public static var lastSelfName:String = "";
     /** Shape-only UI interoperability; no game IDs or non-player map markers are sent. */
     public static function field(value:Dynamic, key:String):Dynamic {
         if (value == null) return null;
@@ -38,9 +40,9 @@ class FcmRoster {
      * verification from a helper or game-data failure. The result contains copied strings
      * only; it never retains a provider, payload, event, or native row object.
      */
-    public static function readNative(key:String, data:Dynamic, localName:String):{valid:Bool, names:Array<String>, skipped:Int} {
+    public static function readNative(key:String, data:Dynamic, localName:String):{valid:Bool, names:Array<String>, selfName:String, skipped:Int} {
         readPhase = "decoder entered";
-        var result:{valid:Bool, names:Array<String>, skipped:Int} = {valid:false, names:[], skipped:0};
+        var result:{valid:Bool, names:Array<String>, selfName:String, skipped:Int} = {valid:false, names:[], selfName:"", skipped:0};
         readPhase = "list shape";
         var rows:Dynamic = switch key {
             case "MapMenuData": field(data, "MarkerData");
@@ -60,19 +62,31 @@ class FcmRoster {
             var row:Dynamic = rows[i];
             if (row == null) continue;
             if (key == "MapMenuData") {
-                if (field(row, "markerType") == "PlayerRemote") addName(result.names, field(row, "text"), local);
+                var marker = field(row, "markerType");
+                if (marker == "PlayerRemote") addName(result.names, field(row, "text"), local);
+                else if (marker == "PlayerLocal") result.selfName = cleanName(field(row, "text"));
             } else if (key == "PublicTeamsData") {
                 var members:Dynamic = field(row, "members");
                 var memberCount = nativeCount(members, 24);
                 if (memberCount < 0) { result.skipped++; continue; }
                 for (j in 0...memberCount) try {
-                    addName(result.names, field(members[j], "playerName"), local);
+                    var member = members[j];
+                    var memberName = cleanName(field(member, "playerName"));
+                    if (field(member, "isLocalPlayer") == true || field(member, "isLocal") == true
+                            || field(member, "isSelf") == true || memberName.toLowerCase() == local)
+                        result.selfName = memberName;
+                    else addName(result.names, memberName, local);
                 } catch (_:Dynamic) {
                     result.skipped++;
                 }
             } else {
-                if (field(row, "isLocalPlayer") == true || field(row, "isLocal") == true || field(row, "isSelf") == true)
+                if (field(row, "isLocalPlayer") == true || field(row, "isLocal") == true || field(row, "isSelf") == true) {
+                    for (candidate in ["displayName", "characterName", "name", "playerName"]) {
+                        var self = cleanName(field(row, candidate));
+                        if (self.length > 0) { result.selfName = self; break; }
+                    }
                     continue;
+                }
                 for (candidate in ["displayName", "characterName", "name", "playerName"]) {
                     var value = field(row, candidate);
                     if (value == null) continue;
@@ -104,6 +118,7 @@ class FcmRoster {
      * null for invalid/damaged data so callers cannot store an empty/partial world. */
     public static function readNames(key:String, data:Dynamic, localName:String):Array<String> {
         if (key != "MapMenuData" && key != "PublicTeamsData") return null;
+        lastSelfName = "";
         var result:Array<String> = [];
         var add = function(value:Dynamic):Void {
             if (value == null) return;
@@ -122,14 +137,23 @@ class FcmRoster {
         for (i in 0...n) try {
             var row:Dynamic = rows[i];
             if (key == "MapMenuData") {
-                if (field(row, "markerType") == "PlayerRemote") add(field(row, "text"));
+                var marker = field(row, "markerType");
+                if (marker == "PlayerRemote") add(field(row, "text"));
+                else if (marker == "PlayerLocal") lastSelfName = cleanName(Std.string(field(row, "text")));
             } else {
                 var members:Dynamic = field(row, "members");
                 var count:Dynamic = field(members, "length");
                 if (!Std.isOfType(count, Int) && !Std.isOfType(count, Float)) return null;
                 var memberCount:Int = Std.int(count);
                 if (memberCount != count || memberCount < 0 || memberCount > 24) return null;
-                for (j in 0...memberCount) add(field(members[j], "playerName"));
+                for (j in 0...memberCount) {
+                    var member = members[j];
+                    var memberName = cleanName(Std.string(field(member, "playerName")));
+                    if (field(member, "isLocalPlayer") == true || field(member, "isLocal") == true
+                            || field(member, "isSelf") == true || memberName.toLowerCase() == localName.toLowerCase())
+                        lastSelfName = memberName;
+                    else add(memberName);
+                }
             }
         } catch (e:Dynamic) { return null; }
         result.sort(function(a,b) return a < b ? -1 : a > b ? 1 : 0);

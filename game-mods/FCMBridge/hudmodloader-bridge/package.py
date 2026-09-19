@@ -16,7 +16,7 @@ import zlib
 
 ROOT = Path(__file__).resolve().parent
 ENTRY = "Interface/FCMServerBridge.swf"
-VERSION = "0.2.3"
+VERSION = "0.2.4"
 
 
 def module(name: str, path: Path):

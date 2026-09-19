@@ -225,15 +225,23 @@ describe('supporter effect readability', () => {
   it('gives chroma split a dim resting state and an occasional offset burst', () => {
     const css = readFileSync(resolve(__dirname, '..', 'nameEffects.css'), 'utf8');
     const chroma = css.match(/\.fcm-name-fx--chroma-split \{([\s\S]*?)\n\}/)?.[1] ?? '';
-    const burst = css.match(/@keyframes fcm-chroma-shift \{([\s\S]*?)\n\}/)?.[1] ?? '';
+    const burst = css.match(/\.fcm-name-fx--chroma-split\[data-fcm-chroma="a"\] \{([\s\S]*?)\n\}/)?.[1] ?? '';
 
-    expect(chroma).toContain('animation: fcm-chroma-shift var(--fcm-chroma-duration, 12s) steps(1, end) infinite;');
-    expect(chroma).toContain('animation-delay: var(--fcm-effect-delay, 0s);');
-    expect(burst).toContain('82%');
+    expect(chroma).not.toContain('animation:');
+    expect(css).not.toContain('@keyframes fcm-chroma-shift');
+    expect(css).toContain('.username-chip.fcm-name-fx--chroma-split');
+    expect(css).toContain('transition-property: color, background;');
     expect(burst).toContain('-2px 1px 0 rgba(255, 0, 64, 0.46)');
     expect(burst).toContain('2px -1px 0 rgba(0, 224, 255, 0.46)');
     expect(chroma).not.toContain('0 0 3px color-mix(in srgb, var(--fcm-fx-color) 68%, transparent)');
     expect(css).toContain('.fcm-name-fx--chroma-split.fcm-no-name-motion');
+  });
+
+  it('retains chroma motion for appearance previews outside the observed message list', () => {
+    const css = readFileSync(resolve(__dirname, '..', 'nameEffects.css'), 'utf8');
+    expect(css).toContain('.fcm-name-fx--chroma-split:not(.username-chip)');
+    expect(css).toContain('@keyframes fcm-chroma-preview');
+    expect(css).toContain('fcm-chroma-preview 12s steps(1, end) infinite');
   });
 
   it('assigns chroma split a stable per-message cadence and phase', () => {

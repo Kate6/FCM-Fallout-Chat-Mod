@@ -323,6 +323,66 @@ try {
   await newestName.evaluate(name => name.classList.remove('fcm-no-name-motion'));
   await expect(newestName).toHaveCSS('animation-name', 'fcm-shimmer-highlight');
   console.log('PASS retained offscreen name effects pause while visible effects stay animated');
+  const originalNameClass = await newestName.getAttribute('class');
+  const chromaName = page.locator('[data-msg-id="general-79"] .fcm-name-fx--chroma-split');
+  await newestName.evaluate(name => {
+    name.style.setProperty('--fcm-chroma-duration', '12s');
+    name.style.setProperty('--fcm-effect-delay', '-9.84s');
+    name.classList.replace('fcm-name-fx--shimmer', 'fcm-name-fx--chroma-split');
+  });
+  await expect(chromaName).toHaveAttribute('data-fcm-chroma', 'a');
+  await expect(chromaName).toHaveCSS('animation-name', 'none');
+  await expect(chromaName).toHaveCSS('transition-property', 'color, background');
+  const burstShadow = await chromaName.evaluate(name => getComputedStyle(name).textShadow);
+  await expect(chromaName).toHaveAttribute('data-fcm-chroma', 'rest');
+  assert.notEqual(await chromaName.evaluate(name => getComputedStyle(name).textShadow), burstShadow);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(chromaName).not.toHaveAttribute('data-fcm-chroma');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect(chromaName).toHaveAttribute('data-fcm-chroma', 'a');
+  for (const hiddenClass of ['fcm-full-auto-fading', 'fcm-full-auto-hidden']) {
+    try {
+      await page.evaluate(value => document.documentElement.classList.add(value), hiddenClass);
+      await expect(chromaName).not.toHaveAttribute('data-fcm-chroma');
+      await expect(chromaName).toHaveAttribute('data-fcm-motion-paused', '');
+    } finally {
+      await page.evaluate(value => document.documentElement.classList.remove(value), hiddenClass);
+    }
+    await expect(chromaName).toHaveAttribute('data-fcm-chroma', 'a');
+  }
+  await chromaName.evaluate((name, original) => {
+    name.setAttribute('class', original);
+    name.style.removeProperty('--fcm-chroma-duration');
+    name.style.removeProperty('--fcm-effect-delay');
+  }, originalNameClass);
+  console.log('PASS discrete chroma shadows change without CSS animation and honor reduced motion');
+  await page.evaluate(() => {
+    const preview = document.createElement('span');
+    preview.id = 'appearance-chroma-check';
+    preview.className = 'fcm-name-fx--chroma-split';
+    preview.textContent = 'Preview';
+    document.body.append(preview);
+  });
+  try {
+    const preview = page.locator('#appearance-chroma-check');
+    await expect(preview).toHaveAttribute('data-fcm-status-motion', 'fcm-chroma-preview');
+    const shadows = await preview.evaluate(element => {
+      const animation = element.getAnimations()[0];
+      const paused = animation.playState;
+      animation.currentTime = 10000;
+      const burst = getComputedStyle(element).textShadow;
+      animation.currentTime = 11000;
+      return { paused, burst, rest: getComputedStyle(element).textShadow };
+    });
+    assert.equal(shadows.paused, 'paused');
+    assert.notEqual(shadows.burst, shadows.rest);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect(preview).toHaveCSS('animation-name', 'none');
+  } finally {
+    await page.evaluate(() => document.querySelector('#appearance-chroma-check')?.remove());
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+  }
+  console.log('PASS appearance preview retains budgeted chroma motion and reduced-motion fallback');
   const initialConnections = connectionCount;
   await composer().fill('draft survives appearance changes');
   const tabRow = page.locator('[data-fcm-subtab-row="channels"]');
@@ -573,6 +633,27 @@ try {
   assert.equal(await page.locator('[data-msg-id^="perf-hidden-"]').evaluateAll(rows => new Set(rows.map(row => row.getAttribute('data-msg-id'))).size), 100);
   console.log('PASS 100 hidden messages survive show without duplicates or a visibility reconnect');
 
+  // Use relay-driven typing, not a mocked scheduler: the original CSS keyframes
+  // must still paint, but not run continuously on the native compositor.
+  for (let cycle = 0; cycle < 3; cycle++) {
+    for (const socket of relay.clients) socket.send(JSON.stringify({ type: 'chat:typing', payload: {
+      userId: 'bob', username: 'Bob', channelId: 'general',
+    } }));
+    const dot = page.locator('[data-fcm-status-motion="fcm-typing-dot"]').first();
+    await expect(dot).toBeVisible();
+    assert.equal(await dot.evaluate(el => el.getAnimations()[0].playState), 'paused');
+    const paint = await dot.evaluate(el => getComputedStyle(el).opacity);
+    await expect.poll(() => dot.evaluate(el => getComputedStyle(el).opacity)).not.toBe(paint);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect.poll(() => dot.evaluate(el => el.getAnimations()[0].currentTime)).toBe(0);
+    const frozenTime = await dot.evaluate(el => el.getAnimations()[0].currentTime);
+    await page.waitForTimeout(220);
+    assert.equal(await dot.evaluate(el => el.getAnimations()[0].currentTime), frozenTime);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect.poll(() => dot.evaluate(el => el.getAnimations()[0].currentTime)).not.toBe(frozenTime);
+  }
+  console.log('PASS relay typing paints at bounded cadence and suspends for reduced motion');
+
   // User-visible unread dots are live-only, close to the corresponding label,
   // clear on click, and keep the theme color with reduced-motion support.
   const channelTab = name => page.locator('[data-fcm-subtab-row="channels"]').getByRole('button', { name: `${name} channel`, exact: true });
@@ -584,6 +665,10 @@ try {
   await expect(unreadDot).toBeVisible();
   await expect(unreadDot).toHaveCSS('margin-right', '3px');
   await expect(unreadDot).toHaveCSS('animation-name', 'fcm-unread-pulse');
+  await expect(unreadDot).toHaveAttribute('data-fcm-status-motion', 'fcm-unread-pulse');
+  assert.equal(await unreadDot.evaluate(el => el.getAnimations()[0].playState), 'paused');
+  const unreadOpacity = await unreadDot.evaluate(el => getComputedStyle(el).opacity);
+  await expect.poll(() => unreadDot.evaluate(el => getComputedStyle(el).opacity)).not.toBe(unreadOpacity);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(unreadDot).toHaveCSS('animation-name', 'none');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -647,7 +732,8 @@ try {
   }
   await expect(page.getByText('[Your server]', { exact: true })).toBeVisible();
   await expect(page.getByText('[Server · 102]', { exact: true })).toBeVisible();
-  await expect(channelTab('Your server')).toBeVisible();
+  await expect(channelTab('Server')).toBeVisible();
+  await expect(channelTab('Your server')).toHaveCount(0);
   await page.getByText('[Server · 102]', { exact: true }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Mute this server', exact: true }).click();
   await expect(page.getByText('Other room moderation fixture', { exact: true })).toHaveCount(0);
@@ -677,7 +763,15 @@ try {
     await page.getByRole('spinbutton', { name: 'Overlay width in pixels' }).fill(String(640 + cycle * 20));
     await page.getByRole('spinbutton', { name: 'Overlay height in pixels' }).fill(String(480 + cycle * 20));
     await page.getByRole('button', { name: 'Apply size', exact: true }).click();
-    await expect(page.locator('[data-fcm-size-status]')).toContainText('Applied ');
+    // The previous cycle's "Applied" status remains until native IPC completes.
+    // Wait for this request's dimensions, not the previous successful response.
+    await expect.poll(async () => {
+      const width = Number(await page.getByRole('spinbutton', { name: 'Overlay width in pixels' }).inputValue());
+      const height = Number(await page.getByRole('spinbutton', { name: 'Overlay height in pixels' }).inputValue());
+      const status = await page.locator('[data-fcm-size-status]').textContent();
+      return Math.abs(width - (640 + cycle * 20)) <= 2 && Math.abs(height - (480 + cycle * 20)) <= 2
+        && status === `Applied ${width}×${height}`;
+    }).toBe(true);
     const actualWidth = Number(await page.getByRole('spinbutton', { name: 'Overlay width in pixels' }).inputValue());
     const actualHeight = Number(await page.getByRole('spinbutton', { name: 'Overlay height in pixels' }).inputValue());
     assert.ok(Math.abs(actualWidth - (640 + cycle * 20)) <= 2 && Math.abs(actualHeight - (480 + cycle * 20)) <= 2, `only desktop pixel rounding may alter these in-range dimensions: cycle=${cycle} actual=${actualWidth}x${actualHeight}`);
@@ -753,6 +847,70 @@ try {
   await expect(page.getByText('Automatic first Server room', { exact: true })).toBeVisible();
   await expect(page.getByText('Automatic second Server room', { exact: true })).toBeVisible({ timeout: 10000 });
   console.log('PASS automatic multi-room General history and normal dropdown Refresh');
+
+  await composer().fill('opacity regression draft');
+  const opacityCheck = await page.evaluate(async () => {
+    const root = document.documentElement;
+    const original = window.getComputedStyle;
+    let opacityReads = 0;
+    window.getComputedStyle = function (...args) {
+      const style = original.apply(this, args);
+      if (args[0] !== root) return style;
+      return new Proxy(style, { get(target, key) {
+        if (key === 'getPropertyValue') return name => {
+          if (name === '--fcm-chrome-bg-alpha' || name === '--fcm-text-opacity') opacityReads++;
+          return target.getPropertyValue(name);
+        };
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      } });
+    };
+    try {
+      for (let i = 0; i < 100; i++) {
+        root.style.setProperty('--fcm-performance-fixture', String(i));
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      return { opacityReads };
+    } finally {
+      window.getComputedStyle = original;
+      root.style.removeProperty('--fcm-performance-fixture');
+    }
+  });
+  assert.equal(opacityCheck.opacityReads, 0);
+  await expect(composer()).toHaveText('opacity regression draft');
+  await expect(page.getByText('Automatic first Server room', { exact: true })).toBeVisible();
+  console.log('PASS 100 unrelated shell style changes avoid computed opacity reads and retain draft/history');
+
+  for (const socket of relay.clients) socket.send(JSON.stringify({ type: 'chat:history', payload: {
+    messages: Array.from({ length: 1500 }, (_, index) => ({
+      id: `window-fixture-${index}`, channel_id: 'general', user_id: 'bob', username: 'Bob',
+      content: `Window fixture ${index}`, source: 'game',
+      created_at: new Date(Date.UTC(2027, 0, 1, 0, 0, index)).toISOString(),
+    })),
+  } }));
+  await page.evaluate(() => window.dispatchEvent(new Event('fcm-scroll-bottom')));
+  await expect(page.getByText('Window fixture 1499', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-fcm-message-line]')).toHaveCount(100);
+  await expect(page.getByText('Window fixture 1399', { exact: true })).toHaveCount(0);
+  const anchorBefore = await page.evaluate(() => {
+    const first = document.querySelector('[data-fcm-message-line]').closest('[data-msg-id]');
+    const list = first.closest('.fcm-scrollbar');
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    list.scrollTop = 0;
+    const anchor = { id: first.getAttribute('data-msg-id'), top: first.getBoundingClientRect().top };
+    list.dispatchEvent(new Event('scroll'));
+    return anchor;
+  });
+  await expect(page.locator('[data-fcm-message-line]')).toHaveCount(200);
+  await expect.poll(() => page.evaluate(anchor => {
+    const row = [...document.querySelectorAll('[data-msg-id]')].find(row => row.getAttribute('data-msg-id') === anchor.id);
+    return row ? Math.abs(row.getBoundingClientRect().top - anchor.top) : Infinity;
+  }, anchorBefore)).toBeLessThan(3);
+  await expect(composer()).toHaveText('opacity regression draft');
+  await page.evaluate(() => window.dispatchEvent(new Event('fcm-scroll-bottom')));
+  await expect(page.locator('[data-fcm-message-line]')).toHaveCount(100);
+  await expect(page.getByText('Window fixture 1499', { exact: true })).toBeVisible();
+  console.log('PASS 1500 cached messages render 100, reveal 100 older rows with stable anchor, and reset at latest');
 
   // The real account boundary still discards the old component and its draft.
   await composer().fill('private draft from Alice');

@@ -45,6 +45,10 @@ def main() -> None:
         assert active_ini_value(source_chat, key) == expected, (
             f"FCMChat.ini shipped default {key} must be {expected!r}"
         )
+    hidden_modes = active_ini_value(source_chat, "hideInHUDModes").split(",")
+    assert "ExamineConfirmMode" in hidden_modes, (
+        "FCMChat.ini must hide the HUD examine/scrap confirmation mode"
+    )
     assert active_ini_value(source_widget, "OpenChatKey") == "INSERT"
     assert '2) Sign in with Steam or Discord<br/>' in source_hx
     version_match = re.search(
@@ -161,6 +165,9 @@ def main() -> None:
         'var rs:String = Std.string(_api.call("chat.v1.sendMessage", payload));'
     ), "optimistic row must be queued before the native send call"
     swf_artifact = (ROOT / "FCMChatWidget.swf").read_bytes()
+    assert b"VisibilityScenario" not in swf_artifact and b"VISIBILITY PASS" not in swf_artifact, (
+        "Ruffle-only visibility driver must never ship in the production widget"
+    )
     assert b"RosterScenario" not in swf_artifact and b"ROSTER-SCENARIO" not in swf_artifact, (
         "Ruffle-only roster drivers and state probes must never ship in the production widget"
     )

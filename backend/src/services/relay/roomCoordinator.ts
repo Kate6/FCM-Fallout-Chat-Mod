@@ -66,9 +66,10 @@ export async function clearRoomMembership(userId: string, assertCurrent: () => P
   await publishRebind(userId, null, undefined, INSTANCE_ID);
 }
 
-export async function observeNativeRoster(userId: string, ownName: string, names: string[], requestId: string): Promise<void> {
+export async function observeNativeRoster(userId: string, ownName: string, names: string[], requestId: string,
+  ownAliases: string[] = []): Promise<void> {
   await coordinateRooms(async assertCurrent => {
-    await setRoster(userId, ownName, names, requestId);
+    await setRoster(userId, ownName, names, requestId, undefined, ownAliases);
     await applyRoomAssignments(userId, assertCurrent);
   });
 }
