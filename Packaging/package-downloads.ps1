@@ -42,6 +42,7 @@ param(
     [string]$DistDir   = "",
     [string]$AssetsDir = "",
     [string]$HudModDir = "",
+    [Parameter(Mandatory = $true)] [string]$BridgeZip,
     [ValidateSet("prod", "dev")] [string]$HudTarget = "prod"
 )
 
@@ -75,15 +76,19 @@ $installWin   = Join-Path $AssetsDir "install\INSTALL-WINDOWS.txt"
 $installLinux = Join-Path $AssetsDir "install\INSTALL-LINUX.txt"
 $kwinRule     = Join-Path $AssetsDir "fallout-chatmod-keepabove.kwinrule"
 $hudPackage   = Join-Path $HudModDir "package.py"
-$bridgePackage = Join-Path (Split-Path $HudModDir -Parent) "hudmodloader-bridge/package.py"
 $portablePackage = Join-Path $PSScriptRoot "package-portable.ps1"
 
 if (-not (Test-Path $installWin))   { Fail "Missing: $installWin" }
 if (-not (Test-Path $installLinux)) { Fail "Missing: $installLinux" }
 if (-not (Test-Path $kwinRule))     { Fail "Missing: $kwinRule" }
 if (-not (Test-Path $hudPackage))   { Fail "Missing: $hudPackage" }
-if (-not (Test-Path $bridgePackage)) { Fail "Missing: $bridgePackage" }
 if (-not (Test-Path $portablePackage)) { Fail "Missing: $portablePackage" }
+if (-not (Test-Path -LiteralPath $BridgeZip)) { Fail "Validated PROD bridge ZIP not found: $BridgeZip" }
+$expectedBridgeZipSha256 = "d2e229b601977efead12108d3db1a09b622f6580fe4f4b2ee50fd0a3d3f3ae47"
+$bridgeZipSha256 = (Get-FileHash -LiteralPath $BridgeZip -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($bridgeZipSha256 -ne $expectedBridgeZipSha256) {
+    Fail "Bridge ZIP is not the native-accepted 0.2.4 artifact (expected $expectedBridgeZipSha256, got $bridgeZipSha256)"
+}
 
 # Resolve Python once so package.py is run consistently by the repeatable
 # release wrapper on Windows, Linux, and macOS.
@@ -127,11 +132,8 @@ Write-Host "[package-downloads]   -> $winZipOut ($([math]::Round($winSize/1MB,1)
 Write-Host "[package-downloads] Building portable ZIP: $portableZipName"
 if (Test-Path $portableZipOut) { Remove-Item $portableZipOut -Force }
 $portableStaging = Join-Path $stagingRoot "portable"
-$bridgeZip = Join-Path $portableStaging "FCM Server Bridge-0.2.4 (PROD).zip"
 New-Item -ItemType Directory -Path $portableStaging -Force | Out-Null
-& $pythonCommand.Source $bridgePackage --target prod --output $bridgeZip
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path $bridgeZip)) { Fail "PROD bridge package failed" }
-& $portablePackage -Version $Version -PortableExe $portableExe -BridgeZip $bridgeZip -OutputDir $portableStaging
+& $portablePackage -Version $Version -PortableExe $portableExe -BridgeZip $BridgeZip -OutputDir $portableStaging
 if ($LASTEXITCODE -ne 0) { Fail "Portable package failed" }
 $generatedPortableZip = Join-Path $portableStaging $portableZipName
 if (-not (Test-Path $generatedPortableZip)) { Fail "Portable ZIP not produced: $generatedPortableZip" }

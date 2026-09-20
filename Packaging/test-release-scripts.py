@@ -135,8 +135,9 @@ def main() -> None:
     assert '$env:ELECTRON_RUN_AS_NODE = $null' in smoke
     for marker in ('[ValidateSet("Default", "Portable")]', 'Fallout Chat Mod Portable $Version.exe', 'FCMData\\logs'):
         assert marker in smoke, f"portable smoke gate is missing: {marker}"
-    for marker in ('Fallout Chat Mod Portable $Version.zip', 'package-portable.ps1', 'hudmodloader-bridge'):
+    for marker in ('Fallout Chat Mod Portable $Version.zip', 'package-portable.ps1', '$expectedBridgeZipSha256', '[Parameter(Mandatory = $true)] [string]$BridgeZip'):
         assert marker in package_downloads, f"portable package path is missing: {marker}"
+    assert '"-BridgeZip", $BridgeZip' in release
     for marker in ('portableDownloadUrl', 'portable VirusTotal GATE', 'Upload-Artifact $portableZip'):
         assert marker in release, f"portable release orchestration is missing: {marker}"
     assert '[switch]$SkipPermalinkUpdate' in vt_gate

@@ -91,6 +91,7 @@ param(
     [switch]$SkipBuild,
     [switch]$DryRun,
     [switch]$SkipWindowsNexus,
+    [Parameter(Mandatory = $true)] [string]$BridgeZip,
     [string]$SshTarget     = "",
     [string]$SshKey        = "",
     # Set the FCM_BACKEND_CONTAINER env var (User scope) to avoid passing this every time.
@@ -426,7 +427,7 @@ if ($DryRun) {
 Step-Banner 4 "Build download ZIPs"
 Write-Host "[step 4] Running package-downloads.ps1 -Version $Version ..."
 
-$pkgExit = Invoke-SubScript $pkgScript @("-Version", $Version, "-DistDir", $distDir, "-HudModDir", $hudModDir, "-HudTarget", $hudTarget)
+$pkgExit = Invoke-SubScript $pkgScript @("-Version", $Version, "-DistDir", $distDir, "-HudModDir", $hudModDir, "-HudTarget", $hudTarget, "-BridgeZip", $BridgeZip)
 if ($pkgExit -ne 0) {
     Fail "step 4 (package-downloads)" "package-downloads.ps1 exited $pkgExit"
 }
