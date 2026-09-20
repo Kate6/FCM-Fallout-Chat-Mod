@@ -37,10 +37,11 @@ setting and ZFE's native key watcher aligned. The complete shipped key map is:
   scrollUpKey=Up
   scrollDownKey=Down
   scrollBottomKey=
-  activateLinkKey=ENTER
+  activateLinkKey=F8
   hideKey=DELETE
 
-`scrollBottomKey` is intentionally blank, so Home/End remain game controls. `activateLinkKey`
+`scrollBottomKey` is intentionally blank, so Home/End remain game controls. Enter is reserved
+for editor submission. `activateLinkKey`
 opens a selected link only after OpenChat owns the editor and defaults to Enter; it is inert during
 ordinary gameplay. Opening requires ZFE browser-v1 and a validated HTTPS destination;
 unsupported providers keep the full URL readable and selectable. ZFE owns consent.

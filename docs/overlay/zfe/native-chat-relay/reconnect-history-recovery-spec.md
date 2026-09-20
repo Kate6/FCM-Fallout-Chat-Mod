@@ -40,6 +40,11 @@ worlds.
 Test: Perform three consecutive reconnects and two world changes; verify each static feed has one
 copy of each expected record and each world feed contains only its own records.
 
+The current 2.10.115 candidate additionally retains already accepted Server rows as bounded,
+display-only in-memory session history across room changes, expiry and MainMenu. New delivery,
+history acceptance and sends remain fenced to the current confirmed room, so retained rows never
+grant access to an old room. A fresh widget/game session starts with an empty Server transcript.
+
 ## Constraints
 
 - A fresh long-lived subscription enqueues the same complete bounded history for both providers.
@@ -53,15 +58,19 @@ copy of each expected record and each world feed contains only its own records.
   roster/world bind, preventing old-world history from crossing a transition. Both ZFE and xScal
   use this recovery path; a normal static snapshot suppresses it.
   An accepted replay forces the next roster/world bind and restarts the bounded drain.
-- Clearing SERVER records also clears SERVER deduplication IDs, allowing a later join to replay
-  those rows. Static deduplication remains intact. Native event IDs reset on reconnect while
-  durable static message IDs remain remembered.
+- Room transitions reset room-scoped SERVER deduplication IDs, allowing a later confirmed join to
+  replay that room's rows. Already accepted SERVER display rows remain in the bounded session
+  transcript but do not authorize delivery or suppress a different room's history. Static
+  deduplication remains intact. Native event IDs reset on reconnect while durable static message
+  IDs remain remembered.
 - History retrieval with an initial cursor returns the bounded recent history for static feeds;
   a later cursor returns only records newer than that cursor.
 - Cursors move forward within a provider session; reconnect may reset native cursor/event identity.
   Retained durable message IDs still prevent a replay from creating another visible record.
-- World-feed history remains scoped to the active derived world room; no record from a prior world
-  may appear after a transition.
+- New world-feed delivery and history acceptance remain scoped to the active derived world room;
+  no retained row authorizes access to a prior room. The current candidate may display previously
+  accepted Server rows as bounded session history after a transition, with the source room kept in
+  each canonical row.
 - Existing authentication, authorization, rate limits, payload limits, and opt-in HUD-mod
   boundaries remain unchanged.
 - The change includes automated regression coverage for initial-history recovery, resumed history,

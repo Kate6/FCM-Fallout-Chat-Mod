@@ -44,10 +44,40 @@ generations receive no grace. Reconciliation is event-driven, so an expired edge
 applied on the next serialized roster mutation; it never renews Redis observation
 freshness or the client lease.
 
+Daily Ops and similar instanced activities can remove the party members themselves
+from `MapMenuData` while every participant continues to report the same surrounding
+public-world population. After direct mutual-sighting grace expires, the coordinator
+retains an existing canonical room when two unchanged sessions with that same
+server-owned room affinity share at least three roster names and at least 75% of the
+larger roster. The server records the receipt time of actual roster observations and
+advances a separate direct-evidence timestamp only when both current rosters mutually
+identify each other. Cached recomputation, shared-population matches, heartbeats and
+history never renew that timestamp. Shared-population continuity expires 60 minutes
+after the last direct evidence. This evidence is continuity-only: it cannot join
+previously separate rooms, restore cleared/expired affinity, survive an account change,
+or cross an explicit leave or new observation generation. Disjoint world rosters and
+expired fallback windows therefore remain hop boundaries.
+
+Raid-stage HUD reconstruction can briefly replace the background bridge export file. The desktop
+watcher now holds its last validated sample through a transient unreadable poll without renewing
+the twelve-second writer-liveness window or thirty-second observation deadline. This prevents a
+single atomic-replacement gap from emitting `bridge:leave` and discarding room affinity, while a
+stopped writer, persistent invalid file, explicit inactive snapshot, game exit or real generation
+change still retires authority.
+
+The overlay and visible HUD separately retain accepted Server rows as bounded, in-memory display
+history for the current game/widget session across backend room moves. This does not retain room
+authorization: incoming delivery, history acceptance and sends remain fenced to the current
+confirmed binding. The overlay clears the transcript on confirmed game-process exit; a new HUD
+MovieRoot/game launch naturally starts empty. No session transcript is persisted to disk.
+
 Production split/rebind decisions are logged at info level with SHA-256-derived
 12-character references, component sizes, reason and fixed transport classes
 (`native`, `bridge:zfe`, or `bridge:xscal`). Logs contain no player names, roster
-contents, message bodies, raw room/session/request identifiers or tokens.
+contents, message bodies, raw room/session/request identifiers or tokens. Decisions
+also carry a fixed continuity reason: `direct`, `shared_population`,
+`fallback_expired`, or `threshold_rejected`. Successful shared-population retention is
+debug-logged with only the fixed reason and a hashed room reference.
 
 HUD 2.10.114 additionally sends transition-only `FCMCTL/1/DIAG:` controls through the
 existing authenticated, capability-gated `chat.v1` path. The body accepts only fixed
@@ -74,7 +104,9 @@ best-effort and cannot fail room assignment.
 HUD and account APIs can expose different labels for the same player. A 2.10.111 HUD therefore
 adds bounded `@self:` aliases to the existing printable v1 roster control, and bridge 0.2.4 prefers
 the local name from its fresh selected roster source for exported `ownName`. The coordinator may
-match any normalized primary/alias name, but still requires both clients to report each other.
+match any normalized primary/alias name, but the direct-sighting path still requires both clients
+to report each other. The bounded shared-population continuity rule above is separate and applies
+only to clients that already own the same canonical room.
 Aliases affect grouping only; relay tokens remain the sole actor identity and all sender/account
 attribution is unchanged. One-sided aliases remain isolated, malformed or excess aliases fail
 closed, and freshness/session/generation rules apply to the whole roster record.
@@ -118,8 +150,10 @@ since they do not maintain the new optional room metadata.
 
 Regression coverage: `worldRoomContinuity.test.js` covers either peer departing,
 component splits, stable-component inheritance, non-renewing partial-sighting grace,
-privacy-safe split telemetry, generation/leave boundaries, a single HUD replacement, five
-simultaneous startup-empty replacements and disjoint replacement; `relayHandler.test.js`
+privacy-safe split telemetry, Daily Ops party-name suppression with an identical public-world
+roster, rejection of shared-population joins across separate rooms, generation/leave boundaries,
+a single HUD replacement, five simultaneous startup-empty replacements and disjoint replacement;
+`relayHandler.test.js`
 covers withheld confirmation during recovery, overlapping replacement bind, the
 authenticated RESYNC marker and history confirmation.
 `localExportBridge.test.js`

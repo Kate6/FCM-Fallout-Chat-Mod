@@ -131,7 +131,7 @@ shipped values are explicit, including the two intentional blank defaults:
   scrollUpKey=Up
   scrollDownKey=Down
   scrollBottomKey=
-  activateLinkKey=ENTER
+  activateLinkKey=F8
   hideKey=DELETE
 
 Up/Down are the packaged arrow-scroll bindings; their ArrowUp/ArrowDown, Cursor, and Dpad

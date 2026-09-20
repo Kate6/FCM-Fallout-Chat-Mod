@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readBridgeState, mergeBridgeRows, clearBridgeRows, bridgeSendPayload, bridgeReplayRowsInMainFeed, INACTIVE_BRIDGE } from '../bridgeFeed';
+import { readBridgeState, mergeBridgeRows, clearBridgeSessionRows, bridgeSendPayload, bridgeReplayRowsInMainFeed, INACTIVE_BRIDGE } from '../bridgeFeed';
 
 const state = readBridgeState({ status: 'ready', channelId: 'server:r:one', bindingId: 'user_a/nonce/r:one' }, true);
 const frame = { channelId: 'server:r:one', bindingId: 'user_a/nonce/r:one' };
@@ -33,10 +33,10 @@ describe('private bridge feed', () => {
     const rows = mergeBridgeRows([], [row(2), { ...row(1), id: 'global:1' }, row(1), { ...row(3), channelId: 'server:r:other' }], state, frame, 100);
     expect(rows.map(r => r.id)).toEqual(['server:r:one:1', 'server:r:one:2']);
   });
-  it('world boundaries remove only server records', () => {
+  it('clears only Server rows when the local game session ends', () => {
     const global = { id: 'global-id', channelId: 'general' };
-    expect(clearBridgeRows([row(1), global])).toEqual([global]);
-    const unchanged = [global]; expect(clearBridgeRows(unchanged)).toBe(unchanged);
+    expect(clearBridgeSessionRows([row(1), global])).toEqual([global]);
+    const unchanged = [global]; expect(clearBridgeSessionRows(unchanged)).toBe(unchanged);
   });
   it('stamps Server sends with the current binding but preserves General routing', () => {
     expect(bridgeSendPayload({ channelId: frame.channelId, content: 'hello' }, state)).toMatchObject({ bridgeBindingId: frame.bindingId });

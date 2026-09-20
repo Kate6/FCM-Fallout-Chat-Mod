@@ -881,8 +881,11 @@ surfaces do not initiate a bridge watch. Server appearing preserves the selected
 actively selected Server follows its confirmed room changes.
 
 `bridgeFeed.ts` merges private history/live by canonical message ID, including within-batch
-duplicates. General and Server filter one collection. Room/connection boundaries purge server
-rows and reject old binding frames. Server sends carry the current binding and never enter the
+duplicates. General and Server filter one collection. Accepted Server rows remain as a bounded,
+in-memory transcript across room changes and WebSocket reconnects for the current game session;
+General and the Server subtab both show rows from every room visited during that session in
+timestamp order. A confirmed game-process exit clears that transcript, and an overlay restart
+starts fresh. Old-binding frames are still rejected. Server sends carry the current binding and never enter the
 offline outbox. Retired presence REST panels and UUID history pagination are excluded for the
 bridge room. See [background bridge](../overlay/zfe/background-server-bridge.md) for setup and
 remaining hosted/runtime acceptance.

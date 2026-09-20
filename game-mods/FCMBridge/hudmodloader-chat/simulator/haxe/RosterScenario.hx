@@ -23,7 +23,7 @@ class RosterScenario {
                 check("authenticated room diagnostic is fixed-schema and privacy safe",
                     MockXscal.roomDiagnosticCount > 0
                     && MockXscal.lastRoomDiagnosticBody.indexOf("event=roster_send") >= 0
-                    && MockXscal.lastRoomDiagnosticBody.indexOf("build=2.10.114") >= 0
+                    && MockXscal.lastRoomDiagnosticBody.indexOf("build=2.10.116") >= 0
                     && MockXscal.lastRoomDiagnosticBody.indexOf("HarnessPeer") < 0
                     && MockXscal.lastRoomDiagnosticBody.indexOf("VisibleSimulator") < 0);
                 var diagnosticCount = MockXscal.roomDiagnosticCount;
@@ -31,7 +31,7 @@ class RosterScenario {
                 check("identical consecutive room diagnostics are suppressed",
                     MockXscal.roomDiagnosticCount == diagnosticCount);
                 run(widget);
-                flash.Lib.trace("ROSTER-SCENARIO PASS " + provider + " preserved=tab,history,nonce controls=unchanged diagnostic=bounded hop=clear,rebind expiry=leave mainMenu=leave");
+                flash.Lib.trace("ROSTER-SCENARIO PASS " + provider + " preserved=tab,history,nonce controls=unchanged diagnostic=bounded transcript=session hop=rebind expiry=leave mainMenu=leave");
             } catch (error:Dynamic) {
                 timer.stop();
                 flash.Lib.trace("ROSTER-SCENARIO FAIL " + provider + " " + Std.string(error));
@@ -177,7 +177,7 @@ class RosterScenario {
         map(["NewWorldPeer"]);
         widget.checkWorldId();
         check("world hop leaves exactly once", MockXscal.leaveControlCount == leaves + 1);
-        check("world hop clears old rows and nonce", serverRows(widget) == 0
+        check("world hop retains old rows but rotates nonce", serverRows(widget) == 1
             && widget._serverSession.target() != nonce && !widget._serverSessionReady);
         widget.checkWorldId();
         drain(widget);
@@ -186,15 +186,15 @@ class RosterScenario {
 
         MockXscal.enqueueServerHistory(widget._serverSession.room);
         drain(widget);
-        check("new room can receive history", serverRows(widget) == 1);
+        check("new room history joins the session transcript count=" + serverRows(widget), serverRows(widget) == 2);
         map([]);
         widget.checkWorldId();
-        check("empty grace initially keeps new room", serverRows(widget) == 1);
+        check("empty grace initially keeps the session transcript", serverRows(widget) == 2);
         // Advance only test-owned observation/confirmation timestamps, not a game clock.
         widget._rosterSnapshots.emptySince = flash.Lib.getTimer() - 60000;
         widget._serverSession.confirmedAt = flash.Lib.getTimer() - 60000;
         widget.checkWorldId();
-        check("expired grace and lease still leave old room", serverRows(widget) == 0
+        check("expired grace and lease leave membership but retain the transcript", serverRows(widget) == 2
             && !widget._serverSessionReady && MockXscal.leaveControlCount == leaves + 2);
         widget.checkWorldId();
         drain(widget);
@@ -210,15 +210,15 @@ class RosterScenario {
         MockXscal.enqueueRetainedHistory(replayRoom, 103);
         drain(widget);
         check("only authorized retained row rendered once count=" + serverRows(widget)
-            + " room=" + widget._serverSession.room, serverRows(widget) == 1);
+            + " room=" + widget._serverSession.room, serverRows(widget) == 4);
         check("retained message identity preserved", widget._records[widget._records.length - 1].messageId
             == "server:r:00000000-0000-4000-8000-000000000001:103");
         flash.Lib.trace("RETAINED-HISTORY PASS authorized=once stale=rejected unmarked=rejected id=preserved");
         MockGameData.publish("MenuStackData", {menuStackA:[{menuName:"MainMenu"}]});
         widget.checkWorldId();
         widget.checkWorldId();
-        check("main menu leaves once and clears despite cached roster", !widget._serverSessionReady
-            && serverRows(widget) == 0 && MockXscal.leaveControlCount == leaves + 3);
+        check("main menu leaves once but keeps the session transcript", !widget._serverSessionReady
+            && serverRows(widget) == 4 && MockXscal.leaveControlCount == leaves + 3);
     }
 
     static function restoredReader(widget:FCMChatWidget):Void {

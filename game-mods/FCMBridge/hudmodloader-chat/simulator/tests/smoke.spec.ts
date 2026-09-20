@@ -22,7 +22,7 @@ test.afterEach(async ({ page, request }) => {
 test('loads the exact production widget artifact and records browser key delivery', async ({ page }) => {
   await page.goto('/?mode=artifact');
   await expect(page.locator('#status')).toHaveAttribute('data-state', 'ready', { timeout: 20_000 });
-  await expect(page.locator('#widget-version')).toHaveText('2.10.114');
+  await expect(page.locator('#widget-version')).toHaveText('2.10.116');
   await page.locator('#focus-stage').click();
   await page.keyboard.press('Insert');
   await page.keyboard.press('ArrowUp');
@@ -84,14 +84,14 @@ test('disables inactivity auto-hide only in the generated simulator config', asy
 });
 
 test('validates profiles and writes every simulator INI key without changing production defaults', () => {
-  const profile = normalizeKeybinds({ ...defaultKeybinds, openKey: 'f8', scrollBottomKey: 'home' });
-  expect(profile).toMatchObject({ openKey: 'F8', scrollBottomKey: 'HOME' });
+  const profile = normalizeKeybinds({ ...defaultKeybinds, openKey: 'f9', scrollBottomKey: 'home' });
+  expect(profile).toMatchObject({ openKey: 'F9', scrollBottomKey: 'HOME' });
   expect(browserKey('F8')).toEqual({ code: 'F8', key: 'F8', keyCode: 119 });
   expect(() => normalizeKeybinds({ ...defaultKeybinds, openKey: 'F8', hideKey: 'F8' })).toThrow(/different key/);
-  const ini = applyKeybindsToIni('openKey=INSERT\nchannelNextKey=NextPage\nchannelPrevKey=PrevPage\nscrollUpKey=Up\nscrollDownKey=Down\nscrollBottomKey=\nactivateLinkKey=ENTER\nhideKey=DELETE\n', profile);
-  expect(ini).toContain('openKey=F8');
+  const ini = applyKeybindsToIni('openKey=INSERT\nchannelNextKey=NextPage\nchannelPrevKey=PrevPage\nscrollUpKey=Up\nscrollDownKey=Down\nscrollBottomKey=\nactivateLinkKey=F8\nhideKey=DELETE\n', profile);
+  expect(ini).toContain('openKey=F9');
   expect(ini).toContain('scrollBottomKey=HOME');
-  expect(ini).toContain('activateLinkKey=ENTER');
+  expect(ini).toContain('activateLinkKey=F8');
 });
 
 test('packages provider-neutral key routing and xScal self-echo', async () => {
@@ -362,7 +362,7 @@ test('delivers every right-panel control and physical compose keys to the harnes
   for (const name of ['Open chat', 'Scroll up', 'Scroll down', 'Previous channel', 'Next channel', 'Open selected link', 'Hide']) {
     await page.getByRole('button', { name, exact: true }).click();
   }
-  for (const code of ['Insert', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Enter', 'Delete']) {
+  for (const code of ['Insert', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'F8', 'Delete']) {
     await expect(page.locator('#log')).toContainText(`KEYDOWN    ${code}`);
     await expect(page.locator('#log')).toContainText(`KEYUP      ${code}`);
   }
@@ -371,21 +371,22 @@ test('delivers every right-panel control and physical compose keys to the harnes
   await page.keyboard.type('automated HUD message');
   await page.keyboard.press('Enter');
   await expect(page.locator('#log')).toContainText('KEYDOWN    Enter');
+  await expect(page.locator('#log')).not.toContainText('command=activate-link handled=false');
   await page.screenshot({ path: 'test-results/hud-harness-input.png', fullPage: true });
 });
 
 for (const provider of ['xscal', 'zfe']) {
-  test(`applies a custom F8 keybind through the ${provider} preview route`, async ({ page, request }) => {
+  test(`applies a custom F9 open keybind through the ${provider} preview route`, async ({ page, request }) => {
     const browserErrors: string[] = [];
     page.on('pageerror', error => browserErrors.push(error.message));
-    const response = await request.post('/__fcm/keybinds', { data: { ...defaultKeybinds, openKey: 'F8', scrollBottomKey: 'HOME' } });
+    const response = await request.post('/__fcm/keybinds', { data: { ...defaultKeybinds, openKey: 'F9', scrollBottomKey: 'HOME' } });
     expect(response.ok()).toBe(true);
     await page.goto(`/?mode=harness&provider=${provider}`);
     await expect(page.locator('#status')).toHaveAttribute('data-state', 'ready', { timeout: 20_000 });
-    await expect(page.locator('#bind-openKey')).toHaveValue('F8');
+    await expect(page.locator('#bind-openKey')).toHaveValue('F9');
     await page.getByRole('button', { name: 'Open chat', exact: true }).click();
-    await expect(page.locator('#log')).toContainText(`openKey=F8 provider=${provider}`);
-    await expect(page.locator('#log')).toContainText('KEYDOWN    F8');
+    await expect(page.locator('#log')).toContainText(`openKey=F9 provider=${provider}`);
+    await expect(page.locator('#log')).toContainText('KEYDOWN    F9');
     expect(browserErrors).toEqual([]);
     await request.post('/__fcm/keybinds/reset', { data: {} });
   });

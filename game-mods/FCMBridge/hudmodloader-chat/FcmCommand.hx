@@ -151,6 +151,8 @@ class FcmCommand {
             inputOpen:Bool, selectedHasLink:Bool):Bool {
         if (!inputOpen || !selectedHasLink) return false;
         var binding:String = StringTools.trim(configured == null ? "" : configured);
+        // Enter belongs exclusively to the host editor's submit contract.
+        if (virtualKeyCode(binding) == 0x0D) return false;
         return binding.length > 0 && sameAction(normalizeAction(raw), binding);
     }
 
@@ -194,7 +196,8 @@ class FcmCommand {
     /**
      * General is a view of the six public HUD feeds. Records keep their source channel,
      * so tab switching, self-echo matching and replay guards share one canonical row.
-     * SERVER records are room-validated on ingestion and cleared on leave.
+     * SERVER records are room-validated on ingestion and retained only in memory
+     * for the current widget/game session when membership changes.
      */
     public static function channelVisible(active:String, channel:String):Bool {
         switch (channel) {

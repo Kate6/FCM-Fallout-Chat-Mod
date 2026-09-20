@@ -81,12 +81,13 @@ describe('monotonic evidence and writer liveness', () => {
     expect(c.accept(snapshot({ sequence: 8 }), 31000)).toBeNull();
     expect(c.accept(snapshot({ sequence: 9, observationSequence: 2 }), 32000)).not.toBeNull();
   });
-  it('retries malformed/partial reads only with new evidence after losing an active file', () => {
+  it('holds the last validated observation across a transient malformed or partial read', () => {
     const c = new ExportCursor(); c.accept(snapshot(), 0); c.accept(snapshot({ sequence: 2 }), 1000);
-    expect(c.accept(null, 1500)).toBeNull();
-    expect(c.accept(snapshot({ sequence: 2 }), 2000)).toBeNull();
-    expect(c.accept(snapshot({ sequence: 3 }), 2500)).toBeNull();
-    expect(c.accept(snapshot({ sequence: 4, observationSequence: 2 }), 3000)).not.toBeNull();
+    expect(c.accept(null, 1500)).not.toBeNull();
+    expect(c.accept(snapshot({ sequence: 2 }), 2000)).not.toBeNull();
+    expect(c.accept(snapshot({ sequence: 3 }), 2500)).not.toBeNull();
+    expect(c.current(14499)).not.toBeNull();
+    expect(c.current(14500)).toBeNull();
   });
   it('rejects backward sequences, observation mutation and holding without established evidence', () => {
     const c = new ExportCursor(); c.accept(snapshot(), 0);
@@ -111,6 +112,26 @@ describe('monotonic evidence and writer liveness', () => {
 });
 
 describe('bounded asynchronous watcher lifecycle', () => {
+  it('does not leave the room for a transient export replacement gap', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    let value = snapshot();
+    const onSnapshot = vi.fn(), onInactive = vi.fn();
+    const watcher = watchExports({ environment: 'dev',
+      discover: async () => [{ root: '/game', relative: 'x.json', provider: 'zfe' }],
+      read: async () => value ? JSON.stringify(value) : null, onSnapshot, onInactive });
+    await vi.advanceTimersByTimeAsync(1000);
+    value = snapshot({ sequence: 2 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onSnapshot).toHaveBeenCalledOnce();
+    value = null;
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(onInactive).not.toHaveBeenCalled();
+    value = snapshot({ sequence: 3 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onSnapshot).toHaveBeenCalledTimes(2);
+    expect(onInactive).not.toHaveBeenCalled();
+    watcher.stop();
+  });
   it('pins non-empty provider paths for the game session instead of relaunching discovery', async () => {
     vi.useFakeTimers(); vi.setSystemTime(0);
     const rows = [{ root: '/game', relative: 'x.json', provider: 'xscal' }];

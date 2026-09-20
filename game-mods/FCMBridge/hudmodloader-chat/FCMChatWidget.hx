@@ -80,7 +80,7 @@ class FCMChatWidget extends MovieClip {
     // 2.10.0 is the first build that reports clientVersion to the relay. The relay
     // treats "no version reported" as "oldest possible client" and gates any new wire
     // field on this, so the version bump IS the capability signal.
-    static inline var VERSION:String  = "2.10.114"; // Authenticated privacy-safe room diagnostics
+    static inline var VERSION:String  = "2.10.116"; // Stable SharedHUDTools drafts; Enter submits only
     static inline var SETTINGS_PATH:String = "settings.ini";
     // This is a top-level ZFE command, not a relay operation. ZFE owns the DPAPI/local auth file
     // and must clear it; the SWF is not allowed to write arbitrary files from the HUD domain.
@@ -420,6 +420,7 @@ class FCMChatWidget extends MovieClip {
     static inline var SHARED_INPUT_FOCUS_GRACE_MS:Float = 225;
     var _sharedInputField:TextField = null;
     var _sharedInputDraft:String = "";
+    var _sharedInputAllowEmpty:Bool = false;
     var _sharedInputSubmitArmed:Bool = false;
     var _sharedInputCancelArmed:Bool = false;
     var _sharedInputFocusLostAt:Float = 0;
@@ -722,6 +723,7 @@ class FCMChatWidget extends MovieClip {
         }
         _sharedInputField = null;
         _sharedInputDraft = "";
+        _sharedInputAllowEmpty = false;
         _sharedInputSubmitArmed = false;
         _sharedInputCancelArmed = false;
         _sharedInputFocusLostAt = 0;
@@ -2804,12 +2806,19 @@ class FCMChatWidget extends MovieClip {
      */
     function onInputSubmit(text:Dynamic):Void {
         if (_disposed) return;
+        var recoveredDraft:String = _sharedInputDraft;
+        var submitWasArmed:Bool = _sharedInputSubmitArmed;
         stopSharedInputDiagnostics();
         _inputOpen = false;
         clearNavigationLatches();
         setPrompt(idlePrompt());
         if (text == null) return; // Cancellation is never link activation.
         var s:String = Std.string(text);
+        if (submitWasArmed && StringTools.trim(s).length == 0
+                && StringTools.trim(recoveredDraft).length > 0) {
+            s = recoveredDraft;
+            zfeLog("warn", "input", "recovered empty SharedHUDTools submit len=" + s.length);
+        }
         handleSubmittedText(s);
     }
 
@@ -2869,8 +2878,15 @@ class FCMChatWidget extends MovieClip {
         }
         // Keep the draft only in memory so an observed HUDTools callback loss cannot discard an
         // Enter submission. Neither the characters nor derived content are written to the log.
-        _sharedInputDraft = _sharedInputField.text;
-        if (e.keyCode == 13) _sharedInputSubmitArmed = true;
+        _sharedInputDraft = FcmSharedInputRecovery.stableDraft(
+            _sharedInputDraft, _sharedInputField.text, _sharedInputAllowEmpty);
+        _sharedInputAllowEmpty = (e.keyCode == 8 || e.keyCode == 46)
+            && _sharedInputField.length <= 1;
+        if (e.keyCode == 13) {
+            _sharedInputSubmitArmed = true;
+            zfeLog("info", "inputdiag", "shared editor Enter reserved for submit len="
+                + _sharedInputDraft.length);
+        }
         else if (e.keyCode == 27 || e.keyCode == 9) _sharedInputCancelArmed = true;
     }
 
@@ -2903,7 +2919,17 @@ class FCMChatWidget extends MovieClip {
         if (isTextField) {
             var tf:TextField = cast focused;
             bindSharedInputField(tf);
-            _sharedInputDraft = tf.text;
+            var observedDraft:String = tf.text;
+            var stableDraft:String = FcmSharedInputRecovery.stableDraft(
+                _sharedInputDraft, observedDraft, _sharedInputAllowEmpty);
+            if (observedDraft.length == 0 && stableDraft.length > 0) {
+                tf.text = stableDraft;
+                tf.setSelection(stableDraft.length, stableDraft.length);
+                zfeLog("warn", "inputdiag", "restored transient empty shared editor len="
+                    + stableDraft.length);
+            }
+            _sharedInputDraft = stableDraft;
+            _sharedInputAllowEmpty = false;
             _sharedInputFocusLostAt = 0;
             // HUDTools creates an INPUT field with selectable=false. In observed Scaleform builds
             // that leaves the caret unstable and the draft returns to length zero between keys.
@@ -3769,7 +3795,7 @@ class FCMChatWidget extends MovieClip {
         _lastRosterSent = "";
         resetRosterObservation("relay connection", true);
         _lastWorldId = ""; // force the legacy worldId fallback to rebind after reconnect
-        clearServerRecords("relay connection");
+        retainServerRecords("relay connection");
         _history.startConnection();
         stopHistoryResyncFallback();
         _lastAuthObservation = "";
@@ -4129,6 +4155,7 @@ class FCMChatWidget extends MovieClip {
                 _cfg.scrollUpKey, _cfg.scrollDownKey, _cfg.scrollBottomKey,
                 _cfg.activateLinkKey, _cfg.hideKey]) {
             var configuredCode:Int = FcmCommand.virtualKeyCode(token);
+            if (configuredCode == 0x0D && token == _cfg.activateLinkKey) continue;
             if (configuredCode > 0 && keyCodes.indexOf(configuredCode) < 0) keyCodes.push(configuredCode);
         }
         // ZFE's native OpenChatKey vocabulary is narrower than Input.* (for example,
@@ -4759,7 +4786,7 @@ class FCMChatWidget extends MovieClip {
                 updateCursorFromEvent(obj);
                 var previousRoom = _serverSession.room;
                 if (_inWorld && !_serverAtMainMenu && _serverSession.accept(body, flash.Lib.getTimer())) {
-                    if (previousRoom != _serverSession.room) clearServerRecords("confirmed room changed");
+                    if (previousRoom != _serverSession.room) retainServerRecords("confirmed room changed");
                     setServerSessionReady(true, "");
                     var pending = _serverSession.takePending();
                     if (pending.length > 0) parseAndRenderEvents('{"events":[' + pending.join(",") + ']}', false);
@@ -5412,20 +5439,14 @@ class FCMChatWidget extends MovieClip {
         return _rosterSnapshots.sessionNames(flash.Lib.getTimer(), ROSTER_FRESH_MS, _lastRosterSent);
     }
 
-    /** Drop only ephemeral SERVER rows before a new roster-derived room is bound. */
-    function clearServerRecords(reason:String):Void {
+    /** Reset room-scoped deduplication while retaining accepted SERVER rows for
+     *  the lifetime of this widget instance. New delivery remains bound to the
+     *  current confirmed room; retained rows are display-only session history. */
+    function retainServerRecords(reason:String):Void {
         _history.clearServer();
-        var kept:Array<ChatRecord> = [];
-        var removed:Int = 0;
-        for (rec in _records) {
-            if (rec.channel == "server" && !(rec.pending && _outbox.get(rec.localSendId) != null)) removed++;
-            else kept.push(rec);
-        }
-        if (removed == 0) return;
-        _records = kept;
-        _newWhileScrolled = 0;
-        zfeLog("info", "history", "cleared server feed rows=" + removed + " reason=" + reason);
-        if (FcmCommand.channelVisible(CHAN_SLUGS[_chanIdx], "server")) renderRecords();
+        var retained:Int = 0;
+        for (rec in _records) if (rec.channel == "server") retained++;
+        zfeLog("info", "history", "retained server session rows=" + retained + " reason=" + reason);
     }
 
     /** Roster-derived world membership: send while observations are fresh. The SERVER tab is
@@ -5444,7 +5465,7 @@ class FCMChatWidget extends MovieClip {
         _worldPollPhase = "roster-snapshots";
         if (_serverSessionReady && !_serverSession.fresh(now)) {
             setServerSessionReady(false, "server confirmation expired");
-            clearServerRecords("server confirmation expired");
+            retainServerRecords("server confirmation expired");
             _lastRosterSentAt = 0;
         }
         var names:Array<String> = freshRosterNames();
@@ -5466,15 +5487,15 @@ class FCMChatWidget extends MovieClip {
             // A roster replacement with no shared name is the only reliable world-hop signal
             // available from the approved HUD data surfaces. The relay may otherwise compute
             // the same room key and keep this subscriber on the previous server feed. Leave
-            // first, clear local ephemeral rows, then let the next tick submit the new roster;
+            // first, retain the local session transcript, then let the next tick submit the new roster;
             // the fresh bind triggers the existing server-history backfill.
             // Keep the prior roster comparison even if the relay lease just expired and
             // reset the send timestamp; a permanent empty must still leave the old room.
             if (FcmCommand.shouldRebindRosterSession(_lastRosterSent, namesField)) {
                 sendRoomDiagnostic("roster_boundary",
                     _rosterSnapshots.sessionSource(now, ROSTER_FRESH_MS, namesField), names.length);
-                zfeLog("info", "world", "roster session changed; clearing feed and rebinding");
-                clearServerRecords("roster session changed");
+                zfeLog("info", "world", "roster session changed; retaining transcript and rebinding");
+                retainServerRecords("roster session changed");
                 setServerSessionReady(false, "");
                 _lastRosterSentAt = 0;
                 _lastRosterSent = "";
@@ -5506,7 +5527,7 @@ class FCMChatWidget extends MovieClip {
         } else if (wasInWorld) {
             sendRoomDiagnostic("roster_stale", "none", 0);
             zfeLog("info", "world", "roster went stale; sending LEAVE");
-            clearServerRecords("roster stale");
+            retainServerRecords("roster stale");
             setServerSessionReady(false, "");
             sendWorldLeaveControl();
             _lastRosterSent = "";
@@ -5526,7 +5547,7 @@ class FCMChatWidget extends MovieClip {
                 sendRoomDiagnostic("main_menu", "none", 0);
                 _serverAtMainMenu = true;
                 _inWorld = false;
-                clearServerRecords("main menu");
+                retainServerRecords("main menu");
                 setServerSessionReady(false, "");
                 sendWorldLeaveControl();
                 resetRosterObservation("main menu");
@@ -5569,7 +5590,7 @@ class FCMChatWidget extends MovieClip {
         _inWorld     = (worldId.length > 0);
         if (_inWorld) {
             if (previousWorldId.length > 0 && previousWorldId != worldId) {
-                clearServerRecords("legacy worldId changed");
+                retainServerRecords("legacy worldId changed");
                 setServerSessionReady(false, "");
             }
             // JOINED (or hopped to) a world → bind the server room.
@@ -5577,7 +5598,7 @@ class FCMChatWidget extends MovieClip {
             sendWorldIdControl(worldId);
         } else if (wasInWorld) {
             // LEFT the world (worldId cleared) → unbind the server room.
-            clearServerRecords("legacy worldId cleared");
+            retainServerRecords("legacy worldId cleared");
             zfeLog("info", "world", "left world; sending LEAVE control");
             sendWorldLeaveControl();
             setServerSessionReady(false, "");

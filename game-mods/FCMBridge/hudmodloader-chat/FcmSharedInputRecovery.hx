@@ -12,4 +12,12 @@ class FcmSharedInputRecovery {
         if (submitArmed && !cancelArmed && draftLength > 0) return SUBMIT;
         return CANCEL;
     }
+
+    /** Preserve a complete draft across transient empty SharedHUDTools observations. */
+    public static function stableDraft(previous:String, observed:String, allowEmpty:Bool):String {
+        var before:String = previous == null ? "" : previous;
+        var current:String = observed == null ? "" : observed;
+        if (current.length > 0 || allowEmpty || before.length == 0) return current;
+        return before;
+    }
 }

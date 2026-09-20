@@ -26,9 +26,14 @@ data. 0.2.3 reuses `FcmJson` for runtime-info/write acknowledgements and forbids
 exports and the user reported it working. Full mixed-client shared-room/message/travel
 acceptance remains pending; the overlay log did not independently confirm room assignment.
 
-**Visible HUD 2.10.114 private candidate:** retains 2.10.113's identity-field inventory and
-2.10.112's use of original relay timestamps to slot delayed
-current-room Server history into General chronologically. Replay older than General's loaded
+**Visible HUD 2.10.116 private candidate:** retains 2.10.115's session transcript and reserves
+Enter for text submission. Selected-link activation defaults to F8, and transient empty
+SharedHUDTools samples no longer erase the stable draft. It keeps accepted
+Server rows as bounded in-memory history across every room visited during the current widget/game
+session. Delivery and sends remain fenced to the current confirmed room; restarting the widget
+starts an empty transcript. It also retains 2.10.113's identity-field inventory and
+2.10.112's use of original relay timestamps to slot delayed newly confirmed-room Server history
+into General chronologically. Replay older than General's loaded
 static-history horizon appears only in the complete Server subtab, preventing a previously visited
 room's backlog from arriving as a tail burst. Live Server rows remain in General. The candidate
 retains 2.10.111's roster-visible `@self:` evidence; authentication, sender attribution, mutual
@@ -36,8 +41,8 @@ sightings and room gates are unchanged. It adds capability-gated, transition-onl
 room diagnostics with no player names, roster contents, messages, raw identifiers or tokens.
 Native acceptance remains pending. 2.10.110 remains the current public release.
 
-The 2.10.114 complete 60-case Ruffle and local Haxe/compiler/source/artifact/package gates pass.
-The exact tested BA2 and version marker are installed on the desktop with a recoverable backup;
+The 2.10.116 complete 60-case Ruffle and local Haxe/compiler/source/artifact/package gates pass;
+native acceptance is pending. The exact older 2.10.114 BA2 and version marker remain installed on the desktop with a recoverable backup;
 provider, settings and loader files are unchanged. It is not natively accepted. No public release
 or backend deployment was performed for this candidate.
 
@@ -224,16 +229,19 @@ failure. Ruffle remains regression evidence, not proof of the native ZFE/GFx lif
 
 ## Combined General feed
 
-In local candidate 2.10.100, General shows **General, current-room Server, Trading, Events,
-Infests, and Raids**. The six allowed slugs are `global`, `server`, `trade`, `events`, `infests`,
-and `raids`. Tabs filter one retained record list; each row keeps its source channel and message
-identity. Sending from General still sends to `global`. No message is copied or rebroadcast.
-Private, system, and unknown channels do not enter the combined view. SERVER rows require a
-confirmed current room and are removed on leaving it; static-channel history remains.
-When a confirmed room restores retained Server history after the static feeds, the widget slots
-replay whose original timestamp overlaps General's loaded static-history horizon into that feed in
-chronological order. Older replay remains available in the Server subtab without flooding General.
-The timestamp controls projection/order only and is not rendered in the HUD.
+In the 2.10.115 session-transcript candidate, General shows **General, accepted Server rows from
+every room visited during the current widget/game session, Trading, Events, Infests, and Raids**.
+The six allowed slugs are `global`, `server`, `trade`, `events`, `infests`, and `raids`. Tabs
+filter one retained record list; each row keeps its source channel and message identity. Sending
+from General still sends to `global`. No message is copied or rebroadcast. Private, system, and
+unknown channels do not enter the combined view. New Server delivery and sends require a
+confirmed current room; leaving it retires authority and room-scoped replay identity, while
+already accepted rows remain display-only in the bounded session transcript. A new widget/game
+session starts empty. When a confirmed room restores retained Server history after the static
+feeds, the widget slots replay whose original timestamp overlaps General's loaded static-history
+horizon into that feed in chronological order. Older replay remains available in the Server
+subtab without flooding General. The timestamp controls projection/order only and is not rendered
+in the HUD.
 
 Replay rejection precedes pending-send reconciliation. A retained canonical row rejects the
 same channel/message ID even after bounded-cache eviction. Different nonempty ACK/event IDs
@@ -242,20 +250,21 @@ intentional repeated send is not silently merged. Provider event IDs cover older
 a durable message ID. These guards do not merge distinct server-assigned messages or suppress
 a second independently loaded renderer.
 
-Initial history is bounded to 15 rows per static channel plus 50 for the current SERVER room,
-then one terminal completion frame, drained in 16-event native polls. Authenticated recovery and
-world rebinding preserve that partition. New-message notices count only rows visible in the
+Initial history is bounded to 15 rows per static channel plus 50 for each freshly confirmed
+SERVER room, then one terminal completion frame, drained in 16-event native polls. The existing
+message cap bounds the session transcript. Authenticated recovery and world rebinding preserve
+that partition. New-message notices count only rows visible in the
 selected tab. Delayed render slices have generation checks and their own exception handling;
 stale work cannot replace a newer feed with a fallback.
 
 ## Input and appearance
 
 The shipped key map is `openKey=INSERT`, `channelNextKey=NextPage`, `channelPrevKey=PrevPage`,
-`scrollUpKey=Up`, `scrollDownKey=Down`, `scrollBottomKey=`, `activateLinkKey=ENTER`, and
+`scrollUpKey=Up`, `scrollDownKey=Down`, `scrollBottomKey=`, `activateLinkKey=F8`, and
 `hideKey=DELETE`. Insert opens chat by
 default; Enter sends a non-empty draft and Escape cancels. Page Up/Down switch channels while idle
 or typing. Up/Down selects a message row and paints a bounded highlight. The configured link key
-(Enter by default) activates the selected row's first HTTP(S) URL through the
+(F8 by default) activates the selected row's first HTTP(S) URL through the
 capability-gated ZFE browser-v1 service. Full URLs remain literal and selectable; ZFE accepts
 only validated HTTPS targets. No generic Flash, Electron, relay or alternate-provider launcher
 is used. Unsupported providers retain readable links. See [browser links and site allowances](browser-links.md)

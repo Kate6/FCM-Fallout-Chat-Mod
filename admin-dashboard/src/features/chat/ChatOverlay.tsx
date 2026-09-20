@@ -2,7 +2,7 @@ import { nextConversation, type NavigationSlot } from './channelNavigation';
 import { isOlderHistoryBatch } from './historyPagination';
 import { loadPartyDirectory, readPublicPartyDirectory, partyRecoveryInterval } from './partyAvailability';
 import { FONT_OPTIONS, FONT_SAMPLE, normalizeFontId, resolveFontFamily, OVERLAY_SETTINGS_EVENT, type FontId } from './overlayFonts';
-import { INACTIVE_BRIDGE, readBridgeState, mergeBridgeRows, clearBridgeRows, bridgeReplayRowsInMainFeed, bridgeSendPayload, type BridgeState } from './bridgeFeed';
+import { INACTIVE_BRIDGE, readBridgeState, mergeBridgeRows, clearBridgeSessionRows, bridgeReplayRowsInMainFeed, bridgeSendPayload, type BridgeState } from './bridgeFeed';
 import { serverRoomLabel, readModeratorRows, mergeModeratorRows, normalizeMutedRooms, readMutedRoomPreferences, shouldMarkChannelUnread } from './serverModeration';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { messageWindowStart, previousMessagePage } from './messageRenderWindow';
@@ -5162,6 +5162,10 @@ export default function ChatOverlay() {
     if (!bridge?.onGameState) return; // website — no-op
     return bridge.onGameState((inGame: boolean) => {
       inGameRef.current = inGame;
+      if (!inGame) {
+        bridgeReplayIdsRef.current.clear();
+        setMessages(clearBridgeSessionRows);
+      }
       // Drive the WS gate: game running → connect; game closed → disconnect.
       wsGameActiveRef.current = inGame;
       setWsGameActive(inGame);
@@ -5280,10 +5284,8 @@ export default function ChatOverlay() {
       moderatorRequestedCursor.current = null;
       setModeratorCursor(null); setModeratorUnavailable(false);
       clearInterval(bridgeWatch);
-      bridgeReplayIdsRef.current.clear();
       bridgeStateRef.current = INACTIVE_BRIDGE;
       setBridgeState(INACTIVE_BRIDGE);
-      setMessages(clearBridgeRows);
     };
     resetBridge();
     let retryTimeout: ReturnType<typeof setTimeout>;
@@ -5474,11 +5476,6 @@ export default function ChatOverlay() {
               }
               if (frame.type === 'bridge:state') {
                 const next = readBridgeState(frame.payload, !!overlayShell && !isPublicMode);
-                const previous = bridgeStateRef.current;
-                if (next.status !== 'ready' || previous.status !== 'ready' || next.bindingId !== previous.bindingId) {
-                  bridgeReplayIdsRef.current.clear();
-                  setMessages(clearBridgeRows);
-                }
                 bridgeStateRef.current = next;
                 setBridgeState(next);
                 return;
@@ -7442,7 +7439,7 @@ export default function ChatOverlay() {
         : messages;
       const eligible = combined
         .filter(m =>
-          ((moderationEnabled && m.channelId.startsWith('server:')) || shouldShowInMainFeed(m, {
+          (((moderationEnabled || overlayShell) && m.channelId.startsWith('server:')) || shouldShowInMainFeed(m, {
             feedParentId: feedParent.id,
             childIds,
             feedPartyIds,
@@ -7458,8 +7455,9 @@ export default function ChatOverlay() {
         );
       return bridgeReplayRowsInMainFeed(eligible, bridgeReplayIdsRef.current);
     }
-    return messages.filter(m => m.channelId === activeSubId && notBlocked(m));
-  }, [messages, moderatorRows, moderatorHistoryPage, moderationEnabled, roomMutes, activeSubId, isMainFeedView, feedParent, activeMainId, partyView, pmView, blockedIds, user?.id, joinedParties, isPublicMode, publicPartyIdKey, isMod, hiddenChannelIds, settings.mutedPartyIds, privateMessages]);
+    return messages.filter(m => ((overlayShell && activeSubId.startsWith('server:'))
+      ? m.channelId.startsWith('server:') : m.channelId === activeSubId) && notBlocked(m));
+  }, [messages, moderatorRows, moderatorHistoryPage, moderationEnabled, roomMutes, activeSubId, isMainFeedView, feedParent, activeMainId, partyView, pmView, blockedIds, user?.id, joinedParties, isPublicMode, publicPartyIdKey, isMod, hiddenChannelIds, settings.mutedPartyIds, privateMessages, overlayShell]);
 
   // Keep cached history intact; only limit expensive row construction in desktop chat.
   const renderScope = `${activeMainId}|${activeSubId}|${partyView}|${pmView}`;

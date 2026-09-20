@@ -379,6 +379,36 @@ describe('overlay lifecycle and navigation', () => {
     expect(screen.getByText('Server row inside General horizon')).toBeInTheDocument();
   });
 
+  it('retains accepted Server rows across room changes for the current overlay session', async () => {
+    await mount();
+    const socket = sockets[0];
+    act(() => {
+      socket.open();
+      socket.emit({ type: 'bridge:state', payload: { status: 'ready', channelId: 'server:r:one', bindingId: 'alice/one/r:one' } });
+      socket.emit({ type: 'bridge:message', payload: {
+        channelId: 'server:r:one', bindingId: 'alice/one/r:one', historyReplay: false,
+        messages: [{ id: 'server:r:one:1', channelId: 'server:r:one', username: 'Old', content: 'First room transcript', source: 'server', timestamp: '2026-09-16T12:00:00Z' }],
+      } });
+    });
+    expect(await screen.findByText('First room transcript')).toBeInTheDocument();
+    act(() => {
+      socket.emit({ type: 'bridge:state', payload: { status: 'ready', channelId: 'server:r:two', bindingId: 'alice/two/r:two' } });
+      socket.emit({ type: 'bridge:message', payload: {
+        channelId: 'server:r:two', bindingId: 'alice/two/r:two', historyReplay: false,
+        messages: [{ id: 'server:r:two:1', channelId: 'server:r:two', username: 'New', content: 'Second room transcript', source: 'server', timestamp: '2026-09-16T12:01:00Z' }],
+      } });
+    });
+
+    expect(screen.getByText('First room transcript')).toBeInTheDocument();
+    expect(screen.getByText('Second room transcript')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Server channel' }));
+    expect(screen.getByText('First room transcript')).toBeInTheDocument();
+    expect(screen.getByText('Second room transcript')).toBeInTheDocument();
+    act(() => gameState(false));
+    expect(screen.queryByText('First room transcript')).toBeNull();
+    expect(screen.queryByText('Second room transcript')).toBeNull();
+  });
+
   it('keeps the reading boundary on live append, then resets to 100 on return to latest', async () => {
     await mount();
     const socket = sockets[0];

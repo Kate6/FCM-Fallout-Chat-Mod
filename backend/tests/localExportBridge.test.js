@@ -46,7 +46,7 @@ const { getServerHistory } = require('../src/services/relay/serverChat');
 const { sendServerMessage } = require('../src/services/relay/serverMessageService');
 const { bridgeBindingId } = require('../src/services/relay/overlayServerBridge');
 const { BridgeConnection } = require('../src/websocket/bridgeConnection');
-const { mergeBridgeRows, readBridgeState, clearBridgeRows, INACTIVE_BRIDGE } = require('../../admin-dashboard/src/features/chat/bridgeFeed');
+const { mergeBridgeRows, readBridgeState, INACTIVE_BRIDGE } = require('../../admin-dashboard/src/features/chat/bridgeFeed');
 const snapshot = (changes = {}) => ({ schemaVersion: 1, environment: 'dev', provider: 'zfe', build: '0.2.0',
   sessionId: 'movie-one', worldGeneration: 'world-one', sequence: 1, observationSequence: 1,
   observationAgeMs: 0, state: 'active', ownName: 'Alice', names: ['Bob'], ...changes });
@@ -217,7 +217,7 @@ test.each([['zfe', 'zfe'], ['zfe', 'xscal'], ['xscal', 'zfe'], ['xscal', 'xscal'
   // just storage and backend row projection (the previous regression gap).
   let rendered = [], state = INACTIVE_BRIDGE;
   for (const frame of JSON.parse(JSON.stringify(a.frames))) {
-    if (frame.type === 'bridge:state') { state = readBridgeState(frame.payload, true); rendered = clearBridgeRows(rendered); }
+    if (frame.type === 'bridge:state') state = readBridgeState(frame.payload, true);
     else if (frame.type === 'bridge:history' || frame.type === 'bridge:message')
       rendered = mergeBridgeRows(rendered, frame.payload.messages, state, frame.payload, 50);
   }

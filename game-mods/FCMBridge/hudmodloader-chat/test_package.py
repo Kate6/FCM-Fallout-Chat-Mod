@@ -25,7 +25,7 @@ HUD_KEY_DEFAULTS = {
     "scrollUpKey": "Up",
     "scrollDownKey": "Down",
     "scrollBottomKey": "",
-    "activateLinkKey": "ENTER",
+    "activateLinkKey": "F8",
     "hideKey": "DELETE",
 }
 

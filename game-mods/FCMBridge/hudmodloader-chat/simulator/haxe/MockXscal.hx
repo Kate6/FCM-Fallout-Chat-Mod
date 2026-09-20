@@ -22,6 +22,8 @@ class MockXscal {
     static var registered:Map<Int, Bool> = new Map();
     static var cursor:Int = 0;
     static var scenarioEvents:Array<Dynamic> = null;
+    static var serverRooms:Map<String, String> = new Map();
+    static var nextServerRoom:Int = 0;
 
     public static function enqueueEvent(event:Dynamic):Void {
         if (scenarioEvents == null) scenarioEvents = [];
@@ -151,11 +153,13 @@ class MockXscal {
                     var target:String = Std.string(Reflect.field(args, "targetUserId"));
                     var separator:Int = target.indexOf(";");
                     var requestId:String = separator >= 0 ? target.substr(separator + 1) : "";
+                    if (!serverRooms.exists(requestId)) serverRooms.set(requestId, "r:sim-room-" + (++nextServerRoom));
+                    var room:String = serverRooms.get(requestId);
                     var controlId:Int = scenarioEvents.length + 1;
                     scenarioEvents.push({kind:"chat.message", id:controlId,
                         messageId:"sim-server-ready-" + controlId, channel:"system",
                         senderUserId:"system", senderDisplayName:"FCM",
-                        body:"FCMCTL/1/SERVER-READY:" + requestId + "|r:sim-room", targetUserId:""});
+                        body:"FCMCTL/1/SERVER-READY:" + requestId + "|" + room, targetUserId:""});
                 }
                 return response({success:true, messageId:messageId, targetUserId:""});
             }

@@ -3,11 +3,16 @@
 FCMChatWidget is the optional HUDModLoader chat widget for Fallout 76. It uses ZFE or xScal's
 native chat bridge and FCM's `/relay`. It is independent of the desktop overlay.
 
-**Current private candidate: 2.10.114 (native-unverified).** It retains 2.10.113's behavior and adds
-transition-only authenticated room diagnostics. The widget sends only fixed event/provider/source
+**Current private candidate: 2.10.116 (native-unverified).** It retains 2.10.115's behavior, keeps
+accepted Server rows as an in-memory transcript across room changes, travel, expiry and MainMenu
+for the current widget/game session. New messages and sends remain restricted to the currently
+confirmed room. Restarting the game/widget starts a fresh transcript, and the existing configured
+message cap still bounds memory. It also retains transition-only authenticated room diagnostics. The widget sends only fixed event/provider/source
 labels, a bounded roster count and its build version; it never sends names, roster contents,
 messages, IDs or tokens as diagnostic data. Consecutive duplicates are suppressed and each widget
-instance is capped at 32 events. The backend stores the matching privacy-safe roster/room decision
+instance is capped at 32 events. It also reserves Enter exclusively for editor submission, moves
+the selected-link default to F8, and preserves/restores the last stable SharedHUDTools draft when
+the host field transiently reports empty. The backend stores the matching privacy-safe roster/room decision
 chain for 24 hours so incidents can be diagnosed without collecting client log files.
 
 It retains 2.10.112's behavior: when retained Server history arrives
@@ -25,11 +30,10 @@ contents, tokens or messages. This is diagnostic evidence for determining whethe
 the live game exposes a stable account/team identifier; no such identifier is
 assumed or transmitted until native evidence establishes its semantics.
 
-The previous 2.10.113 complete 60-case Ruffle suite, all Haxe suites, compiler diagnostics, native API/auth,
-source/anchor/SWF/BA2/package/emoji gates, 1,274 overlay units/build and 471 dashboard
-units/build pass. It has not been installed, natively accepted or published. The previously
-installed 2.10.112 artifact remains the last locally tested candidate. The 2.10.114 automated
-gate and fresh native acceptance are pending.
+The 2.10.116 complete 60-case Ruffle suite, all Haxe suites, compiler diagnostics, native API/auth,
+source/anchor/SWF/BA2/package/emoji gates, focused relay tests (135) and overlay widget tests (196)
+pass. Version 2.10.116 has not been installed, natively accepted or published. Fresh native input
+acceptance is pending.
 
 **Current production release: 2.10.110 (2026-09-16).** Once an authoritative
 self-echo or acknowledgement supplies the local sender's cosmetics, retained rows for the same
@@ -82,7 +86,7 @@ renderer and row reuse remain unchanged.
 Up/Down selects a visible message row while chat owns
 the editor. The selected row has a configurable outline and translucent fill; users can change
 `Selected message` under F11 → Customize → Colors, or set `selectedRowColor` in `FCMChat.ini`.
-`activateLinkKey` (Enter by default) opens that row's
+`activateLinkKey` (F8 by default) opens that row's
 first HTTP(S) link through ZFE's capability-gated browser-v1 service. Full URLs remain literal
 and selectable. ZFE validates HTTPS, owns consent and opens the system browser; absent capability
 or current xScal retains readable links. No Flash `getURL`, relay or desktop fallback is used.
@@ -118,11 +122,13 @@ See [BUILD.md](BUILD.md) for reproducible checks and installation, and the
 
 ## Feed and sends
 
-General combines General, current-room Server, Trading, Events, Infests, and Raids. Each message
-retains its original channel tag and canonical identity. Other tabs filter the same bounded
-history. Sending from General targets `global`; no messages are copied or rebroadcast. Unknown,
-private, and system channels are excluded. Leaving a room clears its SERVER records and
-identities without clearing static history.
+General combines General, accepted Server rows from every room visited during the current
+widget/game session, Trading, Events, Infests, and Raids. Each message retains its original
+channel tag and canonical identity. Other tabs filter the same bounded history. Sending from
+General targets `global`; no messages are copied or rebroadcast. Unknown, private, and system
+channels are excluded. Leaving a room clears membership authority and room-scoped replay
+identity, but retains already accepted Server rows as display-only session history; a new room's
+authorized history appends to that transcript. A new widget/game session starts empty.
 
 Replay rejection runs before pending-send matching. Retained canonical rows remain a duplicate
 guard after cache eviction. A known ACK ID cannot match a different event through a same-body
@@ -135,9 +141,10 @@ transient failures keep a bounded queued row; terminal failures remove it. The s
 ID is reused for retries, with SERVER room pinning. See
 [retry safety](../../../docs/overlay/zfe/hud-send-retries.md).
 
-Initial history contains up to 15 messages per static channel and 50 from the current SERVER
-room. The widget drains the up-to-125-event snapshot over multiple native polls. Empty/lost
-queues trigger bounded authenticated recovery; SERVER history waits for a fresh room bind.
+Initial history contains up to 15 messages per static channel and 50 from each freshly confirmed
+SERVER room; the existing configured message cap bounds the retained session transcript. The
+widget drains the up-to-125-event snapshot over multiple native polls. Empty/lost queues trigger
+bounded authenticated recovery; SERVER history waits for a fresh room bind.
 Account identity comes from the public HUD account handle, not a local character label or the
 `Wanderer` placeholder. Limited identities see a pinned link code and cannot send.
 
@@ -155,7 +162,7 @@ fallback is retained; the widget does not dispatch ControlMap lock events itself
 by renaming FCM's compatibility calls. See the [provider guide](../../../docs/overlay/zfe/modder-guide.md).
 
 The shipped key map is `openKey=INSERT`, `channelNextKey=NextPage`, `channelPrevKey=PrevPage`,
-`scrollUpKey=Up`, `scrollDownKey=Down`, `scrollBottomKey=`, `activateLinkKey=ENTER`, and
+`scrollUpKey=Up`, `scrollDownKey=Down`, `scrollBottomKey=`, `activateLinkKey=F8`, and
 `hideKey=DELETE`. Insert opens chat; Enter sends a non-empty draft and, when it is the configured
 link key, opens a selected link from an empty draft. Escape cancels. A custom link key acts only
 while the OpenChat-owned editor is active and a link row is selected; it is inert during gameplay.

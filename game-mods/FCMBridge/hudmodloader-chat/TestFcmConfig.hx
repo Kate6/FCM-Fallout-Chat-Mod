@@ -176,7 +176,7 @@ class TestFcmConfig {
         eqs("default scrollUpKey", d.scrollUpKey, "Up");
         eqs("default scrollDownKey", d.scrollDownKey, "Down");
         eqs("default scrollBottomKey (unset)", d.scrollBottomKey, "");
-        eqs("default link activation key", d.activateLinkKey, "ENTER");
+        eqs("default link activation key", d.activateLinkKey, "F8");
         eqs("default hideKey", d.hideKey, "DELETE");
         eqb("default showChannelTag", d.showChannelTag, true);
         eqb("default showHints", d.showHints, false);

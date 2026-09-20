@@ -204,6 +204,141 @@ test('a sustained split preserves the old room for the largest stable component'
   } finally { clock.mockRestore(); }
 });
 
+test('daily ops keeps an established room when party names disappear but the public-world roster remains identical', async () => {
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+  try {
+    const users = [
+      ['a', 'Alice'], ['b', 'Bob'], ['c', 'Carol'], ['d', 'Dave'],
+    ];
+    for (const [id, name] of users) {
+      await setRoster(id, name, users.filter(([peerId]) => peerId !== id).map(([, peerName]) => peerName), id);
+    }
+    const oldRoom = (await computeRooms()).get('a');
+    expect(new Set((await computeRooms()).values())).toEqual(new Set([oldRoom]));
+
+    // Daily Ops removes the party members from MapMenuData, but every client
+    // continues to report the exact same public-world population behind them.
+    const publicWorld = Array.from({ length: 17 }, (_, index) => `WorldPlayer${index}`);
+    clock.mockReturnValue(2000);
+    for (const [id, name] of users) await setRoster(id, name, publicWorld, id);
+    clock.mockReturnValue(12_001);
+
+    expect(new Set((await computeRooms()).values())).toEqual(new Set([oldRoom]));
+  } finally { clock.mockRestore(); }
+});
+
+test.each([
+  [['native', 'bridge:xscal', 'bridge:xscal']],
+  [['bridge:xscal', 'native', 'bridge:xscal']],
+  [['bridge:xscal', 'bridge:xscal', 'native']],
+])('raid transition remains atomic for sequential mixed-transport 24-to-23 observations: %j', async sources => {
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+  try {
+    const users = [
+      { id: 'a', name: 'Alice', source: sources[0] },
+      { id: 'b', name: 'Bob', source: sources[1] },
+      { id: 'c', name: 'Carol', source: sources[2] },
+    ];
+    for (const user of users) {
+      await setRoster(user.id, user.name, users.filter(peer => peer.id !== user.id).map(peer => peer.name), user.id,
+        undefined, [], { observationSource: user.source });
+    }
+    const established = await computeRooms();
+    const oldRoom = established.get('a');
+    expect(new Set(established.values())).toEqual(new Set([oldRoom]));
+
+    const population24 = Array.from({ length: 24 }, (_, index) => `WorldPlayer${index}`);
+    const observations = [population24, population24.slice(0, 23), population24.slice(1)];
+    for (let index = 0; index < users.length; index += 1) {
+      clock.mockReturnValue(2_000 + index);
+      const user = users[index];
+      await setRoster(user.id, user.name, observations[index], user.id, undefined, [],
+        { observationSource: user.source });
+      expect(new Set((await computeRooms()).values())).toEqual(new Set([oldRoom]));
+    }
+
+    clock.mockReturnValue(12_001);
+    expect(new Set((await computeRooms()).values())).toEqual(new Set([oldRoom]));
+  } finally { clock.mockRestore(); }
+});
+
+test.each([
+  [18, true],
+  [17, false],
+  [2, false],
+])('shared-population boundary with %i of 24 names retains room=%s', async (sharedCount, retained) => {
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+  try {
+    await setRoster('a', 'Alice', ['Bob'], 'a');
+    await setRoster('b', 'Bob', ['Alice'], 'b');
+    const oldRoom = (await computeRooms()).get('a');
+    const shared = Array.from({ length: sharedCount }, (_, index) => `Shared${index}`);
+    const aRoster = [...shared, ...Array.from({ length: 24 - sharedCount }, (_, index) => `OnlyA${index}`)];
+    const bRoster = [...shared, ...Array.from({ length: 24 - sharedCount }, (_, index) => `OnlyB${index}`)];
+    clock.mockReturnValue(2_000);
+    await setRoster('a', 'Alice', aRoster, 'a');
+    await setRoster('b', 'Bob', bRoster, 'b');
+    clock.mockReturnValue(12_001);
+    const rooms = await computeRooms();
+    expect(rooms.get('a') === rooms.get('b')).toBe(retained);
+    if (retained) expect(rooms.get('a')).toBe(oldRoom);
+  } finally { clock.mockRestore(); }
+});
+
+test('shared-population observations cannot renew the one-hour direct-evidence deadline', async () => {
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+  try {
+    await setRoster('a', 'Alice', ['Bob'], 'a');
+    await setRoster('b', 'Bob', ['Alice'], 'b');
+    const oldRoom = (await computeRooms()).get('a');
+    const population = Array.from({ length: 24 }, (_, index) => `WorldPlayer${index}`);
+    clock.mockReturnValue(2_000);
+    await setRoster('a', 'Alice', population, 'a');
+    await setRoster('b', 'Bob', population, 'b');
+    for (const at of [12_001, 1_800_000, 3_599_999]) {
+      clock.mockReturnValue(at);
+      await setRoster('a', 'Alice', population, 'a');
+      await setRoster('b', 'Bob', population, 'b');
+      expect(new Set((await computeRooms()).values())).toEqual(new Set([oldRoom]));
+    }
+    clock.mockReturnValue(3_601_001);
+    const expired = await computeRooms();
+    expect(expired.get('a')).not.toBe(expired.get('b'));
+    expect([expired.get('a'), expired.get('b')]).toContain(oldRoom);
+  } finally { clock.mockRestore(); }
+});
+
+test('account identity change invalidates direct and shared-population continuity', async () => {
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+  try {
+    await setRoster('a', 'Alice', ['Bob'], 'a');
+    await setRoster('b', 'Bob', ['Alice'], 'b');
+    await computeRooms();
+    const population = Array.from({ length: 24 }, (_, index) => `WorldPlayer${index}`);
+    clock.mockReturnValue(2_000);
+    await setRoster('a', 'DifferentAccount', population, 'a');
+    await setRoster('b', 'Bob', population, 'b');
+    const rooms = await computeRooms();
+    expect(rooms.get('a')).not.toBe(rooms.get('b'));
+  } finally { clock.mockRestore(); }
+});
+
+test('shared population evidence cannot merge previously separate rooms', async () => {
+  await setRoster('a', 'Alice', [], 'a');
+  await setRoster('b', 'Bob', [], 'b');
+  const before = await computeRooms();
+  expect(before.get('a')).not.toBe(before.get('b'));
+
+  const publicWorld = ['WorldPlayer1', 'WorldPlayer2', 'WorldPlayer3', 'WorldPlayer4'];
+  await setRoster('a', 'Alice', publicWorld, 'a');
+  await setRoster('b', 'Bob', publicWorld, 'b');
+  const after = await computeRooms();
+
+  expect(after.get('a')).toBe(before.get('a'));
+  expect(after.get('b')).toBe(before.get('b'));
+  expect(after.get('a')).not.toBe(after.get('b'));
+});
+
 test('equal stable components choose one deterministic old-room survivor', async () => {
   await setRoster('a', 'Alice', ['Bob'], 'a'); await setRoster('b', 'Bob', ['Alice'], 'b');
   const old = (await computeRooms()).get('a');

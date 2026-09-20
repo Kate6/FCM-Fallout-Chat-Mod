@@ -1,5 +1,30 @@
 # Archived HUD build notes
 
+## Shared-editor input correction candidate 2.10.116 (2026-09-20)
+
+- Native 2.10.110 evidence showed the SharedHUDTools field repeatedly transitioning from a
+  one-character draft to empty, while every Enter edge was independently polled as the selected-link
+  command and no chat send followed.
+- Enter is now reserved exclusively for editor submission; selected-link activation defaults to F8.
+  The widget retains and restores the last stable draft across unexplained empty host observations,
+  while Backspace/Delete may still deliberately clear the field.
+- Static startup history remains backend-owned: the relay still replays up to 15 persisted rows per
+  static channel. This correction does not alter backend history, Discord mappings or retention.
+- All Haxe/compiler/source/native-adapter/package/SWF/BA2/emoji gates, the complete 60-case Ruffle
+  suite, 135 focused relay tests and 196 overlay widget tests pass. Native acceptance remains pending.
+
+## Session Server transcript candidate 2.10.115 (2026-09-19)
+
+- Retains accepted, room-authorized Server rows across room changes, travel, confirmation expiry
+  and MainMenu for the current widget/game session. A new widget instance starts empty and the
+  existing configured message cap bounds memory.
+- Incoming rows and sends remain fenced to the current relay-confirmed room. Room transitions
+  reset only room-scoped native deduplication, while canonical retained message IDs prevent replay
+  duplicates.
+- Adds Ruffle coverage for hop, expiry and MainMenu transcript retention. All 60 Ruffle cases and
+  the complete local Haxe/native-adapter/package/SWF/BA2/emoji gates pass. Native acceptance
+  remains required.
+
 ## Backend room-evidence candidate 2.10.114 (2026-09-19)
 
 - Sends only fixed-schema, authenticated `roster_send`, `roster_hold`, `roster_boundary`,

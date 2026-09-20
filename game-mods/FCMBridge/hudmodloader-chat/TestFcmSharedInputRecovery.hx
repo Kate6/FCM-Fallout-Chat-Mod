@@ -16,6 +16,14 @@ class TestFcmSharedInputRecovery {
             FcmSharedInputRecovery.decide(true, 300, 225, true, true, 5) == FcmSharedInputRecovery.CANCEL);
         check("unexplained focus loss releases the stale session",
             FcmSharedInputRecovery.decide(true, 300, 225, false, false, 5) == FcmSharedInputRecovery.CANCEL);
+        check("transient empty host sample preserves the stable draft",
+            FcmSharedInputRecovery.stableDraft("hello", "", false) == "hello");
+        check("a changed nonempty host sample advances the stable draft",
+            FcmSharedInputRecovery.stableDraft("hell", "hello", false) == "hello");
+        check("deliberate deletion may clear the stable draft",
+            FcmSharedInputRecovery.stableDraft("h", "", true) == "");
+        check("an initially empty editor remains empty",
+            FcmSharedInputRecovery.stableDraft("", "", false) == "");
         Sys.println("FCM shared-input recovery tests passed");
     }
 }

@@ -2,6 +2,17 @@
 
 Latest drop-in bridge evidence: [rollout, fallback and diagnostic candidates](bridge-drop-in-acceptance-2026-09-16.md).
 
+2026-09-20 input-correction candidate: HUD 2.10.116 reserves Enter for editor submission, defaults
+selected-link activation to F8, and preserves the stable SharedHUDTools draft across unexplained
+empty host observations. The complete 60-case Ruffle suite and local HUD gates pass; fresh native
+ZFE/xScal input acceptance remains pending.
+
+2026-09-19 session-transcript candidate: HUD 2.10.115 retains accepted Server rows across room
+changes, expiry and MainMenu for the current widget/game session while continuing to fence new
+delivery and sends to the current confirmed room. The Ruffle roster scenario covers hop, expiry
+and MainMenu retention. All 60 Ruffle cases and the complete local artifact gate pass; fresh
+native acceptance is pending.
+
 2026-09-19 backend room-evidence candidate: HUD 2.10.114 retains 2.10.113 and adds fixed-schema,
 authenticated, transition-only room diagnostics. The backend stores a bounded 24-hour pseudonymous
 roster/room decision chain behind an admin-key endpoint. All Haxe/source/native-adapter/package/

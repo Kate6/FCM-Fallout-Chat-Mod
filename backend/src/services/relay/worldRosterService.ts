@@ -25,6 +25,9 @@ const MAX_NAMES = 24;
 const MAX_NAME_LENGTH = 64;
 const MAX_ACTIVE_ROSTERS = 500;
 const MISSING_SIGHTING_GRACE_MS = 10_000;
+const MIN_SHARED_POPULATION = 3;
+const SHARED_POPULATION_RATIO = 0.75;
+const SHARED_POPULATION_MAX_MS = 60 * 60 * 1_000;
 
 interface GraceSighting {
   name: string;
@@ -47,6 +50,10 @@ export interface RosterEntry {
   roomKey?: string;
   /** Server-owned start of this observation session; never renewed by updates. */
   sessionStartedAt?: number;
+  /** Server receipt time for this actual roster observation; recomputation never renews it. */
+  observedAt?: number;
+  /** Last server-observed mutual direct sighting; shared-population continuity never renews it. */
+  lastDirectEvidenceAt?: number;
   /** Desktop exports expire at the original observation deadline, not heartbeat. */
   expiresAt?: number;
 }
@@ -95,13 +102,15 @@ export async function setRoster(relayUserId: string, ownName: string, seenNames:
     // worlds. Preserve backend-owned affinity only when authenticated RESYNC or
     // overlapping roster evidence establishes continuity; ordinary nonce changes
     // remain a fail-closed new observation session.
-    const continuingSession = previous !== null
+    const continuingSession = previous !== null && previous.name === name
       && (previous.requestId === requestId || options.preserveExistingSession || overlapsPrevious);
     const session = continuingSession ? previous.session : randomUUID();
     const roomKey = previous?.session === session ? previous.roomKey : undefined;
     // Missing age belongs to a pre-upgrade active session, older than new ones.
-    const sessionStartedAt = previous?.session === session ? previous.sessionStartedAt ?? 0 : Date.now();
     const now = Date.now();
+    const sessionStartedAt = previous?.session === session ? previous.sessionStartedAt ?? 0 : now;
+    const observedAt = now;
+    const lastDirectEvidenceAt = previous?.session === session ? previous.lastDirectEvidenceAt : undefined;
     const graceByName = new Map<string, number>();
     if (continuingSession && previous) {
       for (const grace of previous.graceSeen ?? []) {
@@ -116,6 +125,8 @@ export async function setRoster(relayUserId: string, ownName: string, seenNames:
     const graceSeen = [...graceByName].map(([graceName, until]) => ({ name: graceName, until })).slice(0, MAX_NAMES);
     const observationSource = options.observationSource ?? previous?.observationSource;
     const value = JSON.stringify({ name, aliases, seen, ...(graceSeen.length ? { graceSeen } : {}), session, requestId, sessionStartedAt,
+      observedAt,
+      ...(lastDirectEvidenceAt === undefined ? {} : { lastDirectEvidenceAt }),
       ...(observationSource ? { observationSource } : {}),
       ...(roomKey ? { roomKey } : {}), ...(expiresAt === undefined ? {} : { expiresAt }) });
     await redis.set(`${KEY_PREFIX}${relayUserId}`, value, expiresAt === undefined
@@ -214,6 +225,10 @@ function isRosterPayload(value: unknown): value is Omit<RosterEntry, 'userId'> {
     && (!('roomKey' in value) || (typeof value.roomKey === 'string' && /^r:[0-9a-f-]{36}$/.test(value.roomKey)))
     && (!('sessionStartedAt' in value) || (typeof value.sessionStartedAt === 'number'
       && Number.isSafeInteger(value.sessionStartedAt) && value.sessionStartedAt >= 0))
+    && (!('observedAt' in value) || (typeof value.observedAt === 'number'
+      && Number.isSafeInteger(value.observedAt) && value.observedAt >= 0))
+    && (!('lastDirectEvidenceAt' in value) || (typeof value.lastDirectEvidenceAt === 'number'
+      && Number.isSafeInteger(value.lastDirectEvidenceAt) && value.lastDirectEvidenceAt >= 0))
     && (!('expiresAt' in value) || (typeof value.expiresAt === 'number' && Number.isFinite(value.expiresAt)))
     && (!('aliases' in value) || (Array.isArray(value.aliases) && value.aliases.length <= 4
       && value.aliases.every(alias => typeof alias === 'string' && alias.length > 0 && alias.length <= MAX_NAME_LENGTH)))
@@ -232,6 +247,7 @@ function isRosterPayload(value: unknown): value is Omit<RosterEntry, 'userId'> {
  */
 export async function computeRooms(assertCurrent: () => Promise<void> = async () => {}): Promise<Map<string, string>> {
   const startedAt = Date.now();
+  const redis = await getRedisClient();
   const rosters = await getAllRosters();
   const parent = new Map<string, string>();
   const find = (x: string): string => {
@@ -265,11 +281,77 @@ export async function computeRooms(assertCurrent: () => Promise<void> = async ()
     ...(roster.graceSeen ?? []).filter(grace => grace.until > startedAt).map(grace => grace.name),
   ])]]));
   const effectiveSeen = (roster: RosterEntry): string[] => effectiveSeenByUser.get(roster.userId) ?? roster.seen;
+  const directEvidenceAtByUser = new Map<string, number>();
   for (const a of rosters) {
     for (const seenName of effectiveSeen(a)) {
       for (const b of byName.get(seenName) ?? []) {
         if (a.userId === b.userId || !identityNames(a).some(name => effectiveSeen(b).includes(name))) continue;
         union(a.userId, b.userId);
+        const currentMutualSighting = identityNames(b).some(name => a.seen.includes(name))
+          && identityNames(a).some(name => b.seen.includes(name));
+        if (currentMutualSighting) {
+          const directEvidenceAt = Math.min(a.observedAt ?? 0, b.observedAt ?? 0);
+          if (directEvidenceAt > 0) {
+            directEvidenceAtByUser.set(a.userId, Math.max(directEvidenceAtByUser.get(a.userId) ?? 0, directEvidenceAt));
+            directEvidenceAtByUser.set(b.userId, Math.max(directEvidenceAtByUser.get(b.userId) ?? 0, directEvidenceAt));
+          }
+        }
+      }
+    }
+  }
+  for (const roster of rosters) {
+    const directEvidenceAt = directEvidenceAtByUser.get(roster.userId);
+    if (directEvidenceAt === undefined || directEvidenceAt <= (roster.lastDirectEvidenceAt ?? 0)) continue;
+    roster.lastDirectEvidenceAt = directEvidenceAt;
+    const { userId, ...payload } = roster;
+    await assertCurrent();
+    await redis.set(`${KEY_PREFIX}${userId}`, JSON.stringify(payload), { XX: true, KEEPTTL: true });
+  }
+
+  // Instanced activities such as Daily Ops can hide the party members themselves
+  // from MapMenuData while leaving the surrounding public-world population intact.
+  // Preserve an existing, server-owned room affinity when two unchanged sessions
+  // still report substantially the same population. This is continuity evidence
+  // only: it can never join clients that did not already share a canonical room.
+  const priorRoomMembers = new Map<string, RosterEntry[]>();
+  for (const roster of rosters) if (roster.roomKey) {
+    const members = priorRoomMembers.get(roster.roomKey) ?? [];
+    members.push(roster);
+    priorRoomMembers.set(roster.roomKey, members);
+  }
+  type SharedPopulationDecision = 'accepted' | 'fallback_expired' | 'threshold_rejected';
+  const sharedPopulationDecision = (a: RosterEntry, b: RosterEntry): SharedPopulationDecision => {
+    const aSeen = new Set(effectiveSeen(a));
+    const bSeen = new Set(effectiveSeen(b));
+    if (aSeen.size < MIN_SHARED_POPULATION || bSeen.size < MIN_SHARED_POPULATION) return 'threshold_rejected';
+    let shared = 0;
+    for (const name of aSeen) if (bSeen.has(name)) shared += 1;
+    if (shared < MIN_SHARED_POPULATION
+      || shared / Math.max(aSeen.size, bSeen.size) < SHARED_POPULATION_RATIO) return 'threshold_rejected';
+    if (a.lastDirectEvidenceAt === undefined || b.lastDirectEvidenceAt === undefined
+      || startedAt - a.lastDirectEvidenceAt > SHARED_POPULATION_MAX_MS
+      || startedAt - b.lastDirectEvidenceAt > SHARED_POPULATION_MAX_MS) return 'fallback_expired';
+    return 'accepted';
+  };
+  const sharedPopulationUsers = new Set<string>();
+  const fallbackRejections = new Map<string, Set<Exclude<SharedPopulationDecision, 'accepted'>>>();
+  for (const [priorRoom, members] of priorRoomMembers) {
+    for (let i = 0; i < members.length; i += 1) {
+      for (let j = i + 1; j < members.length; j += 1) {
+        const a = members[i]!;
+        const b = members[j]!;
+        const decision = sharedPopulationDecision(a, b);
+        if (decision === 'accepted') {
+          union(a.userId, b.userId);
+          sharedPopulationUsers.add(a.userId);
+          sharedPopulationUsers.add(b.userId);
+          logger.debug({ event: 'room_continuity', reason: 'shared_population', roomRef: createHash('sha256')
+            .update(priorRoom).digest('hex').slice(0, 12) }, '[worldRoster] canonical room continuity retained');
+        } else {
+          const reasons = fallbackRejections.get(priorRoom) ?? new Set();
+          reasons.add(decision);
+          fallbackRejections.set(priorRoom, reasons);
+        }
       }
     }
   }
@@ -302,14 +384,16 @@ export async function computeRooms(assertCurrent: () => Promise<void> = async ()
     }).sort((a, b) => b.size - a.size || a.oldest - b.oldest || a.root.localeCompare(b.root));
     const winner = ranked[0]!;
     splitWinners.set(priorRoom, winner.root);
+    const continuityReason = fallbackRejections.get(priorRoom)?.has('fallback_expired')
+      ? 'fallback_expired' : 'threshold_rejected';
     logger.info?.({ event: 'room_split', roomRef: fingerprint(priorRoom), componentCount: roots.size,
-      componentSizes: ranked.map(component => component.size), winnerSize: winner.size },
+      componentSizes: ranked.map(component => component.size), winnerSize: winner.size, continuityReason },
     '[worldRoster] canonical room split');
     await recordRoomDiagnostic(null, { event: 'room_split', roomRef: opaqueRef(priorRoom),
-      componentCount: roots.size, componentSizes: ranked.map(component => component.size), winnerSize: winner.size });
+      componentCount: roots.size, componentSizes: ranked.map(component => component.size), winnerSize: winner.size,
+      continuityReason });
   }
   const rooms = new Map<string, string>();
-  const redis = await getRedisClient();
   for (const [root, members] of groups) {
     // Keep the oldest continuously present session's eligible room when mutual
     // discovery joins components. A returning user's provisional UUID must not
@@ -345,17 +429,23 @@ export async function computeRooms(assertCurrent: () => Promise<void> = async ()
       await redis.set(`${KEY_PREFIX}${userId}`, JSON.stringify({ ...payload, roomKey }), { XX: true, KEEPTTL: true });
     }
     if (changedMembers.length > 0) {
+      const continuityReason = candidates.length
+        ? (members.some(member => sharedPopulationUsers.has(member.userId)) ? 'shared_population' : 'direct')
+        : (fallbackRejections.get(changedMembers[0]!.roomKey!)?.has('fallback_expired')
+            ? 'fallback_expired' : 'threshold_rejected');
       logger.info?.({ event: 'room_rebind', reason: candidates.length ? 'component_join' : 'component_split',
         memberRefs: changedMembers.map(member => fingerprint(member.userId)).sort(),
         fromRoomRefs: [...new Set(changedMembers.map(member => fingerprint(member.roomKey!)))].sort(),
         toRoomRef: fingerprint(roomKey), componentSize: members.length,
-        observationSources: [...new Set(members.map(member => member.observationSource ?? 'legacy'))].sort() },
+        observationSources: [...new Set(members.map(member => member.observationSource ?? 'legacy'))].sort(),
+        continuityReason },
       '[worldRoster] canonical room reassigned');
       for (const member of changedMembers) await recordRoomDiagnostic(member.userId, {
         event: 'room_rebind', reason: candidates.length ? 'component_join' : 'component_split',
         fromRoomRef: opaqueRef(member.roomKey!), toRoomRef: opaqueRef(roomKey), componentSize: members.length,
         componentMemberRefs: members.map(item => opaqueRef(item.userId)).sort(),
         observationSources: [...new Set(members.map(item => item.observationSource ?? 'legacy'))].sort(),
+        continuityReason,
       });
     }
   }

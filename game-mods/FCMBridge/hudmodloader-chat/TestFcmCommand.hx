@@ -112,8 +112,8 @@ class TestFcmCommand {
             !FcmCommand.feedNavigationEnabled(false, false));
         check("feed navigation is disabled while hidden",
             !FcmCommand.feedNavigationEnabled(true, true));
-        check("Enter activates a selected link during an owned edit",
-            FcmCommand.linkActivationEnabled("Enter", "ENTER", true, true));
+        check("Enter remains reserved for editor submission",
+            !FcmCommand.linkActivationEnabled("Enter", "ENTER", true, true));
         check("custom link key activates during an owned edit",
             FcmCommand.linkActivationEnabled("F8", "F8", true, true));
         check("link key is disabled before OpenChat",

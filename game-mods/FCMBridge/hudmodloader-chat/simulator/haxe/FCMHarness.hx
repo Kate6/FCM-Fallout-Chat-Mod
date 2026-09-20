@@ -124,6 +124,7 @@ class FCMHarness extends Sprite {
         return SharedHUDTools.submitActive(text);
     }
 
+
     function simSetHudMode(mode:String):Bool {
         MockGameData.setHudMode(mode);
         return true;

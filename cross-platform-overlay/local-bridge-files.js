@@ -87,7 +87,11 @@ const evidence = s => JSON.stringify([s.provider, s.ownName.trim().toLowerCase()
 class ExportCursor {
   constructor() { this.snapshot = null; this.retired = new Set(); this.lastAdvance = -Infinity; this.deadline = 0; this.live = false; }
   accept(s, now, readStartedAt = now) {
-    if (!s) { this.live = false; return null; }
+    // HUDModLoader replaces the export file rather than updating it in place.
+    // Menu reconstruction can therefore expose one missing/partial read between
+    // two valid writes. Keep only the last validated sample until its existing
+    // writer/evidence deadlines; a read failure must never renew either clock.
+    if (!s) return this.current(now);
     const old = this.snapshot;
     const changedSession = old && old.sessionId !== s.sessionId;
     const changedWorld = old && generation(old) !== generation(s);

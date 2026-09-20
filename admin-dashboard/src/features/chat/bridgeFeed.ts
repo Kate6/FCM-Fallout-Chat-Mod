@@ -32,8 +32,11 @@ export function mergeBridgeRows<T extends Row>(previous: T[], incoming: T[], sta
   return [...previous, ...fresh].sort((a, b) => (a.timestamp ?? '').localeCompare(b.timestamp ?? '')).slice(-cap);
 }
 
-export function clearBridgeRows<T extends Row>(rows: T[]): T[] {
-  return rows.some(row => row.channelId.startsWith('server:')) ? rows.filter(row => !row.channelId.startsWith('server:')) : rows;
+/** End only the local game-session transcript. Room changes and WebSocket
+ * reconnects deliberately do not call this. */
+export function clearBridgeSessionRows<T extends Row>(rows: T[]): T[] {
+  return rows.some(row => row.channelId.startsWith('server:'))
+    ? rows.filter(row => !row.channelId.startsWith('server:')) : rows;
 }
 
 /** Keep replay storage canonical while limiting General to its loaded time span.

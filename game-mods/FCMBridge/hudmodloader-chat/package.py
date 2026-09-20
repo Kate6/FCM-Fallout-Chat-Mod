@@ -40,7 +40,7 @@ HUD_KEY_DEFAULTS = (
     "scrollUpKey=Up\n"
     "scrollDownKey=Down\n"
     "scrollBottomKey=\n"
-    "activateLinkKey=ENTER\n"
+    "activateLinkKey=F8\n"
     "hideKey=DELETE\n"
 )
 
@@ -237,7 +237,8 @@ The shipped Data/FCMChat.ini [FCMChat] key map is:
 {HUD_KEY_DEFAULTS}
 Insert opens the input; Enter sends; Escape cancels; Page Up/Page Down switch channels.
 activateLinkKey opens a selected HTTP(S) row only while that input session is active; Enter is
-the default and a custom value does not become a global gameplay hotkey.
+reserved for submitting the editor, and F8 is the packaged link-action default. A custom link
+binding does not become a global gameplay hotkey.
 Browser launch requires ZFE's zfe-browser-v1 capability and its HTTPS validation/consent.
 Current xScal and older ZFE keep URLs readable; there is no fallback launcher.
 ZFE site allowances are configurable in [BrowserLinks.Sites] of FCMChatWidget.ini.
@@ -377,7 +378,7 @@ def build_package(
             "scrollUpKey / scrollDownKey values scroll the feed (Arrow Up / Down\n"
             "are the defaults). scrollBottomKey is blank by default; set it in\n"
             "Data/FCMChat.ini to Home, End, F12, or a forwarded action if desired.\n"
-            "activateLinkKey=ENTER opens the selected link only while OpenChat owns input.\n"
+            "activateLinkKey=F8 opens the selected link only while OpenChat owns input; Enter submits.\n"
             "Browser opening needs ZFE browser-v1; unsupported providers keep readable URLs.\n"
             "hideKey=DELETE hides while idle and edits text while input is open.\n"
             "Before Insert, configured feed keys remain game controls. FCM -> Scroll\n"

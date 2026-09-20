@@ -5,7 +5,7 @@ export type KeybindProfile = Record<KeybindField, string>;
 
 export const defaultKeybinds: KeybindProfile = {
   openKey: 'INSERT', channelNextKey: 'PAGEDOWN', channelPrevKey: 'PAGEUP',
-  scrollUpKey: 'UP', scrollDownKey: 'DOWN', scrollBottomKey: '', activateLinkKey: 'ENTER', hideKey: 'DELETE',
+  scrollUpKey: 'UP', scrollDownKey: 'DOWN', scrollBottomKey: '', activateLinkKey: 'F8', hideKey: 'DELETE',
 };
 
 export const supportedKeys = ['', 'ENTER', 'INSERT', 'DELETE', 'HOME', 'END', 'PAGEUP', 'PAGEDOWN',

@@ -1,7 +1,9 @@
 # FCMChatWidget build, install, and verification
 
-**Widget version:** 2.10.114. This private candidate retains 2.10.113's identity inventory and
-adds bounded authenticated room diagnostics. Fixed-enum lifecycle events are sent only on state
+**Widget version:** 2.10.116. This private candidate retains 2.10.115's Server transcript and
+bounded authenticated room diagnostics, and retains accepted Server rows in memory across room
+changes for the current widget/game session. Live authorization and sends still use only the
+current confirmed room; the existing message cap bounds the transcript. Fixed-enum lifecycle events are sent only on state
 transitions through the existing capability-gated `chat.v1` control path. They contain provider,
 selected roster source, count and build only; no names, IDs, messages or tokens. The backend's
 24-hour pseudonymous evidence ring correlates them with changed roster, grace, split and assignment
@@ -14,19 +16,19 @@ General by their original relay timestamp, excludes replay older than General's 
 horizon, and keeps the complete chronological replay in the Server subtab. It retains 2.10.111's
 bounded roster-visible local-name evidence and token-owned authenticated identity/message
 attribution. Fresh native acceptance is pending; 2.10.110 remains the current production release.
-This is the explicit opt-in HUD-mod track. The desktop overlay never installs or modifies it.
+It reserves Enter for text submission, moves selected-link activation to F8 by default, and
+recovers a stable draft from transient empty SharedHUDTools observations. This is the explicit
+opt-in HUD-mod track. The desktop overlay never installs or modifies it.
 
-The 2.10.114 complete Haxe/source/native-adapter/package/SWF/BA2/emoji gates pass, as does the
+The 2.10.116 complete Haxe/source/native-adapter/package/SWF/BA2/emoji gates pass, as does the
 complete 60-case Ruffle suite (4.2 minutes). The rebuilt one-entry BA2 was extracted and its SWF
-matched the normalized source artifact byte-for-byte. The reviewed local artifacts are SWF
-SHA-256 `6b34cac23fd173fc37c39261884850fa94eac6ead725c6fcb5bc059e751cf5a8`
-(7,185,687 bytes) and BA2 SHA-256
-`a8516e8b746bc734e546e699d8232eb2cd986ed4d127338eaf6783b58f571f6f`
-(7,185,776 bytes). Prod-target unified website and Nexus tester packages are staged in Downloads.
-After confirming Fallout 76 was closed, the same BA2 and version marker were installed on the
-desktop; extracted installed SWF equality passed and provider/settings/loader files were unchanged.
-Rollback is under `.extender-backups/before-fcm-hud-2.10.114-room-diagnostics-Xlk2KS/`. It is not
-natively accepted or approved for publication.
+matched the normalized source artifact byte-for-byte. The reviewed 2.10.116 local artifacts are
+SWF SHA-256 `0a4affef053a5eabf66dd5c01eeabcc9acf93057898a5ed7c9356dece315ef51`
+(7,185,998 bytes) and BA2 SHA-256
+`240759e5346be7db746b59dd603fcf35276e59eaa7b0ed0225b6b1756df9b65d`
+(7,186,087 bytes). Private PROD Website and Nexus test packages are staged in Downloads. Version
+2.10.116 has not been installed or natively accepted and remains unpublished and unapproved for
+public distribution.
 
 ## Status and scope
 
@@ -366,7 +368,10 @@ operation and must not claim success on a rejected reset. Credentials remain ext
 3. Send on all six allowed channels. General shows each once with its original tag; other tabs
    filter correctly; General sends only to `global`. Private/system/wrong-room SERVER content
    must not enter the view. Fast-travel within the same world: selected SERVER tab, history,
-   and room must persist with no LEAVE. Then hop worlds and check old SERVER history clears.
+   and room must persist with no LEAVE. Then hop worlds: old membership must leave, new-room
+   delivery must wait for confirmation, and the bounded accepted Server transcript must retain
+   old rows while appending authorized new-room history. MainMenu/expiry must retain display rows
+   but disable new Server delivery and sends.
 4. Send identical messages intentionally, replay old history while a new send awaits ACK, and
    reconnect after retained-ID cache eviction. Distinct messages survive; old replays cannot
    consume a newer pending row. Exercise negotiated retry and ambiguous failure behavior.

@@ -109,7 +109,11 @@ observation expiry remains; startup loading cannot invent a world. Existing
 split roster decoding, ready/live provenance, source precedence, fast-travel
 overlap and old-world cache rejection remain.
 
-The desktop reads asynchronously with bounded size/schema checks. A preexisting
+The desktop reads asynchronously with bounded size/schema checks. A transient missing, partial or
+invalid read during the provider's atomic file replacement retains only the last already-validated
+sample until its existing twelve-second writer deadline and thirty-second evidence deadline; it
+does not advance either clock. Persistent corruption therefore still expires and leaves normally.
+A preexisting
 file cannot activate Server: require advancement after attachment, fresh evidence
 and a current authenticated/game lifetime. Logout, account change, exit, hop,
 missing advancement or expiry retire stale authority. Never copy native credentials
