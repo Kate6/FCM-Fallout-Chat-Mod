@@ -13,6 +13,7 @@ async function getVersion(_req: Request, res: Response, next: NextFunction): Pro
         version: '—',
         releaseNotes: '',
         downloadUrl: '',
+        portableDownloadUrl: null,
         hudModVersion: null,
         hudModUrl: null,
         publishedAt: null,
@@ -23,6 +24,7 @@ async function getVersion(_req: Request, res: Response, next: NextFunction): Pro
       data: {
         version: latest.version,
         downloadUrl: latest.downloadUrl,
+        portableDownloadUrl: latest.portableDownloadUrl ?? null,
         releaseNotes: latest.releaseNotes,
         hudModVersion: latest.hudModVersion ?? null,
         hudModUrl: latest.hudModUrl ?? null,

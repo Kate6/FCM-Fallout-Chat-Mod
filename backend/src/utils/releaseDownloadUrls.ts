@@ -38,6 +38,9 @@ export function linuxZipUrl(version: string): string {
 export function windowsZipUrl(version: string): string {
   return `${electronDownloadsBase()}/${encodeURIComponent(`Fallout Chat Mod Setup ${version} (Windows).zip`)}`;
 }
+export function portableWindowsZipUrl(version: string): string {
+  return `${electronDownloadsBase()}/${encodeURIComponent(`Fallout Chat Mod Portable ${version}.zip`)}`;
+}
 
 // Raw installer files — consumed by the CLI installer / direct download.
 export function rawWindowsInstallerUrl(version: string): string {

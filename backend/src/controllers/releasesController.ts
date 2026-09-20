@@ -49,6 +49,7 @@ async function verifyDownload(url: string, label: string, minimumBytes = 1_000_0
 export interface ReleaseEntry {
   version: string;
   downloadUrl: string;
+  portableDownloadUrl?: string | null;
   releaseNotes: string;
   hudModVersion?: string | null;
   hudModUrl?: string | null;
@@ -64,6 +65,13 @@ const releaseBodySchema = z.object({
     .refine(isAllowedDownloadUrl, {
       message: 'downloadUrl must be an https URL on the configured downloads host (/downloads/…)',
     }),
+  portableDownloadUrl: z
+    .string()
+    .url()
+    .refine(isAllowedDownloadUrl, {
+      message: 'portableDownloadUrl must be an https URL on the configured downloads host (/downloads/...)',
+    })
+    .optional(),
   releaseNotes: z.string().min(1),
   // Optional for backwards-compatible overlay-only releases. When present,
   // both fields are required so the website can show a truthful versioned HUD
@@ -96,6 +104,7 @@ const releaseBodySchema = z.object({
 function toEntry(r: {
   version: string;
   downloadUrl: string;
+  portableDownloadUrl?: string | null;
   releaseNotes: string;
   hudModVersion?: string | null;
   hudModUrl?: string | null;
@@ -105,6 +114,7 @@ function toEntry(r: {
   return {
     version: r.version,
     downloadUrl: r.downloadUrl,
+    portableDownloadUrl: r.portableDownloadUrl ?? null,
     releaseNotes: r.releaseNotes,
     hudModVersion: r.hudModVersion ?? null,
     hudModUrl: r.hudModUrl ?? null,
@@ -164,7 +174,7 @@ async function publishRelease(req: Request, res: Response, next: NextFunction): 
       return next(createError(400, detail));
     }
 
-    const { version, downloadUrl, releaseNotes, releaseTarget, announce, suppressNotifications, hudModUrl, hudModVersion } = parsed.data;
+    const { version, downloadUrl, portableDownloadUrl, releaseNotes, releaseTarget, announce, suppressNotifications, hudModUrl, hudModVersion } = parsed.data;
     const publishedAt = new Date();
 
     // Pipeline gate: verify all five overlay artifacts and, when supplied, the
@@ -181,6 +191,7 @@ async function publishRelease(req: Request, res: Response, next: NextFunction): 
     // The zips are >1 MB; raw installers are also well above the 1 MB floor.
     try {
       await verifyDownload(downloadUrl, 'Windows ZIP');
+      if (portableDownloadUrl) await verifyDownload(portableDownloadUrl, 'Windows portable ZIP');
       await verifyDownload(linuxZipUrl(version), 'Linux ZIP');
       await verifyDownload(rawWindowsInstallerUrl(version), 'Windows raw installer (CLI installer / direct download)');
       await verifyDownload(rawLinuxAppImageUrl(version), 'Linux raw AppImage (CLI installer / direct download)');
@@ -207,9 +218,15 @@ async function publishRelease(req: Request, res: Response, next: NextFunction): 
     if (announce) {
       try {
         if (hudModUrl && hudModVersion) {
-          await postReleaseAnnouncement(version, releaseNotes, { url: hudModUrl, version: hudModVersion }, { target: releaseTarget, suppressNotifications });
+          await postReleaseAnnouncement(version, releaseNotes, { url: hudModUrl, version: hudModVersion }, {
+            target: releaseTarget, suppressNotifications,
+            ...(portableDownloadUrl ? { portableDownloadUrl } : {}),
+          });
         } else {
-          await postReleaseAnnouncement(version, releaseNotes, undefined, { target: releaseTarget, suppressNotifications });
+          await postReleaseAnnouncement(version, releaseNotes, undefined, {
+            target: releaseTarget, suppressNotifications,
+            ...(portableDownloadUrl ? { portableDownloadUrl } : {}),
+          });
         }
       } catch (e: any) {
         return next(createError(
@@ -224,11 +241,12 @@ async function publishRelease(req: Request, res: Response, next: NextFunction): 
       where: { version },
       update: {
         downloadUrl,
+        portableDownloadUrl: portableDownloadUrl ?? null,
         releaseNotes,
         publishedAt,
         ...(hudModUrl && hudModVersion ? { hudModUrl, hudModVersion } : {}),
       },
-      create: { version, downloadUrl, releaseNotes, hudModUrl, hudModVersion, publishedAt },
+      create: { version, downloadUrl, portableDownloadUrl, releaseNotes, hudModUrl, hudModVersion, publishedAt },
     });
 
     // Refresh the in-memory latest-version cache so newly connecting overlays
@@ -244,6 +262,7 @@ async function publishRelease(req: Request, res: Response, next: NextFunction): 
       releaseNotes,
       {
         target: releaseTarget,
+        ...(portableDownloadUrl ? { portableDownloadUrl } : {}),
         ...(hudModUrl && hudModVersion ? { hudMod: { url: hudModUrl, version: hudModVersion } } : {}),
       },
     );

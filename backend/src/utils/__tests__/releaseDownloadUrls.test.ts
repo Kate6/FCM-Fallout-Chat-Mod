@@ -12,6 +12,7 @@ import {
   electronDownloadsBase,
   linuxZipUrl,
   windowsZipUrl,
+  portableWindowsZipUrl,
   rawWindowsInstallerUrl,
   rawLinuxAppImageUrl,
   rawLinuxDebUrl,
@@ -50,6 +51,10 @@ describe('releaseDownloadUrls', () => {
       assert.equal(
         windowsZipUrl('1.2.3'),
         'https://falloutchatmod.com/downloads/electron/Fallout%20Chat%20Mod%20Setup%201.2.3%20(Windows).zip',
+      );
+      assert.equal(
+        portableWindowsZipUrl('1.2.3'),
+        'https://falloutchatmod.com/downloads/electron/Fallout%20Chat%20Mod%20Portable%201.2.3.zip',
       );
       assert.equal(
         rawWindowsInstallerUrl('1.2.3'),

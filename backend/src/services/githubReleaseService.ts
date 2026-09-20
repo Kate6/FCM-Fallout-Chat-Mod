@@ -60,12 +60,13 @@ export function buildGitHubReleaseBody(
   releaseNotes: string,
   hudMod?: HudModDownload,
   target: ReleaseTarget = hudMod ? 'both' : 'overlay',
+  portableDownloadUrl?: string,
 ): string {
   return [
     (releaseNotes || 'A new version is available.').trim(),
     '',
     '## Download',
-    releaseDownloadFieldValue(version, target, hudMod),
+    releaseDownloadFieldValue(version, target, hudMod, portableDownloadUrl),
     '',
     '## Endorse on Nexus',
     nexusEndorseFieldValue(),
@@ -86,12 +87,13 @@ export function githubReleasePayload(
   releaseNotes: string,
   hudMod?: HudModDownload,
   target: ReleaseTarget = hudMod ? 'both' : 'overlay',
+  portableDownloadUrl?: string,
 ): GitHubReleasePayload {
   const pre = isPrereleaseVersion(version);
   return {
     tag_name: releaseTag(version),
     name: `Fallout Chat Mod ${releaseTag(version)}`,
-    body: buildGitHubReleaseBody(version, releaseNotes, hudMod, target),
+    body: buildGitHubReleaseBody(version, releaseNotes, hudMod, target, portableDownloadUrl),
     prerelease: pre,
     make_latest: pre ? 'false' : 'true',
   };
@@ -107,7 +109,7 @@ type FetchLike = typeof fetch;
 export async function createGitHubRelease(
   version: string,
   releaseNotes: string,
-  opts: { fetchImpl?: FetchLike; hudMod?: HudModDownload; target?: ReleaseTarget } = {},
+  opts: { fetchImpl?: FetchLike; hudMod?: HudModDownload; target?: ReleaseTarget; portableDownloadUrl?: string } = {},
 ): Promise<void> {
   const cfg = githubReleaseConfig();
   if (!cfg) {
@@ -123,7 +125,7 @@ export async function createGitHubRelease(
     'X-GitHub-Api-Version': '2022-11-28',
     'User-Agent': 'fcm-release',
   };
-  const payload = githubReleasePayload(version, releaseNotes, opts.hudMod, opts.target);
+  const payload = githubReleasePayload(version, releaseNotes, opts.hudMod, opts.target, opts.portableDownloadUrl);
   const tag = payload.tag_name;
   const attemptDelays = [0, 1000, 3000]; // 3 tries
 

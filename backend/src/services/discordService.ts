@@ -1439,7 +1439,7 @@ async function postReleaseAnnouncement(
   version: string,
   releaseNotes: string,
   hudMod: HudModDownload | undefined,
-  options: { target: ReleaseTarget; suppressNotifications?: boolean },
+  options: { target: ReleaseTarget; suppressNotifications?: boolean; portableDownloadUrl?: string },
 ): Promise<void> {
   const attemptDelays = [0, 500, 1500, 3000, 5000]; // 5 tries, ~10s total
   let lastErr: unknown = null;
@@ -1464,7 +1464,7 @@ async function postReleaseAnnouncement(
         .setColor(0xF1C40F) // gold/yellow — matches the Securitron role color
         .setDescription((releaseNotes || 'A new version is available.').slice(0, 4000))
         .addFields(
-          { name: '📥 Download', value: releaseDownloadFieldValue(version, target, hudMod) },
+          { name: '📥 Download', value: releaseDownloadFieldValue(version, target, hudMod, options.portableDownloadUrl) },
           { name: '❤️ Endorse on Nexus', value: nexusEndorseFieldValue() },
         )
         .setTimestamp(new Date());

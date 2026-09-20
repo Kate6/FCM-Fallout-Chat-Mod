@@ -91,11 +91,13 @@ export function releaseDownloadFieldValue(
   version: string,
   target: ReleaseTarget,
   hudMod?: HudModDownload,
+  portableDownloadUrl?: string,
 ): string {
   const links: string[] = [];
   if (target === 'overlay' || target === 'both') {
     links.push(
       `🪟 [Windows](${windowsZipUrl(version)})`,
+      ...(portableDownloadUrl ? [`[Windows Portable](${portableDownloadUrl})`] : []),
       `🐧 [Linux AppImage](${rawLinuxAppImageUrl(version)})`,
       `[Linux .deb](${rawLinuxDebUrl(version)})`,
       `[Linux ZIP + install docs](${linuxZipUrl(version)})`,

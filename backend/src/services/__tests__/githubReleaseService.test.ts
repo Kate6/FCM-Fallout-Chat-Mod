@@ -93,6 +93,12 @@ describe('githubReleaseService', () => {
       });
       assert.ok(body.includes('[FCM HUD Mod ZIP (ZFE / xScal) v2.10.8](https://dev.falloutchatmod.com/downloads/electron/ZFE%20FCM%20HUD%20Mod-2.10.8%20(DEV).zip)'));
     });
+
+    test('includes the explicit portable package link when supplied', () => {
+      const portable = 'https://falloutchatmod.com/downloads/electron/Fallout%20Chat%20Mod%20Portable%201.4.0.zip';
+      const body = buildGitHubReleaseBody('1.4.0', 'My notes here', undefined, 'overlay', portable);
+      assert.ok(body.includes(`[Windows Portable](${portable})`));
+    });
   });
 
   describe('createGitHubRelease (best-effort)', () => {

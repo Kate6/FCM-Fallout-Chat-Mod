@@ -49,7 +49,8 @@ param(
     [int]$MaxMalicious  = 0,
     [int]$MaxSuspicious = 3,
     [string]$ExePath = "",
-    [string]$DistDir = ""
+    [string]$DistDir = "",
+    [switch]$SkipPermalinkUpdate
 )
 $ErrorActionPreference = "Stop"
 
@@ -199,7 +200,9 @@ if ($malicious -gt $MaxMalicious -or $suspicious -gt $MaxSuspicious) {
 }
 
 # PASS: push the permalink to the backend so /virustotal points at this scan.
-if (-not $relToken) {
+if ($SkipPermalinkUpdate) {
+    Write-Host "[vt-gate] Permalink update skipped for secondary artifact."
+} elseif (-not $relToken) {
     Write-Warning "[vt-gate] PROD_ADMIN_RELEASE_TOKEN not set - skipping /admin/virustotal-url update."
 } else {
     try {

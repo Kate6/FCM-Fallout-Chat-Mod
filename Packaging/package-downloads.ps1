@@ -1,11 +1,12 @@
 <#
 .SYNOPSIS
-    Builds the two human-download ZIP archives (website + Nexus) from the raw
+    Builds the human-download ZIP archives (website + Nexus) from the raw
     electron-builder artifacts.
 
 .DESCRIPTION
     Produces:
       - "Fallout Chat Mod Setup V (Windows).zip"  (Windows installer + INSTALL-WINDOWS.txt)
+      - "Fallout Chat Mod Portable V.zip" (portable EXE + README/checksums + optional PROD bridge)
       - "Fallout Chat Mod-V.AppImage (Linux).zip" (Linux AppImage + .deb + INSTALL-LINUX.txt + .kwinrule)
       - "FCM HUD Mod-V (TARGET).zip" (target-stamped FCMChatWidget BA2 + configs + INSTALL.txt)
 
@@ -57,6 +58,7 @@ function Fail($msg) { Write-Error "[package-downloads] $msg"; exit 1 }
 
 # --- Validate raw artifact existence -----------------------------------------
 $winExe   = Join-Path $DistDir "Fallout Chat Mod Setup $Version.exe"
+$portableExe = Join-Path $DistDir "Fallout Chat Mod Portable $Version.exe"
 $linuxApp = Join-Path $DistDir "Fallout Chat Mod-$Version.AppImage"
 # electron-builder is pinned to the product-name artifact pattern in
 # cross-platform-overlay/package.json, so the raw .deb name is deterministic
@@ -64,6 +66,7 @@ $linuxApp = Join-Path $DistDir "Fallout Chat Mod-$Version.AppImage"
 $linuxDeb = Join-Path $DistDir "Fallout Chat Mod-$Version.deb"
 
 if (-not (Test-Path $winExe))   { Fail "Windows installer not found: $winExe" }
+if (-not (Test-Path $portableExe)) { Fail "Windows portable executable not found: $portableExe" }
 if (-not (Test-Path $linuxApp)) { Fail "Linux AppImage not found: $linuxApp" }
 if (-not (Test-Path $linuxDeb)) { Fail "Linux .deb not found: $linuxDeb (electron-builder deb target)" }
 
@@ -72,11 +75,15 @@ $installWin   = Join-Path $AssetsDir "install\INSTALL-WINDOWS.txt"
 $installLinux = Join-Path $AssetsDir "install\INSTALL-LINUX.txt"
 $kwinRule     = Join-Path $AssetsDir "fallout-chatmod-keepabove.kwinrule"
 $hudPackage   = Join-Path $HudModDir "package.py"
+$bridgePackage = Join-Path (Split-Path $HudModDir -Parent) "hudmodloader-bridge/package.py"
+$portablePackage = Join-Path $PSScriptRoot "package-portable.ps1"
 
 if (-not (Test-Path $installWin))   { Fail "Missing: $installWin" }
 if (-not (Test-Path $installLinux)) { Fail "Missing: $installLinux" }
 if (-not (Test-Path $kwinRule))     { Fail "Missing: $kwinRule" }
 if (-not (Test-Path $hudPackage))   { Fail "Missing: $hudPackage" }
+if (-not (Test-Path $bridgePackage)) { Fail "Missing: $bridgePackage" }
+if (-not (Test-Path $portablePackage)) { Fail "Missing: $portablePackage" }
 
 # Resolve Python once so package.py is run consistently by the repeatable
 # release wrapper on Windows, Linux, and macOS.
@@ -90,9 +97,11 @@ if ($LASTEXITCODE -ne 0 -or -not $hudVersion -or $hudVersion -notmatch '^\d+\.\d
 
 # --- Output ZIP names --------------------------------------------------------
 $winZipName   = "Fallout Chat Mod Setup $Version (Windows).zip"
+$portableZipName = "Fallout Chat Mod Portable $Version.zip"
 $linuxZipName = "Fallout Chat Mod-$Version.AppImage (Linux).zip"
 $hudZipName   = "FCM HUD Mod-$hudVersion ($($HudTarget.ToUpperInvariant())).zip"
 $winZipOut    = Join-Path $DistDir $winZipName
+$portableZipOut = Join-Path $DistDir $portableZipName
 $linuxZipOut  = Join-Path $DistDir $linuxZipName
 $hudZipOut    = Join-Path $DistDir $hudZipName
 
@@ -113,6 +122,22 @@ Copy-Item $installWin -Destination $winStaging
 Compress-Archive -Path (Join-Path $winStaging "*") -DestinationPath $winZipOut -Force
 $winSize = (Get-Item $winZipOut).Length
 Write-Host "[package-downloads]   -> $winZipOut ($([math]::Round($winSize/1MB,1)) MB)"
+
+# --- Build Windows portable ZIP ----------------------------------------------
+Write-Host "[package-downloads] Building portable ZIP: $portableZipName"
+if (Test-Path $portableZipOut) { Remove-Item $portableZipOut -Force }
+$portableStaging = Join-Path $stagingRoot "portable"
+$bridgeZip = Join-Path $portableStaging "FCM Server Bridge-0.2.4 (PROD).zip"
+New-Item -ItemType Directory -Path $portableStaging -Force | Out-Null
+& $pythonCommand.Source $bridgePackage --target prod --output $bridgeZip
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $bridgeZip)) { Fail "PROD bridge package failed" }
+& $portablePackage -Version $Version -PortableExe $portableExe -BridgeZip $bridgeZip -OutputDir $portableStaging
+if ($LASTEXITCODE -ne 0) { Fail "Portable package failed" }
+$generatedPortableZip = Join-Path $portableStaging $portableZipName
+if (-not (Test-Path $generatedPortableZip)) { Fail "Portable ZIP not produced: $generatedPortableZip" }
+Move-Item -LiteralPath $generatedPortableZip -Destination $portableZipOut
+$portableSize = (Get-Item $portableZipOut).Length
+Write-Host "[package-downloads]   -> $portableZipOut ($([math]::Round($portableSize/1MB,1)) MB)"
 
 # --- Build Linux ZIP ---------------------------------------------------------
 Write-Host "[package-downloads] Building Linux ZIP: $linuxZipName"
@@ -142,8 +167,9 @@ Write-Host "[package-downloads]   -> $hudZipOut ($([math]::Round($hudSize/1KB,1)
 # --- Cleanup -----------------------------------------------------------------
 Remove-Item $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue
 
-Write-Host "[package-downloads] Done. Three download ZIPs ready in $DistDir"
+Write-Host "[package-downloads] Done. Four download ZIPs ready in $DistDir"
 Write-Host "  $winZipName  ($([math]::Round($winSize/1MB,1)) MB)"
+Write-Host "  $portableZipName  ($([math]::Round($portableSize/1MB,1)) MB)"
 Write-Host "  $linuxZipName  ($([math]::Round($linuxSize/1MB,1)) MB)"
 Write-Host "  $hudZipName  ($([math]::Round($hudSize/1KB,1)) KB)"
 Write-Host "NOTE: Upload the raw .exe/.AppImage/.deb alongside the ZIPs. The HUD ZIP is for the website and Discord release message."

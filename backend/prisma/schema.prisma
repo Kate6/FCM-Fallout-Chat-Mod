@@ -524,6 +524,7 @@ model Release {
   id            Int      @id @default(autoincrement())
   version       String   @unique
   downloadUrl   String   @map("download_url")
+  portableDownloadUrl String? @map("portable_download_url")
   releaseNotes  String   @map("release_notes")
   hudModVersion String?  @map("hud_mod_version")
   hudModUrl     String?  @map("hud_mod_url")

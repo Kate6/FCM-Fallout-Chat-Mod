@@ -1,5 +1,6 @@
 import { hudDownloads } from './hudDownloads';
 import HudManualInstall from './HudManualInstall';
+import { WindowsReleaseDownloads } from './WindowsReleaseDownloads';
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { Player } from '@remotion/player';
@@ -279,6 +280,7 @@ function formatCount(n: number | null): string {
 interface ReleaseEntry {
   version: string;
   downloadUrl: string;
+  portableDownloadUrl?: string | null;
   releaseNotes: string;
   hudModVersion?: string | null;
   hudModUrl?: string | null;
@@ -380,6 +382,7 @@ function InstallPanel() {
   const [copied, setCopied] = useState<CopyKey | null>(null);
   const { latest } = useReleases();
   const winUrl = latest?.downloadUrl ?? null;            // server-authoritative
+  const portableWinUrl = latest?.portableDownloadUrl ?? null;
   const linAppImageUrl = latest?.version ? electronLinuxAppImageUrl(latest.version) : null;
   const linDebUrl = latest?.version ? electronLinuxDebUrl(latest.version) : null;
   const linZipUrl = latest?.version ? electronLinuxZipUrl(latest.version) : null;
@@ -610,28 +613,11 @@ function InstallPanel() {
 
       <div style={subHeaderStyle}>STEP 1 — DOWNLOAD</div>
       <div style={bodyStyle}>
-        Grab the installer ZIP, then unzip it and run
+        Choose the standard installer or the portable package. For the installer, unzip it and run
         &ldquo;Fallout Chat Mod Setup &hellip;.exe&rdquo;. It&apos;s a per-user install
         (no admin prompt). When a new version is released, you&apos;ll get a notification — click it to download from Nexus Mods.
       </div>
-      <div className="install-dl-row" style={downloadRowStyle}>
-        {winUrl ? (
-          <a
-            href={winUrl}
-            download
-            target="_blank"
-            rel="noopener noreferrer"
-            className="install-dl-btn"
-            style={downloadBtnStyle}
-            onMouseEnter={dlHoverIn}
-            onMouseLeave={dlHoverOut}
-          >
-            ↓ DOWNLOAD FOR WINDOWS {verTag}
-          </a>
-        ) : (
-          <span className="install-dl-btn" style={{ ...downloadBtnStyle, opacity: 0.5, cursor: 'default' }}>↓ WINDOWS — UNAVAILABLE</span>
-        )}
-      </div>
+      <WindowsReleaseDownloads version={latest?.version ?? ''} installerUrl={winUrl} portableUrl={portableWinUrl} />
       <div style={stepStyle}>STEP 2 (ALTERNATIVE) — ONE-LINE INSTALL</div>
       <div style={bodyStyle}>
         Prefer the terminal? Paste this into <strong style={{ color: '#C8A840' }}>PowerShell</strong> to

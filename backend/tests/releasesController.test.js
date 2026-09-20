@@ -82,6 +82,7 @@ jest.mock('../src/services/latestReleaseVersion', () => ({
 
 const VALID_VERSION = '1.3.99';
 const VALID_DOWNLOAD_URL = `https://falloutchatmod.com/downloads/electron/${encodeURIComponent('Fallout Chat Mod Setup 1.3.99.exe (Windows).zip')}`;
+const VALID_PORTABLE_URL = `https://falloutchatmod.com/downloads/electron/${encodeURIComponent('Fallout Chat Mod Portable 1.3.99.zip')}`;
 const VALID_HUD_MOD_VERSION = '2.10.8';
 const VALID_HUD_MOD_URL = `https://falloutchatmod.com/downloads/electron/${encodeURIComponent('ZFE FCM HUD Mod-2.10.8 (PROD).zip')}`;
 const RELEASE_TOKEN = 'test-release-token-abc';
@@ -177,6 +178,7 @@ beforeEach(() => {
   prismaMock.release.upsert.mockResolvedValue({
     version: VALID_VERSION,
     downloadUrl: VALID_DOWNLOAD_URL,
+    portableDownloadUrl: VALID_PORTABLE_URL,
     releaseNotes: 'Test release',
     hudModVersion: VALID_HUD_MOD_VERSION,
     hudModUrl: VALID_HUD_MOD_URL,
@@ -234,6 +236,20 @@ describe('POST /admin/releases — publish gate', () => {
         downloadUrl: VALID_DOWNLOAD_URL,
         releaseNotes: 'notes',
         hudModVersion: VALID_HUD_MOD_VERSION,
+      });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when portableDownloadUrl is not on the configured download origin', async () => {
+    const res = await request(app)
+      .post('/admin/releases')
+      .set('Authorization', `Bearer ${RELEASE_TOKEN}`)
+      .send({
+        version: VALID_VERSION,
+        downloadUrl: VALID_DOWNLOAD_URL,
+        portableDownloadUrl: 'https://evil.com/portable.zip',
+        releaseNotes: 'notes',
+        releaseTarget: 'overlay',
       });
     expect(res.status).toBe(400);
   });
@@ -300,6 +316,7 @@ describe('POST /admin/releases — successful publish refreshes cache', () => {
       .send({
         version: VALID_VERSION,
         downloadUrl: VALID_DOWNLOAD_URL,
+        portableDownloadUrl: VALID_PORTABLE_URL,
         hudModVersion: VALID_HUD_MOD_VERSION,
         hudModUrl: VALID_HUD_MOD_URL,
         releaseNotes: 'HUD package included',
@@ -315,14 +332,19 @@ describe('POST /admin/releases — successful publish refreshes cache', () => {
       VALID_VERSION,
       'HUD package included',
       { url: VALID_HUD_MOD_URL, version: VALID_HUD_MOD_VERSION },
-      { target: 'both', suppressNotifications: false },
+      { target: 'both', suppressNotifications: false, portableDownloadUrl: VALID_PORTABLE_URL },
     );
     expect(prismaMock.release.upsert).toHaveBeenCalledWith(expect.objectContaining({
       update: expect.objectContaining({
         hudModUrl: VALID_HUD_MOD_URL,
         hudModVersion: VALID_HUD_MOD_VERSION,
+        portableDownloadUrl: VALID_PORTABLE_URL,
       }),
     }));
+    expect(global.fetch).toHaveBeenCalledWith(
+      VALID_PORTABLE_URL,
+      { method: 'HEAD', redirect: 'error' },
+    );
   });
 });
 
@@ -410,6 +432,7 @@ describe('GET /api/releases', () => {
       {
         version: '1.3.85',
         downloadUrl: 'https://falloutchatmod.com/downloads/electron/setup.zip',
+        portableDownloadUrl: 'https://falloutchatmod.com/downloads/electron/portable.zip',
         releaseNotes: 'Stable',
         hudModVersion: VALID_HUD_MOD_VERSION,
         hudModUrl: VALID_HUD_MOD_URL,
@@ -424,5 +447,6 @@ describe('GET /api/releases', () => {
     expect(res.body.data[0].version).toBe('1.3.85');
     expect(res.body.data[0].hudModVersion).toBe(VALID_HUD_MOD_VERSION);
     expect(res.body.data[0].hudModUrl).toBe(VALID_HUD_MOD_URL);
+    expect(res.body.data[0].portableDownloadUrl).toBe('https://falloutchatmod.com/downloads/electron/portable.zip');
   });
 });

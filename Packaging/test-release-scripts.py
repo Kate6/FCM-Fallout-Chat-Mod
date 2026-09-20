@@ -21,6 +21,8 @@ def main() -> None:
     linux_cli = (ROOT / "Packaging/linux/install.sh").read_text(encoding="utf-8")
     linux_helper = (ROOT / "cross-platform-overlay/main.js").read_text(encoding="utf-8")
     smoke = (ROOT / "Packaging/smoke-test.ps1").read_text(encoding="utf-8")
+    package_downloads = (ROOT / "Packaging/package-downloads.ps1").read_text(encoding="utf-8")
+    vt_gate = (ROOT / "Packaging/vt-gate.ps1").read_text(encoding="utf-8")
 
     required_nexus_markers = (
         "$hudGroup   = $env:NEXUS_FILE_GROUP_ID_HUD",
@@ -131,6 +133,13 @@ def main() -> None:
     assert 'Fallout Chat Mod-$Version.AppImage' in smoke
     assert 'Get-ChildItem -Path $DistDir -Filter "*.AppImage"' not in smoke
     assert '$env:ELECTRON_RUN_AS_NODE = $null' in smoke
+    for marker in ('[ValidateSet("Default", "Portable")]', 'Fallout Chat Mod Portable $Version.exe', 'FCMData\\logs'):
+        assert marker in smoke, f"portable smoke gate is missing: {marker}"
+    for marker in ('Fallout Chat Mod Portable $Version.zip', 'package-portable.ps1', 'hudmodloader-bridge'):
+        assert marker in package_downloads, f"portable package path is missing: {marker}"
+    for marker in ('portableDownloadUrl', 'portable VirusTotal GATE', 'Upload-Artifact $portableZip'):
+        assert marker in release, f"portable release orchestration is missing: {marker}"
+    assert '[switch]$SkipPermalinkUpdate' in vt_gate
 
     # The merged Linux PR made cursor locking explicit/on-demand. Keep the
     # public page from regressing to the old silent Proton/Wine mutation claim.

@@ -36,6 +36,7 @@
 param(
     [Parameter(Mandatory = $true)] [string]$Version,
     [string]$DistDir = "",
+    [ValidateSet("Default", "Portable")] [string]$Artifact = "Default",
     [int]$WaitSec = 15
 )
 $ErrorActionPreference = "Stop"
@@ -55,8 +56,14 @@ if ($IsLinux) {
     $item = Get-ChildItem -Path $DistDir -Filter "Fallout Chat Mod-$Version.AppImage" -File -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($item) { $exe = $item.FullName } else { $exe = "" }
 } else {
-    $logDir = Join-Path $env:APPDATA "Fallout Chat Mod\logs"
-    $exe    = Join-Path $DistDir "win-unpacked\Fallout Chat Mod.exe"
+    if ($Artifact -eq "Portable") {
+        $logDir = Join-Path $DistDir "FCMData\logs"
+        $exe = Join-Path $DistDir "Fallout Chat Mod Portable $Version.exe"
+    } else {
+        $logDir = Join-Path $env:APPDATA "Fallout Chat Mod\logs"
+        $winUnpacked = Join-Path $DistDir "win-unpacked"
+        $exe = Join-Path $winUnpacked "Fallout Chat Mod.exe"
+    }
 }
 $logPath = Join-Path $logDir "main.log"
 $priorElectronRunAsNode = $env:ELECTRON_RUN_AS_NODE

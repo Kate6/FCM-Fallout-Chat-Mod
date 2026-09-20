@@ -103,6 +103,14 @@ describe('releaseAnnouncement', () => {
       assert.ok(v.includes('[Linux ZIP + install docs](https://falloutchatmod.com/downloads/electron/Fallout%20Chat%20Mod-1.2.3.AppImage%20(Linux).zip)'));
     });
 
+    test('includes portable Windows only when release metadata provides it', () => {
+      const portable = 'https://falloutchatmod.com/downloads/electron/Fallout%20Chat%20Mod%20Portable%201.4.0.zip';
+      const withoutPortable = releaseDownloadFieldValue('1.4.0', 'overlay');
+      const withPortable = releaseDownloadFieldValue('1.4.0', 'overlay', undefined, portable);
+      assert.ok(!withoutPortable.includes('Windows Portable'));
+      assert.ok(withPortable.includes(`[Windows Portable](${portable})`));
+    });
+
     test('includes the target HUD package when release metadata provides one', () => {
       process.env.RELEASE_DOWNLOAD_HOST = 'dev.falloutchatmod.com';
       const v = releaseDownloadFieldValue('1.3.91-dev', 'both', {

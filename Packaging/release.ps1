@@ -253,13 +253,16 @@ if (-not $SshKey) {
 
 # Artifact filenames (productName is 'Fallout Chat Mod' WITH spaces).
 $winExe       = Join-Path $distDir "Fallout Chat Mod Setup $Version.exe"
+$portableExe  = Join-Path $distDir "Fallout Chat Mod Portable $Version.exe"
 $linuxApp     = Join-Path $distDir "Fallout Chat Mod-$Version.AppImage"
 $linuxDeb     = Join-Path $distDir "Fallout Chat Mod-$Version.deb"
 $winZipName   = "Fallout Chat Mod Setup $Version (Windows).zip"
+$portableZipName = "Fallout Chat Mod Portable $Version.zip"
 $linuxZipName = "Fallout Chat Mod-$Version.AppImage (Linux).zip"
 $hudTarget    = "prod"
 $hudZipName   = "FCM HUD Mod-$hudModVersion ($($hudTarget.ToUpperInvariant())).zip"
 $winZip       = Join-Path $distDir $winZipName
+$portableZip  = Join-Path $distDir $portableZipName
 $linuxZip     = Join-Path $distDir $linuxZipName
 $hudZip       = Join-Path $distDir $hudZipName
 
@@ -270,6 +273,8 @@ $remoteDownloads = "/app/downloads/electron"
 $winExeName      = "Fallout%20Chat%20Mod%20Setup%20$($Version)%20(Windows).zip"
 $linuxAppName    = "Fallout%20Chat%20Mod-$($Version).AppImage%20(Linux).zip"
 $winExeRawName   = "Fallout%20Chat%20Mod%20Setup%20$Version.exe"
+$portableExeRawName = "Fallout%20Chat%20Mod%20Portable%20$Version.exe"
+$portableZipUrlName = "Fallout%20Chat%20Mod%20Portable%20$Version.zip"
 $linuxRawName    = "Fallout%20Chat%20Mod-$Version.AppImage"
 $linuxDebRawName = "Fallout%20Chat%20Mod-$Version.deb"
 $hudZipUrlName   = $hudZipName -replace ' ', '%20'
@@ -286,6 +291,9 @@ if ($SkipBuild) {
     if (-not (Test-Path $winExe)) {
         Fail "step 1 (pre-built artifact check)" "Windows installer not found: $winExe`n  Build it first or remove -SkipBuild."
     }
+    if (-not (Test-Path $portableExe)) {
+        Fail "step 1 (pre-built artifact check)" "Windows portable executable not found: $portableExe"
+    }
     Pass "step 1 (skipped build; Windows artifact present)"
 } else {
     Write-Host "[step 1] Building renderer..."
@@ -297,6 +305,9 @@ if ($SkipBuild) {
         Write-Host "[step 1] Running electron-builder --win..."
         npx electron-builder --win
         if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "step 1 (electron-builder --win)" "electron-builder exited $LASTEXITCODE" }
+        Write-Host "[step 1] Running electron-builder --win portable ..."
+        npx electron-builder --win portable --publish never
+        if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "step 1 (electron-builder portable)" "electron-builder exited $LASTEXITCODE" }
     } catch {
         Pop-Location
         Fail "step 1 (build)" $_.Exception.Message
@@ -305,6 +316,9 @@ if ($SkipBuild) {
 
     if (-not (Test-Path $winExe)) {
         Fail "step 1 (output check)" "electron-builder succeeded but Windows installer not found: $winExe"
+    }
+    if (-not (Test-Path $portableExe)) {
+        Fail "step 1 (output check)" "electron-builder succeeded but portable executable not found: $portableExe"
     }
     Pass "step 1 (Windows build)"
 }
@@ -349,6 +363,13 @@ if ($smokeExit -ne 0) {
 }
 Pass "step 2 (GATE -- smoke test)"
 
+Write-Host "[step 2] Running portable executable smoke test ..."
+$portableSmokeExit = Invoke-SubScript $smokeScript @("-Version", $Version, "-DistDir", $distDir, "-Artifact", "Portable")
+if ($portableSmokeExit -ne 0) {
+    Fail "step 2 (portable smoke-test GATE)" "Portable executable failed launch smoke test. Publish NOTHING."
+}
+Pass "step 2 (GATE -- portable smoke test)"
+
 # ---- STEP 3: VirusTotal gate -------------------------------------------------
 
 Step-Banner 3 "GATE -- VirusTotal"
@@ -361,6 +382,13 @@ if ($vtExit -ne 0) {
 }
 Pass "step 3 (GATE -- VirusTotal)"
 
+Write-Host "[step 3] Scanning portable executable without replacing the installer permalink ..."
+$portableVtExit = Invoke-SubScript $vtScript @("-Version", $Version, "-DistDir", $distDir, "-ExePath", $portableExe, "-SkipPermalinkUpdate")
+if ($portableVtExit -ne 0) {
+    Fail "step 3 (portable VirusTotal GATE)" "Portable executable is flagged or upload failed. Publish NOTHING."
+}
+Pass "step 3 (GATE -- portable VirusTotal)"
+
 # ---- DRY RUN stops here (before any mutating steps) -------------------------
 
 if ($DryRun) {
@@ -370,6 +398,7 @@ if ($DryRun) {
     Write-Host ""
     Write-Host "  STEP 4: package-downloads.ps1 -Version $Version"
     Write-Host "          -> builds '$winZipName'"
+    Write-Host "          -> builds '$portableZipName'"
     Write-Host "          -> builds '$linuxZipName'"
     Write-Host "          -> builds '$hudZipName' (target: $hudTarget)"
     Write-Host ""
@@ -402,6 +431,7 @@ if ($pkgExit -ne 0) {
     Fail "step 4 (package-downloads)" "package-downloads.ps1 exited $pkgExit"
 }
 if (-not (Test-Path $winZip))   { Fail "step 4 (output check)" "Windows ZIP not produced: $winZip" }
+if (-not (Test-Path $portableZip)) { Fail "step 4 (output check)" "Portable ZIP not produced: $portableZip" }
 if (-not (Test-Path $linuxZip)) { Fail "step 4 (output check)" "Linux ZIP not produced: $linuxZip" }
 if (-not (Test-Path $hudZip))   { Fail "step 4 (output check)" "HUD ZIP not produced: $hudZip" }
 Pass "step 4 (download ZIPs built)"
@@ -425,9 +455,11 @@ function Upload-Artifact($localPath, $remoteName) {
 
 # Upload raw artifacts + ZIPs.
 Upload-Artifact $winExe
+Upload-Artifact $portableExe
 Upload-Artifact $linuxApp
 Upload-Artifact $linuxDeb
 Upload-Artifact $winZip
+Upload-Artifact $portableZip
 Upload-Artifact $linuxZip
 Upload-Artifact $hudZip
 
@@ -437,6 +469,7 @@ Upload-Artifact $hudZip
 Write-Host "[step 5] Verifying served sizes against local build artifact sizes..."
 
 $winLocalSize   = (Get-Item $winExe).Length
+$portableExeLocalSize = (Get-Item $portableExe).Length
 $linuxLocalSize = (Get-Item $linuxApp).Length
 
 Write-Host "[step 5] Local Windows .exe size:   $winLocalSize bytes"
@@ -452,6 +485,19 @@ if ($winServedSize -ne $winLocalSize) {
     Fail "step 5 (size mismatch -- windows)" "Windows .exe: served=$winServedSize bytes vs local=$winLocalSize bytes. Upload may be corrupt or incomplete."
 }
 Pass "step 5 (Windows .exe size verified: $winServedSize bytes)"
+
+$portableExeServedSize = Get-ServedSize "$baseUrl/$portableExeRawName" $SshKey $SshTarget
+if ($null -eq $portableExeServedSize -or $portableExeServedSize -ne $portableExeLocalSize) {
+    Fail "step 5 (size verify -- portable exe)" "Portable EXE served size does not match local size."
+}
+Pass "step 5 (portable .exe size verified: $portableExeServedSize bytes)"
+
+$portableZipLocalSize = (Get-Item $portableZip).Length
+$portableZipServedSize = Get-ServedSize "$baseUrl/$portableZipUrlName" $SshKey $SshTarget
+if ($null -eq $portableZipServedSize -or $portableZipServedSize -ne $portableZipLocalSize) {
+    Fail "step 5 (size verify -- portable zip)" "Portable ZIP served size does not match local size."
+}
+Pass "step 5 (portable ZIP size verified: $portableZipServedSize bytes)"
 
 $linuxServedSize = Get-ServedSize "$baseUrl/$linuxRawName" $SshKey $SshTarget
 if ($null -eq $linuxServedSize) {
@@ -515,10 +561,12 @@ Step-Banner 7 "Register release (POST /admin/releases)"
 # URL-encode the download URL (spaces -> %20).
 $winZipUrlName = "Fallout%20Chat%20Mod%20Setup%20$Version%20(Windows).zip"
 $downloadUrl   = "$baseUrl/$winZipUrlName"
+$portableDownloadUrl = "$baseUrl/$portableZipUrlName"
 
 $releaseBody = @{
     version = $Version
     downloadUrl = $downloadUrl
+    portableDownloadUrl = $portableDownloadUrl
     releaseNotes = $ReleaseNotes
     releaseTarget = $ReleaseTarget
 }
