@@ -10,12 +10,14 @@ class MockXscal {
     public static var historyDoneDeliveries(default, null):Int = 0;
     public static var serverControlCount(default, null):Int = 0;
     public static var leaveControlCount(default, null):Int = 0;
+    public static var roomDiagnosticCount(default, null):Int = 0;
     public static var asyncCompletionDeliveries(default, null):Int = 0;
     public static var authReady:Bool = true;
     public static var authPollCount(default, null):Int = 0;
     public static var connectCount(default, null):Int = 0;
     public static var ordinarySendCount(default, null):Int = 0;
     public static var lastRosterBody(default, null):String = "";
+    public static var lastRoomDiagnosticBody(default, null):String = "";
     static var pressed:Map<Int, Bool> = new Map();
     static var registered:Map<Int, Bool> = new Map();
     static var cursor:Int = 0;
@@ -90,7 +92,7 @@ class MockXscal {
             if (!authReady) return response({success:true, state:"connecting", status:"connecting"});
             return response({success:true, state:"authenticated", status:"authenticated",
                 userId:"sim-relay-user", linkedUserId:"sim-linked-user", canRetryHudSend:true,
-                canSaveHudLayout:true});
+                canSaveHudLayout:true, canSendRoomDiagnostics:true});
         });
         Reflect.setField(chat, "getConnectionState", function():String {
             return response({success:true, state:"authenticated", status:"authenticated"});
@@ -139,7 +141,10 @@ class MockXscal {
             SimLog.emit("CHAT send len=" + body.length);
             if (scenarioEvents == null) scenarioEvents = [];
             if (channel == "server" && StringTools.startsWith(body, "FCMCTL/1/")) {
-                serverControlCount++;
+                if (StringTools.startsWith(body, "FCMCTL/1/DIAG:")) {
+                    roomDiagnosticCount++;
+                    lastRoomDiagnosticBody = body;
+                } else serverControlCount++;
                 if (body == "FCMCTL/1/LEAVE") leaveControlCount++;
                 if (StringTools.startsWith(body, "FCMCTL/1/ROSTER:")) {
                     lastRosterBody = body;

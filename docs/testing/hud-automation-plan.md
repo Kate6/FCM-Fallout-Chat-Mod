@@ -2,6 +2,30 @@
 
 Latest drop-in bridge evidence: [rollout, fallback and diagnostic candidates](bridge-drop-in-acceptance-2026-09-16.md).
 
+2026-09-19 backend room-evidence candidate: HUD 2.10.114 retains 2.10.113 and adds fixed-schema,
+authenticated, transition-only room diagnostics. The backend stores a bounded 24-hour pseudonymous
+roster/room decision chain behind an admin-key endpoint. All Haxe/source/native-adapter/package/
+artifact gates and all 60 Ruffle cases pass, as do the overlay (1,274) and dashboard (471) unit
+suites and builds. The affected backend suites pass; the full backend run reaches 1,604 passes
+and 9 skips, with the same five unrelated `.env.local` expectation failures. Native acceptance
+remains pending. SWF SHA-256: `6b34cac23fd173fc37c39261884850fa94eac6ead725c6fcb5bc059e751cf5a8`;
+BA2 SHA-256: `a8516e8b746bc734e546e699d8232eb2cd986ed4d127338eaf6783b58f571f6f`.
+The byte-identical BA2 and 2.10.114 marker are installed on the desktop after a game-closed check;
+extracted installed SWF equality and unchanged configuration hashes pass. Rollback is
+`.extender-backups/before-fcm-hud-2.10.114-room-diagnostics-Xlk2KS/`. The Prod unified website
+tester ZIP in Downloads has SHA-256
+`b905f3fffc7c7c82032dfbfe7e62b795cdb0a0fc212b0952fe4d751d3508a17c`; the Nexus-safe variant is
+`6f5bff993ba769d9ff2121285c83243c8653f4b00b3004053492af5f184d95db`.
+
+2026-09-19 stable-room diagnostics candidate: HUD 2.10.113 retains 2.10.112 and adds a
+values-free identity-field inventory for the supported BSUI roster surfaces. All Haxe suites,
+compiler diagnostics, native API/auth, source/anchor/SWF/BA2/package/emoji gates and all 60
+Ruffle cases pass. Overlay (1,274) and dashboard (471) unit suites and builds also pass. It is not
+installed or natively accepted. The room-stability correction itself is backend-owned and remains
+compatible with older HUD clients. The rebuilt SWF SHA-256 is
+`a1c34f807e9aeaf55c06aa72fa3c5965bfd2b0ee4d2992670880ed397b3c2225`; BA2 SHA-256 is
+`7f9ac06e617d05571330d7e790199aa9d201dc21ae88e186d46cace07dd8af5b`.
+
 2026-09-19 Server-history chronology candidate: HUD 2.10.112 preserves the relay `createdAt`
 and authorized replay marker on canonical records. A pure Haxe regression covers General's
 static-history horizon and deterministic ordering. The compiled `server-history-chronology`

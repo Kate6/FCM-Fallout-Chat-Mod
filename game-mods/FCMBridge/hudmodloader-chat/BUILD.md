@@ -1,18 +1,32 @@
 # FCMChatWidget build, install, and verification
 
-**Widget version:** 2.10.112. This private candidate slots delayed retained Server rows into
+**Widget version:** 2.10.114. This private candidate retains 2.10.113's identity inventory and
+adds bounded authenticated room diagnostics. Fixed-enum lifecycle events are sent only on state
+transitions through the existing capability-gated `chat.v1` control path. They contain provider,
+selected roster source, count and build only; no names, IDs, messages or tokens. The backend's
+24-hour pseudonymous evidence ring correlates them with changed roster, grace, split and assignment
+decisions. The HUD sends only when `getAuthState` advertises `canSendRoomDiagnostics`, making
+backend-first rollout and backend rollback safe.
+
+The candidate retains 2.10.112's delayed Server-history ordering and a privacy-safe, one-shot identity-field inventory across supported BSUI roster
+surfaces. The inventory records field names only and transmits no values. 2.10.112 slots delayed retained Server rows into
 General by their original relay timestamp, excludes replay older than General's loaded history
 horizon, and keeps the complete chronological replay in the Server subtab. It retains 2.10.111's
 bounded roster-visible local-name evidence and token-owned authenticated identity/message
 attribution. Fresh native acceptance is pending; 2.10.110 remains the current production release.
 This is the explicit opt-in HUD-mod track. The desktop overlay never installs or modifies it.
 
-The complete 60-case Ruffle suite and local Haxe/source/package/SWF/BA2/emoji gates pass. The
-tested normalized SWF SHA-256 is `0f39b1b9ab0e90e86e4a8b608fbc135ae0c5b2cc081901ef1a427c878f742abc`;
-the matching one-entry BA2 SHA-256 is
-`9e952bdf3a461be3acad16a87d9f1434095998d9b6a098dcf0ec100fdf0fb0b8`. The provider-paired compiled
-regression verifies the complete General/Server projection described above. This is automated
-evidence, not native two-client acceptance or publication approval.
+The 2.10.114 complete Haxe/source/native-adapter/package/SWF/BA2/emoji gates pass, as does the
+complete 60-case Ruffle suite (4.2 minutes). The rebuilt one-entry BA2 was extracted and its SWF
+matched the normalized source artifact byte-for-byte. The reviewed local artifacts are SWF
+SHA-256 `6b34cac23fd173fc37c39261884850fa94eac6ead725c6fcb5bc059e751cf5a8`
+(7,185,687 bytes) and BA2 SHA-256
+`a8516e8b746bc734e546e699d8232eb2cd986ed4d127338eaf6783b58f571f6f`
+(7,185,776 bytes). Prod-target unified website and Nexus tester packages are staged in Downloads.
+After confirming Fallout 76 was closed, the same BA2 and version marker were installed on the
+desktop; extracted installed SWF equality passed and provider/settings/loader files were unchanged.
+Rollback is under `.extender-backups/before-fcm-hud-2.10.114-room-diagnostics-Xlk2KS/`. It is not
+natively accepted or approved for publication.
 
 ## Status and scope
 

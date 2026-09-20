@@ -5,6 +5,7 @@ import { INSTANCE_ID } from '../../config/instanceIdentity';
 import { clearRoster, computeRooms, readRoster, setRoster } from './worldRosterService';
 import { clearWorldId, getWorldId, setWorldId } from './worldIdService';
 import { publishRebind } from './serverChat';
+import { opaqueRef, recordRoomDiagnostic } from './roomDiagnostics';
 
 interface NativeRoomHooks {
   hasResync?(userId: string): boolean;
@@ -51,6 +52,11 @@ export async function applyRoomAssignments(requester: string, assertCurrent: () 
     await setWorldId(userId, roomKey, roster.expiresAt);
     const requestId = roster.requestId;
     if (current === roomKey && !shouldBackfillResync && !(userId === requester && requestId)) continue;
+    if (current !== roomKey) await recordRoomDiagnostic(userId, {
+      event: 'room_assignment', reason: current ? 'rebind' : 'initial',
+      fromRoomRef: current ? opaqueRef(current) : null, toRoomRef: opaqueRef(roomKey),
+      requestRef: opaqueRef(requestId), observationSource: roster.observationSource ?? 'legacy',
+    });
     nativeHooks?.rebind(userId, roomKey);
     await publishRebind(userId, roomKey, requestId, INSTANCE_ID);
     await nativeHooks?.backfill(userId, roomKey, requestId);
@@ -72,7 +78,7 @@ export async function observeNativeRoster(userId: string, ownName: string, names
   await coordinateRooms(async assertCurrent => {
     const preserveExistingSession = nativeHooks?.hasResync?.(userId) ?? false;
     const stored = await setRoster(userId, ownName, names, requestId, undefined, ownAliases,
-      { preserveExistingSession, recoverHudReplacement: true });
+      { preserveExistingSession, recoverHudReplacement: true, observationSource: 'native' });
     // A replacement HUD's initial empty snapshot is not a new solo-world
     // observation. Keep the old graph until its original TTL while withholding
     // SERVER-READY; the widget retries after its data sources recover.

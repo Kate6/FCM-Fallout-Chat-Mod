@@ -11,6 +11,17 @@ class FcmRoster {
         try { return untyped value[key]; } catch (e:Dynamic) { return null; }
     }
 
+    /** Allowlisted shape-only probe for stable identity fields. Values never leave the game. */
+    public static function identityFieldNames(value:Dynamic):Array<String> {
+        var present:Array<String> = [];
+        for (key in ["accountId", "accountID", "bethesdaId", "bethesdaID", "playerId", "playerID",
+                "userId", "userID", "formId", "formID", "teamId", "teamID", "worldId", "worldID",
+                "serverId", "serverID", "instanceId", "instanceID"]) {
+            try { if (field(value, key) != null) present.push(key); } catch (_:Dynamic) {}
+        }
+        return present;
+    }
+
     /** Read only the menu names already exposed to the HUD. */
     public static function hasPipboy(data:Dynamic):Bool {
         var menus:Dynamic = field(data, "menuStackA");

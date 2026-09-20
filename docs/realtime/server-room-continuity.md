@@ -24,14 +24,50 @@ was necessary.
 An explicit leave, expired/missing roster, disjoint replacement, or desktop export
 world-generation change still discards affinity. RESYNC cannot recreate a cleared or
 expired roster and never extends observation freshness. Coordination writes use XX
-and KEEPTTL for the same reason. No HUD, bridge, overlay protocol, or client binary
-changes are required.
+and KEEPTTL for the same reason. The room-stability correction needs no HUD, bridge,
+overlay protocol, or client binary change; HUD 2.10.114 adds diagnostics only.
 
-If surviving members of an old room split into disconnected components, none of
-those components inherits that shared room. They receive independent rooms until
-mutual sightings justify convergence. This deliberately favors isolation over
-history continuity when world evidence is ambiguous. Roster inference remains
-non-authoritative; there is no trusted game-world ID.
+If surviving members of an old room split into disconnected components, exactly
+one component retains the canonical room: the component containing the most
+members who previously owned it, then the oldest continuously observed session,
+then a deterministic root tie-break. Every other component receives an independent
+room immediately, so disconnected users never continue sharing live publication
+authority. This prevents one incomplete observation from renaming the room for an
+otherwise stable group while retaining fail-closed isolation. Roster inference
+remains non-authoritative; there is no trusted game-world ID.
+
+A partial same-session roster update retains each newly missing sighting for a
+10-second, per-name grace. Repeating the incomplete roster cannot renew that
+deadline, restored names remove their grace immediately, and expired grace is not
+used for clustering. Empty rosters, explicit leave, expiry and new/disjoint
+generations receive no grace. Reconciliation is event-driven, so an expired edge is
+applied on the next serialized roster mutation; it never renews Redis observation
+freshness or the client lease.
+
+Production split/rebind decisions are logged at info level with SHA-256-derived
+12-character references, component sizes, reason and fixed transport classes
+(`native`, `bridge:zfe`, or `bridge:xscal`). Logs contain no player names, roster
+contents, message bodies, raw room/session/request identifiers or tokens.
+
+HUD 2.10.114 additionally sends transition-only `FCMCTL/1/DIAG:` controls through the
+existing authenticated, capability-gated `chat.v1` path. The body accepts only fixed
+event/provider/source enums, a roster count from 0–24 and the numeric build version;
+there is no free-text field. Events cover roster send, temporary-empty hold, disjoint
+boundary, stale observation and MainMenu. Consecutive duplicates are suppressed and
+each widget instance is capped at 32 events. The server advertises
+`canSendRoomDiagnostics`; an older backend therefore receives no unknown control. These
+controls never establish or renew membership and use an independent 12-per-minute limiter,
+so diagnostics cannot consume the functional world-control budget.
+
+The coordinator keeps a separate 24-hour Redis evidence ring: 1,000 recent global
+events and 100 per relay identity. It records changed roster observations, held reloads,
+grace sets, room assignments, splits, rebinds and clears. Player/alias values use
+server-secret HMAC references; UUIDs, nonces, sessions and rooms use 12-character
+SHA-256-derived references. Raw names, IDs, request values, tokens and message bodies
+are not retained. `GET /admin/debug/room-diagnostics?userId=<relay-user-id>&limit=<1..200>`
+reads the per-user ring; omitting `userId` reads recent global evidence. The endpoint
+requires `X-Admin-API-Key` and the normal admin API limiter. Diagnostic storage is
+best-effort and cannot fail room assignment.
 
 ### Roster-visible self names
 
@@ -51,8 +87,10 @@ and one-sided rejection. Fresh two-client native acceptance remains required.
 ### Delayed peer departure
 
 A remaining player may report a roster without their peer before the peer's
-leave reaches the backend. This still separates live rooms immediately. When
-every member of a resulting component has the same previous room affinity and
+leave reaches the backend. This separates live rooms after the bounded partial-
+sighting grace, or immediately for an empty roster, leave, expiry or generation
+boundary. The selected stable component keeps the canonical room. When every
+member of another resulting component has the same previous room affinity and
 unchanged observation session, the coordinator seeds its new room with a snapshot
 of that old room's retained history before publishing the new assignment.
 Redis COPY preserves message IDs and the existing expiration, does not replace
@@ -79,7 +117,8 @@ change. Older backend instances must be drained before relying on continuity,
 since they do not maintain the new optional room metadata.
 
 Regression coverage: `worldRoomContinuity.test.js` covers either peer departing,
-component splits, generation/leave boundaries, a single HUD replacement, five
+component splits, stable-component inheritance, non-renewing partial-sighting grace,
+privacy-safe split telemetry, generation/leave boundaries, a single HUD replacement, five
 simultaneous startup-empty replacements and disjoint replacement; `relayHandler.test.js`
 covers withheld confirmation during recovery, overlapping replacement bind, the
 authenticated RESYNC marker and history confirmation.

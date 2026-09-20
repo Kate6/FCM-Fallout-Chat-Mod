@@ -1,5 +1,36 @@
 # Archived HUD build notes
 
+## Backend room-evidence candidate 2.10.114 (2026-09-19)
+
+- Sends only fixed-schema, authenticated `roster_send`, `roster_hold`, `roster_boundary`,
+  `roster_stale` and `main_menu` transitions. Provider, selected source, roster count and build
+  are allowlisted; no player names, roster contents, messages, raw identifiers or tokens enter
+  diagnostic controls.
+- Consecutive duplicate controls are suppressed and each widget instance is capped at 32.
+  Diagnostics use only the already-required nonblocking control transport and cannot change or
+  renew room membership.
+- The backend retains a bounded 24-hour pseudonymous event ring covering client state, changed
+  roster evidence, reload holds, grace, assignments, splits, rebinds and clears. An admin-key-only
+  endpoint reads either the global or per-user chain without collecting client logs.
+- All Haxe/source/native-adapter/package/artifact gates and all 60 Ruffle cases pass. The rebuilt
+  BA2 extracts to the tested normalized SWF byte-for-byte; overlay and dashboard unit/build gates
+  also pass. Prod-target tester packages are staged in Downloads. The byte-identical BA2 and
+  version marker are installed on the desktop after a game-closed check; provider/settings/loader
+  files are unchanged and rollback is retained under the game root's `.extender-backups/`.
+- Backend-first rollout and fresh two-client native acceptance remain required.
+
+## Stable-room diagnostics candidate 2.10.113 (2026-09-19)
+
+- Retains 2.10.112's chronological Server-history projection.
+- Adds a one-shot inventory across all supported BSUI roster surfaces. Only provider/row field
+  names and allowlisted identity-like field names are logged; values, names, roster contents,
+  messages and tokens are never logged or transmitted.
+- Pairs with the backend's non-renewing partial-sighting grace, deterministic stable-component
+  inheritance and privacy-safe split/rebind decision telemetry. Those room semantics are backend
+  owned; older HUD clients remain protocol-compatible.
+- All Haxe/compiler/source/artifact/package checks and the complete 60-case Ruffle suite pass.
+  Native acceptance remains pending; the candidate is not installed or published.
+
 ## Server-history chronology candidate 2.10.112 (2026-09-19)
 
 - Preserves original relay `createdAt` values and the existing authorized-history carrier marker
