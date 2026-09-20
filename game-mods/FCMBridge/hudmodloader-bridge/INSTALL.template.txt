@@ -10,21 +10,38 @@ __SFCodeObj.version.runtime == xScal and modStorage.register/save. These are
 separate downloads. The visible FCM HUD and legacy FCMBridge must not coexist
 with this background bridge. The default overlay does not install any mods.
 
-INSTALL (WITH FALLOUT 76 CLOSED)
-1. Back up the exact files being changed. Copy Data/FCMServerBridge.ba2 to the
-   game's Data directory.
-2. Add FCMServerBridge once to Data/hudmodloader.ini. Preserve all unrelated
-   entries. The supplied FCMServerBridge.hudmodloader.ini is a fragment, not a
-   replacement registry.
-3. Append FCMServerBridge.ba2 once to sResourceArchive2List in [Archive] in the
-   active Fallout76Custom.ini. Keep HUDModLoader.ba2 and other mods.
-   Windows: your actual Documents/My Games/Fallout 76 directory (including
-   redirected Documents). Proton: the corresponding game prefix directory.
-4. No extender chat endpoint or native authentication is required. Remove ONLY
-   an older bridge-specific Data/ZFE/TextChat/fragments/FCMServerBridge.ini
-   after backing it up; do not erase shared extender settings or HUD credentials.
-5. Run a compatible {target} overlay pointed at https://{host} and sign in there.
-   Start Fallout 76 and enter a world. Either startup order is supported.
+CHOOSE ONE INSTALL PATH (FALLOUT 76 MUST BE CLOSED)
+
+ZFE INSTALL
+-----------
+1. Install HUDModLoader and ZFE with the zfe-storage-v1 capability.
+2. Back up the files below, then copy Data/FCMServerBridge.ba2 into the game's
+   Data directory.
+3. Add FCMServerBridge once to Data/hudmodloader.ini. Preserve every existing
+   entry; FCMServerBridge.hudmodloader.ini is a snippet, not a replacement.
+4. Append FCMServerBridge.ba2 once to [Archive] sResourceArchive2List in the
+   active Fallout76Custom.ini. Preserve HUDModLoader.ba2 and unrelated archives.
+5. If an obsolete Data/ZFE/TextChat/fragments/FCMServerBridge.ini exists, back
+   up and remove only that bridge fragment. Do not alter shared ZFE settings.
+6. Start the signed-in {target} overlay for https://{host}, launch Fallout 76,
+   enter a world, then check F11 -> FCM Server Bridge for ZFE export status.
+
+XSCAL INSTALL
+-------------
+1. Install HUDModLoader and xScal with modStorage.register/save support.
+2. Back up the files below, then copy Data/FCMServerBridge.ba2 into the game's
+   Data directory.
+3. Add FCMServerBridge once to Data/hudmodloader.ini. Preserve every existing
+   entry; FCMServerBridge.hudmodloader.ini is a snippet, not a replacement.
+4. Append FCMServerBridge.ba2 once to [Archive] sResourceArchive2List in the
+   active Fallout76Custom.ini. Preserve HUDModLoader.ba2 and unrelated archives.
+5. Do not create a ZFE fragment or configure a relay endpoint. The bridge uses
+   xScal storage directly and has no separate login.
+6. Start the signed-in {target} overlay for https://{host}, launch Fallout 76,
+   enter a world, then check F11 -> FCM Server Bridge for xScal export status.
+
+Fallout76Custom.ini is normally in Documents/My Games/Fallout 76 on Windows
+(including redirected Documents) or the matching Proton prefix directory.
 
 The {target} environment is compiled into this BA2. EXPORT.json documents its
 exact provider output paths; do not create or edit the exported JSON manually.

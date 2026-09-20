@@ -1,9 +1,10 @@
-<# Builds an unpublished portable folder and ZIP from a tested EXE and PROD bridge ZIP. #>
+<# Builds an unpublished portable folder and ZIP from a tested EXE and optional PROD bridge. #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)] [ValidatePattern('^\d+\.\d+\.\d+$')] [string]$Version,
     [Parameter(Mandatory = $true)] [string]$PortableExe,
     [Parameter(Mandatory = $true)] [string]$BridgeZip,
+    [string]$BridgeInstructions = "",
     [Parameter(Mandatory = $true)] [string]$OutputDir
 )
 $ErrorActionPreference = 'Stop'
@@ -20,7 +21,6 @@ $stage = Join-Path ([IO.Path]::GetTempPath()) ("fcm-portable-package-" + [guid]:
 New-Item -ItemType Directory -Path $stage | Out-Null
 try {
     $bridge = Join-Path $stage 'Optional FCM Bridge'
-    # .NET rejects ZIP path traversal outside the extraction root.
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -LiteralPath $BridgeZip).Path, $bridge)
     $allowed = @('BUILD.json', 'EXPORT.json', 'INSTALL.txt', 'FCMServerBridge.hudmodloader.ini', 'Fallout76Custom.ini.example', 'Data/FCMServerBridge.ba2')
@@ -30,15 +30,22 @@ try {
     }
     $manifest = Get-Content -LiteralPath (Join-Path $bridge 'BUILD.json') -Raw | ConvertFrom-Json
     $export = Get-Content -LiteralPath (Join-Path $bridge 'EXPORT.json') -Raw | ConvertFrom-Json
-    if ($manifest.target -ne 'prod' -or $export.environment -ne 'prod') {
-        throw 'Only a PROD-stamped bridge may be included'
-    }
+    if ($manifest.target -ne 'prod' -or $export.environment -ne 'prod') { throw 'Only a PROD-stamped bridge may be included' }
     $ba2 = Join-Path $bridge 'Data/FCMServerBridge.ba2'
     if ((Get-FileHash -LiteralPath $ba2 -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.ba2Sha256) {
         throw 'Bridge BA2 does not match its build manifest'
     }
-    foreach ($required in @('INSTALL.txt', 'FCMServerBridge.hudmodloader.ini', 'Fallout76Custom.ini.example')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $bridge $required))) { throw "Missing bridge instructions/config: $required" }
+    $bridgeInstallPath = Join-Path $bridge 'INSTALL.txt'
+    if ($BridgeInstructions) {
+        Copy-Item -LiteralPath $BridgeInstructions -Destination $bridgeInstallPath -Force
+    } else {
+        $repoRoot = Split-Path $PSScriptRoot -Parent
+        $gameMods = Join-Path $repoRoot 'game-mods'
+        $fcmBridge = Join-Path $gameMods 'FCMBridge'
+        $bridgeMod = Join-Path $fcmBridge 'hudmodloader-bridge'
+        $template = Join-Path $bridgeMod 'INSTALL.template.txt'
+        $text = (Get-Content -LiteralPath $template -Raw).Replace('{version}', '0.2.4').Replace('{target}', 'PROD').Replace('{host}', 'falloutchatmod.com')
+        [IO.File]::WriteAllText($bridgeInstallPath, $text, [Text.UTF8Encoding]::new($false))
     }
     Copy-Item -LiteralPath $exe.FullName -Destination $stage
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows/README-PORTABLE.txt') -Destination (Join-Path $stage 'README.txt')

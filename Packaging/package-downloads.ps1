@@ -77,12 +77,14 @@ $installLinux = Join-Path $AssetsDir "install\INSTALL-LINUX.txt"
 $kwinRule     = Join-Path $AssetsDir "fallout-chatmod-keepabove.kwinrule"
 $hudPackage   = Join-Path $HudModDir "package.py"
 $portablePackage = Join-Path $PSScriptRoot "package-portable.ps1"
+$bridgeInstallTemplate = Join-Path (Split-Path $HudModDir -Parent) "hudmodloader-bridge/INSTALL.template.txt"
 
 if (-not (Test-Path $installWin))   { Fail "Missing: $installWin" }
 if (-not (Test-Path $installLinux)) { Fail "Missing: $installLinux" }
 if (-not (Test-Path $kwinRule))     { Fail "Missing: $kwinRule" }
 if (-not (Test-Path $hudPackage))   { Fail "Missing: $hudPackage" }
 if (-not (Test-Path $portablePackage)) { Fail "Missing: $portablePackage" }
+if (-not (Test-Path $bridgeInstallTemplate)) { Fail "Missing: $bridgeInstallTemplate" }
 if (-not (Test-Path -LiteralPath $BridgeZip)) { Fail "Validated PROD bridge ZIP not found: $BridgeZip" }
 $expectedBridgeZipSha256 = "d2e229b601977efead12108d3db1a09b622f6580fe4f4b2ee50fd0a3d3f3ae47"
 $bridgeZipSha256 = (Get-FileHash -LiteralPath $BridgeZip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -114,6 +116,15 @@ $hudZipOut    = Join-Path $DistDir $hudZipName
 # cross-drive concern) and always writable. Cross-platform -- the old GetPathRoot($DistDir)
 # returned "/" on Linux, so the staging root became "/fcm-pkg-staging" (access denied).
 $stagingRoot = Join-Path $DistDir "_pkg-staging"
+$bridgeInstructions = Join-Path $stagingRoot "BRIDGE-INSTALL.txt"
+New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
+$bridgeText = (Get-Content -LiteralPath $bridgeInstallTemplate -Raw).Replace('{version}', '0.2.4').Replace('{target}', 'PROD').Replace('{host}', 'falloutchatmod.com')
+[IO.File]::WriteAllText($bridgeInstructions, $bridgeText, [Text.UTF8Encoding]::new($false))
+
+function Expand-OptionalBridge($destination) {
+    Expand-Archive -LiteralPath $BridgeZip -DestinationPath $destination
+    Copy-Item -LiteralPath $bridgeInstructions -Destination (Join-Path $destination "INSTALL.txt") -Force
+}
 
 # --- Build Windows ZIP -------------------------------------------------------
 Write-Host "[package-downloads] Building Windows ZIP: $winZipName"
@@ -123,6 +134,8 @@ if (Test-Path $winStaging) { Remove-Item $winStaging -Recurse -Force }
 New-Item -ItemType Directory -Path $winStaging -Force | Out-Null
 Copy-Item $winExe   -Destination $winStaging
 Copy-Item $installWin -Destination $winStaging
+$winBridge = Join-Path $winStaging "Optional FCM Bridge"
+Expand-OptionalBridge $winBridge
 # Compress CONTENTS of the staging folder (files at root, not nested in a folder)
 Compress-Archive -Path (Join-Path $winStaging "*") -DestinationPath $winZipOut -Force
 $winSize = (Get-Item $winZipOut).Length
@@ -133,7 +146,7 @@ Write-Host "[package-downloads] Building portable ZIP: $portableZipName"
 if (Test-Path $portableZipOut) { Remove-Item $portableZipOut -Force }
 $portableStaging = Join-Path $stagingRoot "portable"
 New-Item -ItemType Directory -Path $portableStaging -Force | Out-Null
-& $portablePackage -Version $Version -PortableExe $portableExe -BridgeZip $BridgeZip -OutputDir $portableStaging
+& $portablePackage -Version $Version -PortableExe $portableExe -BridgeZip $BridgeZip -BridgeInstructions $bridgeInstructions -OutputDir $portableStaging
 if ($LASTEXITCODE -ne 0) { Fail "Portable package failed" }
 $generatedPortableZip = Join-Path $portableStaging $portableZipName
 if (-not (Test-Path $generatedPortableZip)) { Fail "Portable ZIP not produced: $generatedPortableZip" }
@@ -151,6 +164,8 @@ Copy-Item $linuxApp   -Destination $linuxStaging
 Copy-Item $linuxDeb   -Destination $linuxStaging
 Copy-Item $installLinux -Destination $linuxStaging
 Copy-Item $kwinRule     -Destination $linuxStaging
+$linuxBridge = Join-Path $linuxStaging "Optional FCM Bridge"
+Expand-OptionalBridge $linuxBridge
 # Compress CONTENTS of the staging folder (files at root, not nested in a folder)
 Compress-Archive -Path (Join-Path $linuxStaging "*") -DestinationPath $linuxZipOut -Force
 $linuxSize = (Get-Item $linuxZipOut).Length

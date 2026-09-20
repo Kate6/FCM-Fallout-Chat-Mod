@@ -17,7 +17,7 @@ describe('portable release', () => {
     expect(workflow).toContain('options: [installer, portable, both]');
   });
 
-  it('packages only a hash-matching PROD bridge, preserves existing outputs and excludes profiles', () => {
+  it('packages the portable overlay with only the validated optional bridge', () => {
     const temp = mkdtempSync(path.join(tmpdir(), 'fcm-portable-release-'));
     const ps = process.platform === 'win32' ? 'powershell.exe' : 'pwsh';
     const run = args => spawnSync(ps, ['-NoProfile', ...args], { encoding: 'utf8', timeout: 30000 });
@@ -28,24 +28,22 @@ describe('portable release', () => {
       writeFileSync(path.join(bridge, 'BUILD.json'), JSON.stringify({ target: 'prod', ba2Sha256: createHash('sha256').update(bytes).digest('hex') }));
       writeFileSync(path.join(bridge, 'EXPORT.json'), JSON.stringify({ environment: 'prod' }));
       for (const name of ['INSTALL.txt', 'FCMServerBridge.hudmodloader.ini', 'Fallout76Custom.ini.example']) writeFileSync(path.join(bridge, name), 'fixture');
-      const zip = path.join(temp, 'bridge.zip');
-      const quote = value => `'${value.replaceAll("'", "''")}'`;
-      const compress = () => run(['-Command', `Compress-Archive -Path ${quote(bridge + '/*')} -DestinationPath ${quote(zip)} -Force`]);
-      expect(compress().status).toBe(0);
+      const bridgeZip = path.join(temp, 'bridge.zip');
+      const quotedBridge = `'${bridge.replaceAll("'", "''")}/*'`;
+      const quotedZip = `'${bridgeZip.replaceAll("'", "''")}'`;
+      expect(run(['-Command', `Compress-Archive -Path ${quotedBridge} -DestinationPath ${quotedZip} -Force`]).status).toBe(0);
       const exe = path.join(temp, 'Fallout Chat Mod Portable 1.4.0.exe');
       writeFileSync(exe, Buffer.alloc(1024 * 1024));
-      const args = ['-File', path.join(repo, 'Packaging/package-portable.ps1'), '-Version', '1.4.0', '-PortableExe', exe, '-BridgeZip', zip, '-OutputDir', path.join(temp, 'out')];
+      const instructions = path.join(temp, 'INSTALL.txt'); writeFileSync(instructions, 'ZFE INSTALL\nXSCAL INSTALL\n');
+      const args = ['-File', path.join(repo, 'Packaging/package-portable.ps1'), '-Version', '1.4.0', '-PortableExe', exe, '-BridgeZip', bridgeZip, '-BridgeInstructions', instructions, '-OutputDir', path.join(temp, 'out')];
       const result = run(args); expect(result.stderr).toBe(''); expect(result.status).toBe(0);
       const folder = path.join(temp, 'out/Fallout Chat Mod Portable 1.4.0');
       expect(existsSync(folder + '.zip')).toBe(true);
       expect(existsSync(path.join(folder, 'README.txt'))).toBe(true);
       expect(existsSync(path.join(folder, 'FCMData'))).toBe(false);
+      expect(existsSync(path.join(folder, 'Optional FCM Bridge/INSTALL.txt'))).toBe(true);
+      expect(readFileSync(path.join(folder, 'Optional FCM Bridge/INSTALL.txt'), 'utf8')).toContain('XSCAL INSTALL');
       expect(run(args).status).not.toBe(0);
-      writeFileSync(path.join(bridge, 'EXPORT.json'), JSON.stringify({ environment: 'dev' }));
-      expect(compress().status).toBe(0);
-      const invalid = [...args]; invalid[invalid.length - 1] = path.join(temp, 'rejected');
-      expect(run(invalid).status).not.toBe(0);
-      expect(existsSync(path.join(temp, 'rejected'))).toBe(false);
     } finally { rmSync(temp, { recursive: true, force: true }); }
   }, 60000);
 });

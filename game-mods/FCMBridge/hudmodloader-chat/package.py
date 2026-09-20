@@ -114,35 +114,35 @@ def install_instructions(
         else ""
     )
     zfe_setup = (
-        "ZFE setup\n"
-        "---------\n"
-        f"{zfe_copy}{zfe_destination_note}\n"
-        "  The fragment supplies the relay endpoint and ZFE's startup OpenChatKey.\n"
-        "  FCMChat.ini openKey is authoritative after widget discovery (INSERT by default).\n"
-        "  If Data/configuration/zfe.ini contains [TextChat], it overrides the fragment.\n"
-        "  Merge settings into that existing section; do not replace the file or duplicate keys.\n"
-        "  If you use an override, set:\n\n"
+        "ZFE INSTALL - FOLLOW ONLY IF USING ZFE\n"
+        "--------------------------------------\n"
+        f"Z1. {zfe_copy.strip()}{zfe_destination_note}\n"
+        "Z2. The fragment supplies the relay endpoint and startup OpenChatKey.\n"
+        "    Data/FCMChat.ini openKey becomes authoritative after discovery.\n"
+        "Z3. If Data/configuration/zfe.ini already has [TextChat], merge these values\n"
+        "    into that section; do not replace the file or duplicate the section:\n\n"
         "  [TextChat]\n"
         f"  Endpoint={endpoint}\n"
         "  OpenChatKey=INSERT\n\n"
         f"{zfe_example_note}"
-        "  Do not install xscal.ini. Restart Fallout 76 after changing ZFE configuration.\n"
+        "Z4. Do not install xscal.ini. Restart Fallout 76, press F11, and confirm\n"
+        "    FCM reports ZFE before linking the displayed code.\n"
     )
     xscal_setup = (
-        "xScal setup\n"
-        "------------\n"
-        "  xScal ships with chat disabled. Merge xscal.ini.example into the existing\n"
-        "  [Chat] section in xscal.ini beside Fallout76.exe:\n\n"
+        "XSCAL INSTALL - FOLLOW ONLY IF USING XSCAL\n"
+        "------------------------------------------\n"
+        "X1. xScal ships with chat disabled. Merge xscal.ini.example into the existing\n"
+        "    [Chat] section in xscal.ini beside Fallout76.exe:\n\n"
         "  [Chat]\n"
         "  enabled=true\n"
         f"  relayEndpoint={endpoint}\n\n"
-        "  If the section or file is missing, add it once. Preserve unrelated settings\n"
-        "  and do not duplicate the [Chat] section.\n"
+        "X2. If the section or file is missing, add it once. Preserve unrelated\n"
+        "    settings and do not duplicate [Chat].\n"
         f"{xscal_helper}"
-        "  xScal has no OpenChatKey setting. Data/FCMChat.ini openKey is mapped through\n"
-        "  xScal Input.*; see KEYBINDS.txt for key behavior.\n"
-        "  Do not install the ZFE fragment or create Data/ZFE folders. Restart Fallout 76\n"
-        "  after changing xScal configuration.\n"
+        "X3. xScal has no OpenChatKey setting. Data/FCMChat.ini openKey is mapped\n"
+        "    through xScal Input.*; see KEYBINDS.txt.\n"
+        "X4. Do not install the ZFE fragment or create Data/ZFE folders. Restart\n"
+        "    Fallout 76, press F11, and confirm FCM reports xScal before linking.\n"
     )
 
     if provider == "zfe":
@@ -181,8 +181,8 @@ def install_instructions(
             f"{xscal_files}"
         )
         provider_setup = (
-            "Choose one provider\n"
-            "-------------------\n"
+            "CHOOSE EXACTLY ONE PROVIDER SECTION\n"
+            "===================================\n"
             f"{zfe_setup}\n"
             f"{xscal_setup}"
         )
@@ -198,8 +198,17 @@ separate from the desktop overlay; the desktop overlay is not required for HUD c
 Installation
 ------------
 {extender_instruction}
-2. Extract this archive into the Fallout 76 game folder. Keep the existing files in
-   place; do not replace unrelated configuration. The important files are:
+2. Extract this archive to a temporary folder OUTSIDE the Fallout 76 game folder,
+   such as Downloads/FCM-HUD. Do not extract the whole archive over the game.
+3. Copy only these files from the extracted folder into the game:
+
+   - Copy Data/FCMChatWidget.ba2 to <Fallout 76>/Data/FCMChatWidget.ba2.
+   - On a new install, copy Data/FCMChat.ini to <Fallout 76>/Data/FCMChat.ini.
+   - On an update, replace the BA2 but preserve your existing FCMChat.ini settings;
+     compare the packaged INI and merge any new keys instead of overwriting it.
+
+   Keep the remaining instructions, examples, snippets, and helpers in the extracted
+   folder for the steps below:
 
    Data/FCMChatWidget.ba2
    Data/FCMChat.ini
@@ -210,9 +219,9 @@ Installation
    CUSTOMIZATION.txt
    Fallout76Custom.ini.example
 
-3. Open the existing Data/hudmodloader.ini and append the one line in
+4. Open the existing <Fallout 76>/Data/hudmodloader.ini and append the one line in
    FCMChatWidget.hudmodloader.ini exactly once. Do not replace the file.
-4. Open Fallout76Custom.ini and append FCMChatWidget.ba2 to the existing
+5. Open Fallout76Custom.ini and append FCMChatWidget.ba2 to the existing
    [Archive] sResourceArchive2List value. Preserve every existing archive. If the
    section or key is missing, use:
 
@@ -222,13 +231,13 @@ Installation
    Windows normally stores this file in Documents/My Games/Fallout 76/.
    Proton/Wine uses the Fallout 76 prefix's Documents/My Games/Fallout 76/ folder.
 
-5. Configure the chosen extender:
+6. Configure the chosen extender:
 
 {provider_setup}
-6. Start Fallout 76. Press F11 and confirm the FCM menu appears. Use FCM -> Customize...
+7. Start Fallout 76. Press F11 and confirm the FCM menu appears. Use FCM -> Customize...
    for appearance settings. The menu also provides Hide chat, Auto-hide, and Scroll to
    newest. If FCM is missing, verify the HUDModLoader line and BA2 archive entry, then restart.
-7. When the widget shows an 8-character link code, open {config['web_link_url']}, sign in,
+8. When the widget shows an 8-character link code, open {config['web_link_url']}, sign in,
    enter the code, and return to the game. Codes expire after 10 minutes.
 
 Key defaults

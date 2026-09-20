@@ -263,7 +263,13 @@ def main() -> None:
                 assert b"@@FCM_RELAY_ENDPOINT@@" not in archive.read("Enable-xScal-Chat.ps1")
                 install = archive.read("INSTALL.txt")
                 assert b"Choose exactly one script extender" in install
-                assert b"Choose one provider" in install
+                assert b"CHOOSE EXACTLY ONE PROVIDER SECTION" in install
+                assert b"ZFE INSTALL - FOLLOW ONLY IF USING ZFE" in install
+                assert b"XSCAL INSTALL - FOLLOW ONLY IF USING XSCAL" in install
+                assert b"temporary folder OUTSIDE the Fallout 76 game folder" in install
+                assert b"Do not extract the whole archive over the game" in install
+                assert b"Copy only these files" in install
+                assert b"preserve your existing FCMChat.ini settings" in install
                 assert b"Do not install the ZFE fragment" in install
                 assert archive.read("FCMChatWidget.provider.txt") == b"unified\n"
                 install = install.decode()
@@ -273,7 +279,7 @@ def main() -> None:
                 assert "xScal has no OpenChatKey setting" in install
                 assert "xScal Input.*" in install
                 assert "Copy examples/ZFE/FCMChatWidget.ini.example" in install
-                assert "If Data/configuration/zfe.ini contains [TextChat], it overrides" in install
+                assert "If Data/configuration/zfe.ini already has [TextChat]" in install
                 assert f"Endpoint={expected['endpoint']}" in install
                 assert "OpenChatKey=INSERT" in install
                 for key, value in HUD_KEY_DEFAULTS.items():
@@ -383,12 +389,12 @@ def main() -> None:
                     assert expected["endpoint"].encode() in install
                     assert provider != "xscal" or f"relayEndpoint={expected['endpoint']}\n".encode() in xscal_config
                     if provider == "zfe":
-                        assert b"ZFE setup" in install
+                        assert b"ZFE INSTALL" in install
                         assert b"Data/configuration/zfe.ini" in install
                         assert b"Do not install xscal.ini" in install
-                        assert b"xScal setup" not in install
+                        assert b"XSCAL INSTALL" not in install
                     else:
-                        assert b"xScal setup" in install
+                        assert b"XSCAL INSTALL" in install
                         assert b"xScal Input.*" in install
                         assert b"Do not install the ZFE fragment" in install
                     assert b"Press F11" in install

@@ -1,5 +1,11 @@
-Fallout Chat Mod — Windows install
-====================================
+Fallout Chat Mod — Windows installer
+=====================================
+
+USE THIS GUIDE FOR THE SETUP EXE
+--------------------------------
+Choose this package when you want Start Menu/desktop shortcuts and normal
+Windows uninstall support. For a no-install folder, use the separate Portable ZIP
+and follow its README.txt instead.
 
 1. Double-click "Fallout Chat Mod Setup <version>.exe" (in this folder).
 2. The installer is per-user — no administrator prompt. It installs to:
@@ -10,6 +16,13 @@ Fallout Chat Mod — Windows install
 3. Launch "Fallout Chat Mod" from the Start Menu (or the desktop shortcut).
 4. Sign in with Discord and finish the short onboarding (enter your Fallout 76
    name when asked).
+
+Optional Server chat bridge
+---------------------------
+The ZIP also contains Optional FCM Bridge. It is not required for normal overlay
+chat and is never installed by the Setup EXE. To add desktop Server chat, open
+that folder's INSTALL.txt and follow exactly one section: ZFE INSTALL or XSCAL
+INSTALL. Do not install the visible FCM HUD widget at the same time.
 
 Using the overlay
 -----------------

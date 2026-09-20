@@ -29,6 +29,10 @@ class BridgePackageTests(unittest.TestCase):
                         self.assertIn(f'fcmserverbridge-{target}.json', config['xscal'])
                         self.assertFalse(any('TextChat' in n or 'xscal.ini' in n for n in names))
                         self.assertIn(f'https://{host}', archive.read('INSTALL.txt').decode())
+                        install = archive.read('INSTALL.txt').decode()
+                        self.assertIn('ZFE INSTALL', install)
+                        self.assertIn('XSCAL INSTALL', install)
+                        self.assertLess(install.index('ZFE INSTALL'), install.index('XSCAL INSTALL'))
                         ba2file = root / f'{target}.ba2'
                         ba2file.write_bytes(archive.read('Data/FCMServerBridge.ba2'))
                         data, _, _, records, entries = package.ba2._read(ba2file)

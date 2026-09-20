@@ -29,6 +29,27 @@ describe('INSTALL-*.txt — no stale auto-update claim, manual-update path docum
   }
 });
 
+describe('packaged install guides separate each supported path', () => {
+  it('Windows distinguishes the setup EXE from the portable ZIP', () => {
+    const windows = readOverlay('assets/install/INSTALL-WINDOWS.txt');
+    expect(windows).toContain('USE THIS GUIDE FOR THE SETUP EXE');
+    expect(windows).toContain('Portable ZIP');
+  });
+
+  it('Linux gives AppImage and deb their own numbered sections', () => {
+    const linux = readOverlay('assets/install/INSTALL-LINUX.txt');
+    expect(linux).toContain('APPIMAGE - PORTABLE, NO PACKAGE INSTALL');
+    expect(linux).toContain('DEBIAN / UBUNTU .DEB - SYSTEM PACKAGE');
+  });
+
+  it('portable README sends bridge users to exactly one extender section', () => {
+    const portable = readRepo('Packaging/windows/README-PORTABLE.txt');
+    expect(portable).toContain('ZFE INSTALL');
+    expect(portable).toContain('XSCAL INSTALL');
+    expect(portable).toContain('follow exactly ONE section');
+  });
+});
+
 describe('installer filename convention stays in sync with productName', () => {
   const pkg = JSON.parse(readOverlay('package.json'));
   const productName = pkg.productName || (pkg.build && pkg.build.productName);
