@@ -20,8 +20,18 @@ class RosterScenario {
                 check("roster control carries local UI identity as separate evidence",
                     MockXscal.lastRosterBody.indexOf("@self:VisibleSimulator") >= 0
                     && MockXscal.lastRosterBody.indexOf("HarnessPeer") >= 0);
+                check("authenticated room diagnostic is fixed-schema and privacy safe",
+                    MockXscal.roomDiagnosticCount > 0
+                    && MockXscal.lastRoomDiagnosticBody.indexOf("event=roster_send") >= 0
+                    && MockXscal.lastRoomDiagnosticBody.indexOf("build=2.10.114") >= 0
+                    && MockXscal.lastRoomDiagnosticBody.indexOf("HarnessPeer") < 0
+                    && MockXscal.lastRoomDiagnosticBody.indexOf("VisibleSimulator") < 0);
+                var diagnosticCount = MockXscal.roomDiagnosticCount;
+                widget.sendRoomDiagnostic("roster_send", "MapMenuData", 1);
+                check("identical consecutive room diagnostics are suppressed",
+                    MockXscal.roomDiagnosticCount == diagnosticCount);
                 run(widget);
-                flash.Lib.trace("ROSTER-SCENARIO PASS " + provider + " preserved=tab,history,nonce controls=unchanged hop=clear,rebind expiry=leave mainMenu=leave");
+                flash.Lib.trace("ROSTER-SCENARIO PASS " + provider + " preserved=tab,history,nonce controls=unchanged diagnostic=bounded hop=clear,rebind expiry=leave mainMenu=leave");
             } catch (error:Dynamic) {
                 timer.stop();
                 flash.Lib.trace("ROSTER-SCENARIO FAIL " + provider + " " + Std.string(error));

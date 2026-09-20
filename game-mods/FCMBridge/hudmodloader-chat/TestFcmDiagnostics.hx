@@ -14,6 +14,14 @@ class TestFcmDiagnostics {
         if (FcmDiagnostics.rows([]) != "repeatedIds=0 repeatedContent=0 pendingRows=0") throw "empty";
         if (FcmDiagnostics.rows([row(null, null, null), row("", "", "")])
                 != "repeatedIds=0 repeatedContent=0 pendingRows=0") throw "null/empty collision";
+        var room = FcmDiagnostics.roomControl("roster_hold", "zfe", "MapMenuData", 0, "2.10.114");
+        if (room != "FCMCTL/1/DIAG:event=roster_hold;provider=zfe;source=MapMenuData;count=0;build=2.10.114")
+            throw "room diagnostic";
+        if (FcmDiagnostics.roomControl("private-text", "zfe", "MapMenuData", 0, "2.10.114") != ""
+                || FcmDiagnostics.roomControl("roster_send", "other", "MapMenuData", 0, "2.10.114") != ""
+                || FcmDiagnostics.roomControl("roster_send", "zfe", "PrivatePlayer", 0, "2.10.114") != ""
+                || FcmDiagnostics.roomControl("roster_send", "zfe", "MapMenuData", 25, "2.10.114") != "")
+            throw "room diagnostic allowlist";
         Sys.println("HUD duplicate diagnostics tests passed");
     }
 }

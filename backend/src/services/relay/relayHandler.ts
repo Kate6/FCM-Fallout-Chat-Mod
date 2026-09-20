@@ -76,6 +76,11 @@ import { sendServerMessage, ServerMessageError } from './serverMessageService';
 import { parseHudSendCarrier, claimHudSend, hudSendReceiptIdentity, hudSendResponse, HUD_SEND_RECEIPT_SECONDS } from './hudSendReceipt';
 import { HUD_LAYOUT_CONTROL, HUD_LAYOUT_EVENT, parseHudLayout, parseHudLayoutControl, readHudLayout, writeHudLayout } from './hudLayoutService';
 import { HUD_OPEN_URL_CONTROL, parseHudOpenUrlControl } from './hudOpenUrl';
+import {
+  ROOM_DIAGNOSTIC_CONTROL_PREFIX,
+  parseHudRoomDiagnostic,
+  recordRoomDiagnostic,
+} from './roomDiagnostics';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -104,6 +109,8 @@ const MAX_WORLD_ID_LENGTH       = 128;
 const MAX_ROSTER_CONTROL_BYTES  = 2048;
 const WORLD_CONTROL_WINDOW_SECONDS = 10;
 const MAX_WORLD_CONTROLS_PER_WINDOW = 6;
+const ROOM_DIAGNOSTIC_WINDOW_SECONDS = 60;
+const MAX_ROOM_DIAGNOSTICS_PER_WINDOW = 12;
 const REGISTER_WINDOW_SECONDS = 60;
 const MAX_REGISTRATIONS_PER_IP = 3;
 const REPORT_WINDOW_SECONDS = 10 * 60;
@@ -461,6 +468,21 @@ async function checkWorldControlRateLimit(userId: string): Promise<boolean> {
     return count <= MAX_WORLD_CONTROLS_PER_WINDOW;
   } catch (err) {
     logger.warn({ err, userId }, '[relayHandler] world-control rate limit unavailable');
+    return false;
+  }
+}
+
+/** Diagnostics have an independent budget so evidence can never consume membership controls. */
+async function checkRoomDiagnosticRateLimit(userId: string): Promise<boolean> {
+  try {
+    const redis = await getRedisClient();
+    const bucket = Math.floor(Date.now() / 1000 / ROOM_DIAGNOSTIC_WINDOW_SECONDS);
+    const key = `relay:room-diagnostic-control:${userId}:${bucket}`;
+    const count = await redis.incr(key);
+    if (count === 1) await redis.expire(key, ROOM_DIAGNOSTIC_WINDOW_SECONDS + 1);
+    return count <= MAX_ROOM_DIAGNOSTICS_PER_WINDOW;
+  } catch (err) {
+    logger.warn({ err, userId }, '[relayHandler] room-diagnostic rate limit unavailable');
     return false;
   }
 }
@@ -1080,6 +1102,7 @@ async function handleGetAuthState(ws: WebSocket, frame: Record<string, unknown>)
       canSend:   identity.isLinked,
       canSaveHudLayout: identity.isLinked,
       canRetryHudSend: identity.isLinked,
+      canSendRoomDiagnostics: identity.isLinked,
       canReport: identity.isLinked,
       canDeleteMessage: identity.isLinked && privileged,
       canKickUser:      identity.isLinked && privileged,
@@ -1204,6 +1227,23 @@ async function handleSend(ws: WebSocket, frame: Record<string, unknown>): Promis
   // ── Authenticated world/roster control intercept (before ALL_SLUGS check) ──
   // Actor identity comes only from `identity`, derived from the relay token above.
   // Controls are bounded, applied to membership, and never broadcast/persisted.
+  if (slug === 'server' && body.startsWith(ROOM_DIAGNOSTIC_CONTROL_PREFIX)) {
+    const diagnostic = parseHudRoomDiagnostic(body);
+    if (!diagnostic) {
+      await deliver(errEnvelope('invalid_request', 'Invalid room diagnostic control'));
+      return;
+    }
+    if (!(await checkRoomDiagnosticRateLimit(identity.userId))) {
+      await deliver(errEnvelope('rate_limited', 'Room diagnostics are temporarily rate limited'));
+      return;
+    }
+    await recordRoomDiagnostic(identity.userId, {
+      event: 'hud_state', hudEvent: diagnostic.event, provider: diagnostic.provider,
+      source: diagnostic.source, rosterCount: diagnostic.rosterCount, build: diagnostic.build,
+    });
+    sendControlAck(ws);
+    return;
+  }
   if (slug === 'server' && (body.startsWith(WORLD_ID_SENTINEL_PREFIX) || body.startsWith(LEGACY_WORLD_ID_SENTINEL_PREFIX))) {
     const worldId = parseWorldIdControl(body, identity.userId);
     if (worldId) {

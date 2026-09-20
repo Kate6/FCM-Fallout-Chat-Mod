@@ -80,7 +80,7 @@ class FCMChatWidget extends MovieClip {
     // 2.10.0 is the first build that reports clientVersion to the relay. The relay
     // treats "no version reported" as "oldest possible client" and gates any new wire
     // field on this, so the version bump IS the capability signal.
-    static inline var VERSION:String  = "2.10.112"; // Slot restored Server history chronologically without flooding General
+    static inline var VERSION:String  = "2.10.114"; // Authenticated privacy-safe room diagnostics
     static inline var SETTINGS_PATH:String = "settings.ini";
     // This is a top-level ZFE command, not a relay operation. ZFE owns the DPAPI/local auth file
     // and must clear it; the SWF is not allowed to write arbitrary files from the HUD domain.
@@ -362,6 +362,9 @@ class FCMChatWidget extends MovieClip {
     var _serverSession:FcmServerSession = new FcmServerSession();
     var _serverAtMainMenu:Bool = false;
     var _serverSessionError:String = "";
+    var _lastRoomDiagnosticBody:String = "";
+    var _roomDiagnosticCount:Int = 0;
+    static inline var MAX_ROOM_DIAGNOSTICS:Int = 32;
     // History resync is a send operation and must wait until xScal's async
     // subscriber has reached an authenticated state.
     // A fresh cursor-zero subscription already contains the complete bounded snapshot. Delay the
@@ -466,6 +469,7 @@ class FCMChatWidget extends MovieClip {
     var _zfePendingSends:Map<Int, String> = new Map();
     var _zfePendingControls:Map<Int, String> = new Map();
     var _canRetryHudSend:Bool = false;
+    var _canSendRoomDiagnostics:Bool = false;
     var _connectStartedAt:Float = 0;
     var _sendNonce:String = Std.string(Date.now().getTime()) + "-" + Std.string(Std.random(1000000000));
 
@@ -3709,6 +3713,7 @@ class FCMChatWidget extends MovieClip {
         _connectStartedAt = flash.Lib.getTimer();
         _zfeAuthGraceLogged = false;
         _canRetryHudSend = false;
+        _canSendRoomDiagnostics = false;
         // Re-read the public FO76 account handle each attempt until AccountInfoData has it.
         // Never substitute CharacterInfoData: that is the local character label, not the name
         // other Fallout 76 players see. The retry timer probes later without re-entering a live
@@ -3984,6 +3989,7 @@ class FCMChatWidget extends MovieClip {
                 _ownStarColor = "";
             }
             _canRetryHudSend = extractJsonBool(state, "canRetryHudSend");
+            _canSendRoomDiagnostics = extractJsonBool(state, "canSendRoomDiagnostics");
             if (authDecision == FcmAuthFlow.AUTHENTICATED) {
                 var identity = linkedUid.length > 0 ? linkedUid : uid;
                 if (_outboxIdentity.length > 0 && identity.length > 0 && identity != _outboxIdentity) clearOutbox();
@@ -5282,6 +5288,25 @@ class FCMChatWidget extends MovieClip {
         return false;
     }
 
+    /** Best-effort transition evidence. Fixed enums prevent names, messages, IDs or tokens entering the payload. */
+    function sendRoomDiagnostic(event:String, source:String, rosterCount:Int):Void {
+        if (_api == null || !_connected || _authState != "authenticated" || _needsLink
+                || !_canSendRoomDiagnostics
+                || !_api.supportsNonBlockingControl() || _roomDiagnosticCount >= MAX_ROOM_DIAGNOSTICS) return;
+        if (source == null || source.length == 0) source = "none";
+        var body = FcmDiagnostics.roomControl(event, _api.provider, source, rosterCount, VERSION);
+        if (body.length == 0 || body == _lastRoomDiagnosticBody) return;
+        var payload = '{"channel":"server","targetUserId":"' + _serverSession.target()
+            + '","body":"' + body + '"}';
+        try {
+            var raw = Std.string(_api.call("chat.v1.sendMessage", payload));
+            if (FcmWire.controlAccepted(raw)) {
+                _lastRoomDiagnosticBody = body;
+                _roomDiagnosticCount++;
+            }
+        } catch (_:Dynamic) {} // Diagnostics can never change room state or interrupt the HUD.
+    }
+
     /** Keep the tab strip, active channel, and user-facing state in sync with relay membership. */
     function setServerSessionReady(ready:Bool, error:String):Void {
         var changed:Bool = (_serverSessionReady != ready);
@@ -5432,7 +5457,11 @@ class FCMChatWidget extends MovieClip {
         if (_inWorld) {
             // Loading can briefly blank even the primary roster. Preserve the current room
             // while it recovers, without sending an empty roster or extending the relay lease.
-            if (_rosterSnapshots.waitForRoster(_lastRosterSent, names, now, ROSTER_FRESH_MS)) return;
+            if (_rosterSnapshots.waitForRoster(_lastRosterSent, names, now, ROSTER_FRESH_MS)) {
+                sendRoomDiagnostic("roster_hold",
+                    _rosterSnapshots.sessionSource(now, ROSTER_FRESH_MS, _lastRosterSent), names.length);
+                return;
+            }
             var namesField:String = names.join("|");
             // A roster replacement with no shared name is the only reliable world-hop signal
             // available from the approved HUD data surfaces. The relay may otherwise compute
@@ -5442,6 +5471,8 @@ class FCMChatWidget extends MovieClip {
             // Keep the prior roster comparison even if the relay lease just expired and
             // reset the send timestamp; a permanent empty must still leave the old room.
             if (FcmCommand.shouldRebindRosterSession(_lastRosterSent, namesField)) {
+                sendRoomDiagnostic("roster_boundary",
+                    _rosterSnapshots.sessionSource(now, ROSTER_FRESH_MS, namesField), names.length);
                 zfeLog("info", "world", "roster session changed; clearing feed and rebinding");
                 clearServerRecords("roster session changed");
                 setServerSessionReady(false, "");
@@ -5462,7 +5493,9 @@ class FCMChatWidget extends MovieClip {
                 var payload:String = '{"channel":"server","targetUserId":"' + _serverSession.target() + '","body":"' + jsonEscape(body) + '"}';
                 try {
                     var raw:String = Std.string(_api.call("chat.v1.sendMessage", payload));
-                    applyServerControlResult(raw, "roster");
+                    var accepted = applyServerControlResult(raw, "roster");
+                    if (accepted) sendRoomDiagnostic("roster_send",
+                        _rosterSnapshots.sessionSource(now, ROSTER_FRESH_MS, namesField), names.length);
                     zfeLog("info", "world", "roster control sent names=" + names.length
                         + " source=" + _rosterSnapshots.sessionSource(now, ROSTER_FRESH_MS, namesField));
                 } catch (e:Dynamic) {
@@ -5471,6 +5504,7 @@ class FCMChatWidget extends MovieClip {
                 }
             }
         } else if (wasInWorld) {
+            sendRoomDiagnostic("roster_stale", "none", 0);
             zfeLog("info", "world", "roster went stale; sending LEAVE");
             clearServerRecords("roster stale");
             setServerSessionReady(false, "");
@@ -5489,6 +5523,7 @@ class FCMChatWidget extends MovieClip {
         subscribeRoster();
         if (FcmRoster.isMainMenu(uiData(getBSUIData(_rosterManager, "MenuStackData")))) {
             if (!_serverAtMainMenu) {
+                sendRoomDiagnostic("main_menu", "none", 0);
                 _serverAtMainMenu = true;
                 _inWorld = false;
                 clearServerRecords("main menu");
@@ -7217,23 +7252,37 @@ class FCMChatWidget extends MovieClip {
     function dumpDataInventory():Void {
         var mgr:Dynamic = findBSUI();
         if (mgr == null) return;
-        for (key in ["AccountInfoData", "CharacterInfoData", "PlayerListData", "HUDModeData", "MenuStackData"]) {
+        for (key in ["AccountInfoData", "CharacterInfoData", "PlayerListData", "PartyMenuList",
+                "MapMenuData", "PublicTeamsData", "TeamMarkers", "VoiceChatAreaData", "HUDModeData", "MenuStackData"]) {
             try {
                 var r:Dynamic = getBSUIData(mgr, key);
                 if (r == null || r.data == null) { zfeLog("info", "inv", key + ": <no data>"); continue; }
                 var d:Dynamic = r.data;
-                // PlayerListData is an Array of entries — dump count + first entry's fields.
+                // Resolve one representative row without logging any player value.
+                var sample:Dynamic = d;
+                try {
+                    if (key == "MapMenuData") sample = d.MarkerData != null && d.MarkerData.length > 0 ? d.MarkerData[0] : null;
+                    else if (key == "PublicTeamsData") sample = d.publicTeams != null && d.publicTeams.length > 0
+                        && d.publicTeams[0].members != null && d.publicTeams[0].members.length > 0 ? d.publicTeams[0].members[0] : null;
+                    else if (key == "TeamMarkers") sample = d.Markers != null && d.Markers.length > 0 ? d.Markers[0] : null;
+                    else if (key == "VoiceChatAreaData") sample = d.participants != null && d.participants.length > 0 ? d.participants[0] : null;
+                    else if ((key == "PlayerListData" || key == "PartyMenuList") && d.length > 0) sample = d[0];
+                } catch (_:Dynamic) { sample = null; }
+                var idFields = FcmRoster.identityFieldNames(sample);
+                // Array-like providers log only their size and shape; never row values.
                 var isArr:Bool = false;
                 try { isArr = (d.length != null && d[0] != null); } catch (e:Dynamic) {}
                 if (isArr) {
                     var n:Int = Std.int(d.length);
                     var f0:Array<String> = [];
                     try { f0 = Reflect.fields(d[0]); } catch (e:Dynamic) {}
-                    zfeLog("info", "inv", key + ": array len=" + n + " entryFields=[" + f0.join(",") + "]");
+                    zfeLog("info", "inv", key + ": array len=" + n + " entryFields=[" + f0.join(",")
+                        + "] idFields=[" + idFields.join(",") + "]");
                 } else {
                     var fields:Array<String> = [];
                     try { fields = Reflect.fields(d); } catch (e:Dynamic) {}
-                    zfeLog("info", "inv", key + ": fields=[" + fields.join(",") + "]");
+                    zfeLog("info", "inv", key + ": fields=[" + fields.join(",")
+                        + "] idFields=[" + idFields.join(",") + "]");
                 }
             } catch (e:Dynamic) {
                 zfeLog("warn", "inv", key + " threw: " + Std.string(e));

@@ -9,6 +9,11 @@ class TestFcmRoster {
         check("map roster excludes local and non-player markers",
             FcmRoster.readNames("MapMenuData", map, "Local").join("|") == "Alice|Bob");
         check("map roster retains its UI-visible local name", FcmRoster.lastSelfName == "Local");
+        check("identity inventory reports allowlisted field names without values",
+            FcmRoster.identityFieldNames({displayName:"PrivateName", accountId:"private-id", teamID:42}).join("|")
+                == "accountId|teamID");
+        check("identity inventory ignores display-only fields",
+            FcmRoster.identityFieldNames({displayName:"PrivateName", playerName:"PrivateName"}).length == 0);
         check("public team roster uses nested members",
             FcmRoster.readNames("PublicTeamsData", {publicTeams:[{members:[
                 {playerName:"Alice"}, {playerName:"VisibleLocal", isSelf:true}, {playerName:"Carol"}]}]}, "AccountLocal").join("|") == "Alice|Carol");

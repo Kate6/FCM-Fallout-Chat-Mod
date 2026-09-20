@@ -1991,8 +1991,10 @@ app.post('/admin/debug/automod-rules/invalidate-cache', apiLimiter, requireAdmin
 // local environment (FO76 process state, memory-scan results, AV detection,
 // etc.) so support can diagnose why scanning isn't firing on a user's machine.
 import { submitOverlayReport, listOverlayReports } from './controllers/debugReportsController';
+import { getRoomDiagnostics } from './controllers/roomDiagnosticsController';
 app.post('/api/debug/overlay-report', debugReportLimiter, requireClientAuth, submitOverlayReport);
 app.get('/admin/debug/overlay-reports', apiLimiter, requireAdminKey, listOverlayReports);
+app.get('/admin/debug/room-diagnostics', apiLimiter, requireAdminKey, getRoomDiagnostics);
 
 // Admin: one-shot hard wipe of every user + derived per-user state. Used once
 // during the X-App-Client-Key hard flip. Requires ADMIN_API_KEY plus a

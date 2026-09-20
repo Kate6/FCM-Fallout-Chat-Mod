@@ -2885,6 +2885,33 @@ describe('roster-derived world rooms', () => {
     expect(res.messageId).not.toBe('');
   });
 
+  test('authenticated HUD room diagnostics are consumed, allowlisted, and retained without chat ingestion', async () => {
+    const a = await registerAndLink('DiagnosticUser', 'fcm-room-diagnostic');
+    const ingestMock = require('../src/services/ingestMessage').ingestMessage;
+    ingestMock.mockClear();
+    const body = 'FCMCTL/1/DIAG:event=roster_hold;provider=xscal;source=MapMenuData;count=0;build=2.10.114';
+    expect(await sendRaw(a, body)).toMatchObject({ success: true, messageId: expect.any(String) });
+    expect(ingestMock).not.toHaveBeenCalled();
+    const stored = (_lists[`relay:room-diagnostics:user:${a.rawId}`] ?? []).map(JSON.parse);
+    expect(stored[0]).toMatchObject({ event: 'hud_state', hudEvent: 'roster_hold', provider: 'xscal',
+      source: 'MapMenuData', rosterCount: 0, build: '2.10.114' });
+    expect(JSON.stringify(stored)).not.toContain(a.rawId);
+
+    const invalid = body.replace('source=MapMenuData', 'source=PrivatePlayer');
+    expect(await sendRaw(a, invalid)).toMatchObject({ success: false, error: { code: 'invalid_request' } });
+  });
+
+  test('diagnostic throttling cannot consume the functional world-control budget', async () => {
+    const a = await registerAndLink('DiagnosticBurst', 'fcm-room-diagnostic-burst');
+    for (let count = 0; count < 12; count++) {
+      const body = `FCMCTL/1/DIAG:event=roster_send;provider=zfe;source=MapMenuData;count=${count};build=2.10.114`;
+      expect(await sendRaw(a, body)).toMatchObject({ success: true });
+    }
+    expect(await sendRaw(a, 'FCMCTL/1/DIAG:event=roster_send;provider=zfe;source=MapMenuData;count=12;build=2.10.114'))
+      .toMatchObject({ success: false, error: { code: 'rate_limited' } });
+    expect(await sendRaw(a, makeRosterEvidenceBody(['DiagnosticBurst'], []))).toMatchObject({ success: true });
+  });
+
   test('leaving and joining a solo world does not reuse the old server history', async () => {
     const a = await registerAndLink('SoloHop', 'fcm-solo-hop');
     await sendRaw(a, makeRosterBody(a.rawId, []));

@@ -26,18 +26,20 @@ data. 0.2.3 reuses `FcmJson` for runtime-info/write acknowledgements and forbids
 exports and the user reported it working. Full mixed-client shared-room/message/travel
 acceptance remains pending; the overlay log did not independently confirm room assignment.
 
-**Visible HUD 2.10.112 private candidate:** uses original relay timestamps to slot delayed
+**Visible HUD 2.10.114 private candidate:** retains 2.10.113's identity-field inventory and
+2.10.112's use of original relay timestamps to slot delayed
 current-room Server history into General chronologically. Replay older than General's loaded
 static-history horizon appears only in the complete Server subtab, preventing a previously visited
 room's backlog from arriving as a tail burst. Live Server rows remain in General. The candidate
 retains 2.10.111's roster-visible `@self:` evidence; authentication, sender attribution, mutual
-sightings and room gates are unchanged. Native acceptance remains pending. 2.10.110 remains the
-current public release.
+sightings and room gates are unchanged. It adds capability-gated, transition-only fixed-schema
+room diagnostics with no player names, roster contents, messages, raw identifiers or tokens.
+Native acceptance remains pending. 2.10.110 remains the current public release.
 
-The complete 60-case Ruffle suite and local source/artifact/package gates pass. The exact tested
-2.10.112 BA2 is installed on the desktop with the existing settings and single visible-widget
-loader entry preserved. Native reconnect acceptance is still pending; no public release or
-backend deployment was performed for this HUD-only correction.
+The 2.10.114 complete 60-case Ruffle and local Haxe/compiler/source/artifact/package gates pass.
+The exact tested BA2 and version marker are installed on the desktop with a recoverable backup;
+provider, settings and loader files are unchanged. It is not natively accepted. No public release
+or backend deployment was performed for this candidate.
 
 **Current production HUD release (2026-09-16):** visible FCMChatWidget **2.10.110** reapplies an authoritative
 supporter projection to retained rows from the same authenticated sender IDs, fixing old feed rows

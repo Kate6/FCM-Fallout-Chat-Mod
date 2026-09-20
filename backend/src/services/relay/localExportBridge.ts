@@ -152,7 +152,8 @@ export class LocalExportBridge {
         state.active = state.active && roster?.requestId === requestIdFor(snapshot) && !!room;
         await assertCurrent();
         if (state.active && room && expiresAt < state.expiresAt) {
-          await setRoster(this.actorId, snapshot.ownName, snapshot.names, requestIdFor(snapshot), expiresAt);
+          await setRoster(this.actorId, snapshot.ownName, snapshot.names, requestIdFor(snapshot), expiresAt, [],
+            { observationSource: `bridge:${snapshot.provider}` });
           await setWorldId(this.actorId, room, expiresAt);
         }
         state.snapshot = snapshot;
@@ -171,7 +172,8 @@ export class LocalExportBridge {
       await this.save(state);
       if (!fresh) return true;
       // A replay after expiry cannot revive a room even if it reports age zero.
-      await setRoster(this.actorId, snapshot.ownName, snapshot.names, requestIdFor(snapshot), expiresAt);
+      await setRoster(this.actorId, snapshot.ownName, snapshot.names, requestIdFor(snapshot), expiresAt, [],
+        { observationSource: `bridge:${snapshot.provider}` });
       await applyRoomAssignments(this.actorId, assertCurrent);
       await assertCurrent();
       if (!this.isInGame() || !(await this.authenticated()) || epoch !== this.activityEpoch || expiresAt <= Date.now()) {

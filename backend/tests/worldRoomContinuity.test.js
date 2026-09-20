@@ -10,7 +10,8 @@ const redis = {
   scanIterator: async function* () { yield [...values.keys()]; },
 };
 jest.mock('../src/config/redis', () => ({ getRedisClient: async () => redis }));
-jest.mock('../src/config/logger', () => ({ __esModule: true, default: { warn: jest.fn(), debug: jest.fn() } }));
+jest.mock('../src/config/logger', () => ({ __esModule: true, default: { warn: jest.fn(), info: jest.fn(), debug: jest.fn() } }));
+const logger = require('../src/config/logger').default;
 const { setRoster, clearRoster, computeRooms, readRoster } = require('../src/services/relay/worldRosterService');
 beforeEach(() => { values.clear(); jest.clearAllMocks(); });
 
@@ -156,13 +157,62 @@ test.each(['a', 'b'])('survivor keeps the canonical history key when %s leaves',
   expect((await computeRooms()).get(survivor)).toBe(before.get(survivor));
   expect(redis.set).toHaveBeenCalledWith(expect.any(String), expect.any(String), { XX: true, KEEPTTL: true });
 });
-test('disconnected components cannot keep sharing the old room', async () => {
+test('a transient one-sided missing sighting keeps the room during a non-renewing grace', async () => {
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+  try {
+    await setRoster('a', 'Alice', ['Bob', 'Carol'], 'a');
+    await setRoster('b', 'Bob', ['Alice'], 'b');
+    await setRoster('c', 'Carol', ['Alice'], 'c');
+    const old = (await computeRooms()).get('a');
+    clock.mockReturnValue(2000);
+    await setRoster('a', 'Alice', ['Carol'], 'a');
+    expect(new Set((await computeRooms()).values())).toEqual(new Set([old]));
+
+    // Repeating the same incomplete observation must not extend the original deadline.
+    clock.mockReturnValue(9000);
+    await setRoster('a', 'Alice', ['Carol'], 'a');
+    clock.mockReturnValue(12001);
+    const separated = await computeRooms();
+    expect(separated.get('a')).not.toBe(separated.get('b'));
+  } finally { clock.mockRestore(); }
+});
+
+test('a sustained split preserves the old room for the largest stable component', async () => {
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+  try {
+    for (const id of ['a', 'b', 'c']) {
+      const peers = ['a', 'b', 'c'].filter(peer => peer !== id).map(peer => peer === 'a' ? 'Alice' : peer === 'b' ? 'Bob' : 'Carol');
+      await setRoster(id, id === 'a' ? 'Alice' : id === 'b' ? 'Bob' : 'Carol', peers, id, undefined, [],
+        { observationSource: id === 'c' ? 'bridge:zfe' : 'native' });
+    }
+    const old = (await computeRooms()).get('a');
+    clock.mockReturnValue(2000);
+    await setRoster('a', 'Alice', ['Bob'], 'a');
+    await setRoster('b', 'Bob', ['Alice'], 'b');
+    await setRoster('c', 'Carol', [], 'c');
+    clock.mockReturnValue(12001);
+    const rooms = await computeRooms();
+    expect(rooms.get('a')).toBe(old);
+    expect(rooms.get('b')).toBe(old);
+    expect(rooms.get('c')).not.toBe(old);
+    expect(logger.info).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'room_split', componentCount: 2, winnerSize: 2,
+    }), '[worldRoster] canonical room split');
+    expect(logger.info).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'room_rebind', observationSources: ['bridge:zfe'],
+    }), '[worldRoster] canonical room reassigned');
+  } finally { clock.mockRestore(); }
+});
+
+test('equal stable components choose one deterministic old-room survivor', async () => {
   await setRoster('a', 'Alice', ['Bob'], 'a'); await setRoster('b', 'Bob', ['Alice'], 'b');
   const old = (await computeRooms()).get('a');
   await setRoster('a', 'Alice', [], 'a'); await setRoster('b', 'Bob', [], 'b');
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 10_001);
   const rooms = await computeRooms();
+  clock.mockRestore();
   expect(rooms.get('a')).not.toBe(rooms.get('b'));
-  expect(rooms.get('a')).not.toBe(old); expect(rooms.get('b')).not.toBe(old);
+  expect([rooms.get('a'), rooms.get('b')]).toContain(old);
 });
 test('roster-only self aliases bridge account-name differences without weakening mutual sighting', async () => {
   await setRoster('a', 'AccountAlice', ['VisibleBob'], 'a', undefined, ['VisibleAlice']);
@@ -171,7 +221,9 @@ test('roster-only self aliases bridge account-name differences without weakening
   expect(rooms.get('a')).toBe(rooms.get('b'));
 
   await setRoster('b', 'AccountBob', ['SomeoneElse'], 'b', undefined, ['VisibleBob']);
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 10_001);
   const separated = await computeRooms();
+  clock.mockRestore();
   expect(separated.get('a')).not.toBe(separated.get('b'));
 });
 test('world generation change and leave/rejoin do not inherit old history', async () => {
@@ -190,7 +242,9 @@ test('split history is not granted to a newly joined member', async () => {
   const old = (await computeRooms()).get('a');
   await setRoster('a', 'Alice', ['Charlie'], 'a');
   await setRoster('c', 'Charlie', ['Alice'], 'c');
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 10_001);
   const rooms = await computeRooms();
+  clock.mockRestore();
   expect(rooms.get('a')).toBe(rooms.get('c'));
   expect(rooms.get('a')).not.toBe(rooms.get('b'));
   expect(redis.copy).not.toHaveBeenCalledWith(`relay:serverchat:${old}`, `relay:serverchat:${rooms.get('a')}`);
@@ -202,8 +256,10 @@ test('history storage failure aborts a split before changing room affinity', asy
   await setRoster('b', 'Bob', ['Alice'], 'b');
   const old = (await computeRooms()).get('a');
   await setRoster('a', 'Alice', [], 'a');
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 10_001);
   redis.copy.mockRejectedValueOnce(new Error('storage unavailable'));
   await expect(computeRooms()).rejects.toThrow('storage unavailable');
+  clock.mockRestore();
   expect((await readRoster('a')).roomKey).toBe(old);
   expect((await readRoster('b')).roomKey).toBe(old);
 });

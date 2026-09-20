@@ -462,6 +462,7 @@ Debug mirror: `GET /admin/debug/community-stats` — `requireAdminKey`.
 |--------|------|------|-------------|
 | POST | `/api/debug/overlay-report` | requireClientAuth + debugReportLimiter | Submit overlay diagnostic snapshot |
 | GET | `/admin/debug/overlay-reports` | requireAdminKey | List submitted reports |
+| GET | `/admin/debug/room-diagnostics` | requireAdminKey | List privacy-safe room/roster evidence (optional relay `userId`, `limit` 1–200) |
 
 ---
 
@@ -827,6 +828,7 @@ Key debug mirrors:
 Additional admin-key-only debug endpoints (no public API mirror):
 - `GET /admin/debug/ws-clients` — snapshot of connected WebSocket clients
 - `GET /admin/debug/presence-audit?userId=&limit=` — Redis ring buffer of raw `presence:update` payloads
+- `GET /admin/debug/room-diagnostics?userId=&limit=` — 24-hour privacy-safe roster, HUD lifecycle, split and room-assignment evidence; `userId`, when supplied, is the `user_<32 lowercase hex>` relay identity, and omitting it reads the global ring
 - `GET /admin/debug/users/:userId/aliases` — username alias history
 - `POST /admin/debug/set-username` — force-set a user's username
 - `POST /admin/debug/clear-rate-limit` — clear `rl_api:*` Redis keys
