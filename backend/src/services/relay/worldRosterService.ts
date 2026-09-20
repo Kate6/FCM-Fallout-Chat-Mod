@@ -29,6 +29,8 @@ const MIN_SHARED_POPULATION = 3;
 const SHARED_POPULATION_RATIO = 0.75;
 const SHARED_POPULATION_MAX_MS = 60 * 60 * 1_000;
 
+type SharedPopulationDecision = 'accepted' | 'fallback_expired' | 'threshold_rejected';
+
 interface GraceSighting {
   name: string;
   until: number;
@@ -69,6 +71,28 @@ interface SetRosterOptions {
 
 export function normalizeRosterName(name: string): string { return name.trim().toLowerCase().slice(0, MAX_NAME_LENGTH); }
 
+function effectiveSeenAt(roster: RosterEntry, now: number): string[] {
+  return [...new Set([
+    ...roster.seen,
+    ...(roster.graceSeen ?? []).filter(grace => grace.until > now).map(grace => grace.name),
+  ])];
+}
+
+function sharedPopulationDecision(aSeenNames: string[], bSeenNames: string[], aDirectEvidenceAt: number | undefined,
+  bDirectEvidenceAt: number | undefined, now: number): SharedPopulationDecision {
+  const aSeen = new Set(aSeenNames);
+  const bSeen = new Set(bSeenNames);
+  if (aSeen.size < MIN_SHARED_POPULATION || bSeen.size < MIN_SHARED_POPULATION) return 'threshold_rejected';
+  let shared = 0;
+  for (const name of aSeen) if (bSeen.has(name)) shared += 1;
+  if (shared < MIN_SHARED_POPULATION
+    || shared / Math.max(aSeen.size, bSeen.size) < SHARED_POPULATION_RATIO) return 'threshold_rejected';
+  if (aDirectEvidenceAt === undefined || bDirectEvidenceAt === undefined
+    || now - aDirectEvidenceAt > SHARED_POPULATION_MAX_MS
+    || now - bDirectEvidenceAt > SHARED_POPULATION_MAX_MS) return 'fallback_expired';
+  return 'accepted';
+}
+
 export async function setRoster(relayUserId: string, ownName: string, seenNames: string[], requestId = '', expiresAt?: number,
   ownAliases: string[] = [], options: SetRosterOptions = {}): Promise<boolean> {
   try {
@@ -97,17 +121,27 @@ export async function setRoster(relayUserId: string, ownName: string, seenNames:
     }
     const overlapsPrevious = options.recoverHudReplacement && replacement && seen.length > 0
       && seen.some(seenName => previous.seen.includes(seenName));
+    const now = Date.now();
+    let replacementSharedPopulation = false;
+    if (options.recoverHudReplacement && replacement && !overlapsPrevious && seen.length > 0
+      && previous.name === name && previous.roomKey && previous.lastDirectEvidenceAt !== undefined) {
+      const rosters = await getAllRosters();
+      replacementSharedPopulation = rosters.some(peer => peer.userId !== relayUserId
+        && peer.roomKey === previous.roomKey
+        && sharedPopulationDecision(seen, peer.seen, previous.lastDirectEvidenceAt,
+          peer.lastDirectEvidenceAt, now) === 'accepted');
+    }
     // A replacement HUD MovieRoot deliberately rotates its request nonce. That
     // nonce still fences delivery, but it is not evidence that Fallout changed
     // worlds. Preserve backend-owned affinity only when authenticated RESYNC or
     // overlapping roster evidence establishes continuity; ordinary nonce changes
     // remain a fail-closed new observation session.
     const continuingSession = previous !== null && previous.name === name
-      && (previous.requestId === requestId || options.preserveExistingSession || overlapsPrevious);
+      && (previous.requestId === requestId || options.preserveExistingSession || overlapsPrevious
+        || replacementSharedPopulation);
     const session = continuingSession ? previous.session : randomUUID();
     const roomKey = previous?.session === session ? previous.roomKey : undefined;
     // Missing age belongs to a pre-upgrade active session, older than new ones.
-    const now = Date.now();
     const sessionStartedAt = previous?.session === session ? previous.sessionStartedAt ?? 0 : now;
     const observedAt = now;
     const lastDirectEvidenceAt = previous?.session === session ? previous.lastDirectEvidenceAt : undefined;
@@ -140,6 +174,10 @@ export async function setRoster(relayUserId: string, ownName: string, seenNames:
     if (changed) await recordRoomDiagnostic(relayUserId, {
       event: 'roster_observed', source: observationSource ?? 'legacy',
       continuity: continuingSession ? 'continued' : 'new_session', replacement,
+      ...(options.recoverHudReplacement && replacement && seen.length > 0 ? {
+        replacementDecision: overlapsPrevious ? 'replacement_overlap'
+          : replacementSharedPopulation ? 'replacement_shared_population' : 'replacement_rejected',
+      } : {}),
       requestRef: opaqueRef(requestId), sessionRef: opaqueRef(session),
       roomRef: roomKey ? opaqueRef(roomKey) : null,
       rosterCount: seen.length, rosterRefs: seen.map(rosterNameRef).sort(),
@@ -276,10 +314,7 @@ export async function computeRooms(assertCurrent: () => Promise<void> = async ()
       byName.set(identityName, owners);
     }
   }
-  const effectiveSeenByUser = new Map(rosters.map(roster => [roster.userId, [...new Set([
-    ...roster.seen,
-    ...(roster.graceSeen ?? []).filter(grace => grace.until > startedAt).map(grace => grace.name),
-  ])]]));
+  const effectiveSeenByUser = new Map(rosters.map(roster => [roster.userId, effectiveSeenAt(roster, startedAt)]));
   const effectiveSeen = (roster: RosterEntry): string[] => effectiveSeenByUser.get(roster.userId) ?? roster.seen;
   const directEvidenceAtByUser = new Map<string, number>();
   for (const a of rosters) {
@@ -319,20 +354,6 @@ export async function computeRooms(assertCurrent: () => Promise<void> = async ()
     members.push(roster);
     priorRoomMembers.set(roster.roomKey, members);
   }
-  type SharedPopulationDecision = 'accepted' | 'fallback_expired' | 'threshold_rejected';
-  const sharedPopulationDecision = (a: RosterEntry, b: RosterEntry): SharedPopulationDecision => {
-    const aSeen = new Set(effectiveSeen(a));
-    const bSeen = new Set(effectiveSeen(b));
-    if (aSeen.size < MIN_SHARED_POPULATION || bSeen.size < MIN_SHARED_POPULATION) return 'threshold_rejected';
-    let shared = 0;
-    for (const name of aSeen) if (bSeen.has(name)) shared += 1;
-    if (shared < MIN_SHARED_POPULATION
-      || shared / Math.max(aSeen.size, bSeen.size) < SHARED_POPULATION_RATIO) return 'threshold_rejected';
-    if (a.lastDirectEvidenceAt === undefined || b.lastDirectEvidenceAt === undefined
-      || startedAt - a.lastDirectEvidenceAt > SHARED_POPULATION_MAX_MS
-      || startedAt - b.lastDirectEvidenceAt > SHARED_POPULATION_MAX_MS) return 'fallback_expired';
-    return 'accepted';
-  };
   const sharedPopulationUsers = new Set<string>();
   const fallbackRejections = new Map<string, Set<Exclude<SharedPopulationDecision, 'accepted'>>>();
   for (const [priorRoom, members] of priorRoomMembers) {
@@ -340,7 +361,8 @@ export async function computeRooms(assertCurrent: () => Promise<void> = async ()
       for (let j = i + 1; j < members.length; j += 1) {
         const a = members[i]!;
         const b = members[j]!;
-        const decision = sharedPopulationDecision(a, b);
+        const decision = sharedPopulationDecision(effectiveSeen(a), effectiveSeen(b), a.lastDirectEvidenceAt,
+          b.lastDirectEvidenceAt, startedAt);
         if (decision === 'accepted') {
           union(a.userId, b.userId);
           sharedPopulationUsers.add(a.userId);

@@ -17,15 +17,22 @@ original Redis TTL untouched and deliberately withholds `SERVER-READY`; therefor
 permanently blank or dead client cannot renew stale membership. The widget's normal
 retry supplies a later roster. If that nonempty roster overlaps the prior roster, the
 existing same-world heuristic keeps the backend session, room affinity and age while
-adopting the new delivery nonce. A disjoint nonempty roster remains a new world
-generation. This works whether or not the separate history-recovery `FCMCTL/1/RESYNC`
-was necessary.
+adopting the new delivery nonce. A recovered roster that is disjoint from the client's
+own pre-reload roster receives one additional continuity check while the room coordinator
+lock is held: it may match only current peers already assigned to the same canonical room,
+using the same three-name, 75%-of-the-larger-roster and unexpired direct-evidence rules.
+If any peer qualifies, only the delivery nonce rotates; the old observation session,
+room affinity, age and nonrenewable direct-evidence timestamp survive. Otherwise the
+replacement remains an immediate new world generation. This works whether or not the
+separate history-recovery `FCMCTL/1/RESYNC` was necessary.
 
-An explicit leave, expired/missing roster, disjoint replacement, or desktop export
+An explicit leave, expired/missing roster, rejected replacement, or desktop export
 world-generation change still discards affinity. RESYNC cannot recreate a cleared or
 expired roster and never extends observation freshness. Coordination writes use XX
 and KEEPTTL for the same reason. The room-stability correction needs no HUD, bridge,
-overlay protocol, or client binary change; HUD 2.10.114 adds diagnostics only.
+overlay protocol, or client binary change. A replacement comparison reads peer evidence
+without writing peer records or extending their Redis TTLs. HUD 2.10.116 and bridge 0.2.4
+remain unchanged.
 
 If surviving members of an old room split into disconnected components, exactly
 one component retains the canonical room: the component containing the most
@@ -77,7 +84,9 @@ Production split/rebind decisions are logged at info level with SHA-256-derived
 contents, message bodies, raw room/session/request identifiers or tokens. Decisions
 also carry a fixed continuity reason: `direct`, `shared_population`,
 `fallback_expired`, or `threshold_rejected`. Successful shared-population retention is
-debug-logged with only the fixed reason and a hashed room reference.
+debug-logged with only the fixed reason and a hashed room reference. Changed native
+replacement observations additionally carry one fixed decision:
+`replacement_overlap`, `replacement_shared_population`, or `replacement_rejected`.
 
 HUD 2.10.114 additionally sends transition-only `FCMCTL/1/DIAG:` controls through the
 existing authenticated, capability-gated `chat.v1` path. The body accepts only fixed
@@ -152,7 +161,8 @@ Regression coverage: `worldRoomContinuity.test.js` covers either peer departing,
 component splits, stable-component inheritance, non-renewing partial-sighting grace,
 privacy-safe split telemetry, Daily Ops party-name suppression with an identical public-world
 roster, rejection of shared-population joins across separate rooms, generation/leave boundaries,
-a single HUD replacement, five simultaneous startup-empty replacements and disjoint replacement;
+a single HUD replacement, five simultaneous startup-empty replacements, peer-assisted populated
+replacement recovery, 18/24 and 17/24 boundaries, direct-evidence expiry and disjoint replacement;
 `relayHandler.test.js`
 covers withheld confirmation during recovery, overlapping replacement bind, the
 authenticated RESYNC marker and history confirmation.

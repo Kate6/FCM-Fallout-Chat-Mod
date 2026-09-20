@@ -123,6 +123,95 @@ test('a disjoint replacement roster remains a new world generation', async () =>
   expect((await computeRooms()).get('a')).not.toBe(oldRoom);
 });
 
+test('a populated HUD replacement may retain its established room from a matching current peer', async () => {
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+  try {
+    const users = [
+      ['a', 'Alice', 'native'],
+      ['b', 'Bob', 'bridge:xscal'],
+      ['c', 'Carol', 'native'],
+    ];
+    for (const [id, name, source] of users) {
+      await setRoster(id, name, users.filter(([peerId]) => peerId !== id).map(([, peerName]) => peerName),
+        `first-${id}`, undefined, [], { observationSource: source });
+    }
+    const oldRoom = (await computeRooms()).get('a');
+    const before = await readRoster('a');
+    const population = Array.from({ length: 23 }, (_, index) => `RaidPlayer${index}`);
+
+    clock.mockReturnValue(2_000);
+    await setRoster('b', 'Bob', population, 'first-b', undefined, [], { observationSource: 'bridge:xscal' });
+    await setRoster('c', 'Carol', population.slice(0, 22), 'first-c', undefined, [], { observationSource: 'native' });
+    await expect(setRoster('a', 'Alice', [], 'replacement-a', undefined, [],
+      { recoverHudReplacement: true, observationSource: 'native' })).resolves.toBe(false);
+    await expect(setRoster('a', 'Alice', [], 'replacement-a', undefined, [],
+      { recoverHudReplacement: true, observationSource: 'native' })).resolves.toBe(false);
+
+    await expect(setRoster('a', 'Alice', population, 'replacement-a', undefined, [],
+      { recoverHudReplacement: true, observationSource: 'native' })).resolves.toBe(true);
+    expect(await readRoster('a')).toMatchObject({
+      requestId: 'replacement-a', session: before.session, roomKey: oldRoom,
+      lastDirectEvidenceAt: before.lastDirectEvidenceAt,
+    });
+    expect(new Set((await computeRooms()).values())).toEqual(new Set([oldRoom]));
+  } finally { clock.mockRestore(); }
+});
+
+test.each([
+  [18, true],
+  [17, false],
+  [2, false],
+])('replacement peer overlap boundary with %i of 24 names preserves session=%s', async (sharedCount, retained) => {
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+  try {
+    await setRoster('a', 'Alice', ['Bob'], 'first-a');
+    await setRoster('b', 'Bob', ['Alice'], 'first-b');
+    await computeRooms();
+    const before = await readRoster('a');
+    const shared = Array.from({ length: sharedCount }, (_, index) => `Shared${index}`);
+    const candidate = [...shared, ...Array.from({ length: 24 - sharedCount }, (_, index) => `OnlyA${index}`)];
+    const peer = [...shared, ...Array.from({ length: 24 - sharedCount }, (_, index) => `OnlyB${index}`)];
+    clock.mockReturnValue(2_000);
+    await setRoster('b', 'Bob', peer, 'first-b');
+    await setRoster('a', 'Alice', candidate, 'replacement-a', undefined, [], { recoverHudReplacement: true });
+    expect((await readRoster('a')).session === before.session).toBe(retained);
+  } finally { clock.mockRestore(); }
+});
+
+test('replacement shared-population evidence expires and never renews direct evidence', async () => {
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+  try {
+    await setRoster('a', 'Alice', ['Bob'], 'first-a');
+    await setRoster('b', 'Bob', ['Alice'], 'first-b');
+    await computeRooms();
+    const before = await readRoster('a');
+    const population = Array.from({ length: 24 }, (_, index) => `WorldPlayer${index}`);
+    clock.mockReturnValue(2_000);
+    await setRoster('b', 'Bob', population, 'first-b');
+    await setRoster('a', 'Alice', population, 'replacement-a', undefined, [], { recoverHudReplacement: true });
+    expect((await readRoster('a')).lastDirectEvidenceAt).toBe(before.lastDirectEvidenceAt);
+
+    const preservedSession = (await readRoster('a')).session;
+    clock.mockReturnValue(3_601_001);
+    const nextPopulation = Array.from({ length: 24 }, (_, index) => `NextWorldPlayer${index}`);
+    await setRoster('b', 'Bob', nextPopulation, 'first-b');
+    await setRoster('a', 'Alice', nextPopulation, 'replacement-b', undefined, [], { recoverHudReplacement: true });
+    expect((await readRoster('a')).session).not.toBe(preservedSession);
+  } finally { clock.mockRestore(); }
+});
+
+test('replacement peer evidence cannot survive an authenticated account change', async () => {
+  await setRoster('a', 'Alice', ['Bob'], 'first-a');
+  await setRoster('b', 'Bob', ['Alice'], 'first-b');
+  await computeRooms();
+  const oldSession = (await readRoster('a')).session;
+  const population = Array.from({ length: 24 }, (_, index) => `WorldPlayer${index}`);
+  await setRoster('b', 'Bob', population, 'first-b');
+  await setRoster('a', 'DifferentAccount', population, 'replacement-a', undefined, [],
+    { recoverHudReplacement: true });
+  expect((await readRoster('a')).session).not.toBe(oldSession);
+});
+
 test('pre-upgrade active sessions retain priority without resetting their age', async () => {
   const room = 'r:ffffffff-ffff-4fff-8fff-ffffffffffff';
   values.set('relay:roster:a', JSON.stringify({ name: 'alice', seen: [], session: 'old', requestId: 'old', roomKey: room }));
