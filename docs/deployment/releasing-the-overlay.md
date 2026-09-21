@@ -115,8 +115,8 @@ OS-aware behavior (no flags needed — the scripts detect `$IsLinux`/`$IsWindows
 | `FCM_SSH_TARGET` | upload (step 5) | `user@host` of the prod VPS |
 | `FCM_SSH_KEY` | upload (step 5) | path to the SSH private key. On Linux the key must live at a real path with `chmod 600` (a key on `/mnt/*` DrvFs has perms `ssh` rejects — copy it to `~/.ssh/<key>`) |
 | `FCM_BACKEND_CONTAINER` | upload (step 5) | Dokploy backend container, e.g. `chat-mod-fallout-chat-mod-<id>-backend-1` |
-| `NEXUS_API_KEY`, `NEXUS_FILE_GROUP_ID_LINUX`, `NEXUS_FILE_GROUP_ID_LINUX_DEB`, `NEXUS_FILE_GROUP_ID_HUD` | step 6 (Nexus) | required before the canonical publish path starts |
-| `NEXUS_FILE_GROUP_ID_WINDOWS` | step 6 (Nexus) | required by default for the Windows support-review upload; omit only with `-SkipWindowsNexus` |
+| `NEXUS_API_KEY`, `NEXUS_MOD_FILE_ID_LINUX`, `NEXUS_MOD_FILE_ID_LINUX_DEB`, `NEXUS_MOD_FILE_ID_HUD` | step 6 (Nexus) | required before the canonical publish path starts; surrounding dotenv quotes are accepted |
+| `NEXUS_MOD_FILE_ID_WINDOWS` | step 6 (Nexus) | required by default for the Windows support-review upload; omit only with `-SkipWindowsNexus` |
 
 ### Step 1 — Build raw artifacts
 
@@ -448,17 +448,17 @@ upload is intentionally deferred. The standalone wrapper still requires the
 explicit `-PublishWindowsForReview` switch.
 
 This script:
-1. Builds the executable-free Nexus-specific HUD ZIP, then calls `Packaging/publish-nexus.ps1` for the Linux AppImage ZIP and Linux `.deb` ZIP as `main`, and that Nexus HUD ZIP as `main` (still a separate, opt-in installation); these normal replacement paths archive their previous files
+1. Builds the executable-free Nexus-specific HUD ZIP, then calls `Packaging/publish-nexus.ps1` for the Linux AppImage ZIP as `main`, and the Linux `.deb` ZIP plus Nexus HUD ZIP as `optional`; these normal replacement paths archive their previous versions
 2. Calls `publish-nexus.ps1` for the Windows ZIP as `main` with `archive_existing_file: false` when the canonical release path enables the support-review upload
 3. Implements the 6-step Nexus v3 Upload API: open multipart session → upload chunks to S3 → complete S3 multipart → finalise → poll for `available` state → attach the new file with the requested archive behavior
 4. Uploads the Windows `.exe` to VirusTotal and pushes the permalink to `/admin/virustotal-url`
 
 Required env vars (set as Windows USER env vars):
 - `NEXUS_API_KEY`
-- `NEXUS_FILE_GROUP_ID_WINDOWS` — required by the canonical release path unless `-SkipWindowsNexus` is used; required by the standalone wrapper only with `-PublishWindowsForReview`
-- `NEXUS_FILE_GROUP_ID_LINUX`
-- `NEXUS_FILE_GROUP_ID_LINUX_DEB` — the separate Linux `.deb` file group
-- `NEXUS_FILE_GROUP_ID_HUD` — the separate HUD file group in Main Files on the same Nexus mod page
+- `NEXUS_MOD_FILE_ID_WINDOWS` — required by the canonical release path unless `-SkipWindowsNexus` is used; required by the standalone wrapper only with `-PublishWindowsForReview`
+- `NEXUS_MOD_FILE_ID_LINUX`
+- `NEXUS_MOD_FILE_ID_LINUX_DEB` — the separate Linux `.deb` mod-file ID
+- `NEXUS_MOD_FILE_ID_HUD` — the separate optional HUD mod-file ID on the same Nexus mod page
 - `VT_API_KEY`
 - `PROD_ADMIN_RELEASE_TOKEN`
 
@@ -466,8 +466,8 @@ The website HUD package remains `dist-electron/FCM HUD Mod-<widget-version> (PRO
 Nexus receives only `dist-electron/FCM HUD Mod-<widget-version> (PROD)-Nexus.zip`, generated
 immediately before publishing with no executable or script entries.
 Its Nexus file version is the widget version read from `FCMChatWidget.hx`, not the desktop
-overlay version. Create the HUD file group in the Nexus Files tab and set its ID in
-`NEXUS_FILE_GROUP_ID_HUD`; the wrapper then replaces the previous HUD file on each release. The
+overlay version. Create the HUD file in the Nexus Files tab and set its stable v3 ID in
+`NEXUS_MOD_FILE_ID_HUD`; the wrapper then replaces the previous HUD version on each release. The
 low-level uploader defaults to preserving the previous file; normal Linux, `.deb`, and HUD
 replacements explicitly enable archiving.
 

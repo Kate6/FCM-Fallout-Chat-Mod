@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
     Publishes a built release (Linux AppImage + .deb + optional in-game HUD package)
-    to Nexus Mods, attaching each artifact to its own file group.
+    to Nexus Mods, attaching each artifact to its stable mod file.
 
 .DESCRIPTION
-    Thin wrapper over publish-nexus.ps1 that knows the per-platform file-group ids
+    Thin wrapper over publish-nexus.ps1 that knows the per-platform mod-file ids
     and descriptions. Finds the version's artifacts in the Electron build output
     (cross-platform-overlay/dist-electron), publishes the Linux desktop package
     and the optional HUD package to Nexus, then uploads the Windows .exe to
@@ -37,10 +37,10 @@
 
     Env vars (set as Windows USER env vars):
       NEXUS_API_KEY               personal API key (apikey header)
-      NEXUS_FILE_GROUP_ID_WINDOWS file-group id for the Windows file
-      NEXUS_FILE_GROUP_ID_LINUX   file-group id for the Linux AppImage file
-      NEXUS_FILE_GROUP_ID_LINUX_DEB file-group id for the Linux .deb file
-      NEXUS_FILE_GROUP_ID_HUD     file-group id for the optional HUD file
+      NEXUS_MOD_FILE_ID_WINDOWS stable mod-file id for the Windows file
+      NEXUS_MOD_FILE_ID_LINUX stable mod-file id for the Linux AppImage file
+      NEXUS_MOD_FILE_ID_LINUX_DEB stable mod-file id for the Linux .deb file
+      NEXUS_MOD_FILE_ID_HUD stable mod-file id for the optional HUD file
       VT_API_KEY                  VirusTotal personal API key
       PROD_ADMIN_RELEASE_TOKEN    falloutchatmod.com admin release token
 
@@ -83,19 +83,19 @@ $nexus     = Join-Path $PSScriptRoot "publish-nexus.ps1"
 $assetsDir = Join-Path $overlayDir "assets"
 $hudPackage = Join-Path $HudModDir "package.py"
 
-$winGroup   = $env:NEXUS_FILE_GROUP_ID_WINDOWS
-$linuxGroup = $env:NEXUS_FILE_GROUP_ID_LINUX
-$linuxDebGroup = $env:NEXUS_FILE_GROUP_ID_LINUX_DEB
-$hudGroup   = $env:NEXUS_FILE_GROUP_ID_HUD
+$winGroup   = $env:NEXUS_MOD_FILE_ID_WINDOWS
+$linuxGroup = $env:NEXUS_MOD_FILE_ID_LINUX
+$linuxDebGroup = $env:NEXUS_MOD_FILE_ID_LINUX_DEB
+$hudGroup   = $env:NEXUS_MOD_FILE_ID_HUD
 $publishWindows = [bool]$PublishWindowsForReview
 # Fall back to the persistent USER-scope value (process env may not carry it).
-if (-not $winGroup)   { $winGroup   = [Environment]::GetEnvironmentVariable('NEXUS_FILE_GROUP_ID_WINDOWS','User') }
-if (-not $linuxGroup) { $linuxGroup = [Environment]::GetEnvironmentVariable('NEXUS_FILE_GROUP_ID_LINUX','User') }
-if (-not $linuxDebGroup) { $linuxDebGroup = [Environment]::GetEnvironmentVariable('NEXUS_FILE_GROUP_ID_LINUX_DEB','User') }
-if (-not $hudGroup)   { $hudGroup   = [Environment]::GetEnvironmentVariable('NEXUS_FILE_GROUP_ID_HUD','User') }
+if (-not $winGroup)   { $winGroup   = [Environment]::GetEnvironmentVariable('NEXUS_MOD_FILE_ID_WINDOWS','User') }
+if (-not $linuxGroup) { $linuxGroup = [Environment]::GetEnvironmentVariable('NEXUS_MOD_FILE_ID_LINUX','User') }
+if (-not $linuxDebGroup) { $linuxDebGroup = [Environment]::GetEnvironmentVariable('NEXUS_MOD_FILE_ID_LINUX_DEB','User') }
+if (-not $hudGroup)   { $hudGroup   = [Environment]::GetEnvironmentVariable('NEXUS_MOD_FILE_ID_HUD','User') }
 if (-not $linuxGroup -or -not $linuxDebGroup -or -not $hudGroup -or ($publishWindows -and -not $winGroup)) {
-    $requiredGroups = "NEXUS_FILE_GROUP_ID_LINUX, NEXUS_FILE_GROUP_ID_LINUX_DEB, and NEXUS_FILE_GROUP_ID_HUD"
-    if ($publishWindows) { $requiredGroups += ", plus NEXUS_FILE_GROUP_ID_WINDOWS for the Windows upload" }
+    $requiredGroups = "NEXUS_MOD_FILE_ID_LINUX, NEXUS_MOD_FILE_ID_LINUX_DEB, and NEXUS_MOD_FILE_ID_HUD"
+    if ($publishWindows) { $requiredGroups += ", plus NEXUS_MOD_FILE_ID_WINDOWS for the Windows upload" }
     Write-Error "Set $requiredGroups env vars first."
     exit 1
 }
@@ -223,10 +223,10 @@ $linuxInclude = @(
 
 $platforms = @(
     @{ Name = "Linux AppImage"; File = $linuxApp; Zip = $linuxAppZip; Group = $linuxGroup; Desc = $linuxAppDesc; Include = $linuxInclude; NexusVersion = $Version; Category = "main"; ArchiveExisting = $true },
-    @{ Name = "Linux .deb"; File = $linuxDeb; Zip = $linuxDebZip; Group = $linuxDebGroup; Desc = $linuxDebDesc; Include = $linuxInclude; NexusVersion = $Version; Category = "main"; ArchiveExisting = $true },
+    @{ Name = "Linux .deb"; File = $linuxDeb; Zip = $linuxDebZip; Group = $linuxDebGroup; Desc = $linuxDebDesc; Include = $linuxInclude; NexusVersion = $Version; Category = "optional"; ArchiveExisting = $true },
     # The HUD has its own Main Files entry; installation remains opt-in.
     # Its file version follows the widget version, not the desktop overlay version.
-    @{ Name = "HUD"; File = $hudNexusZip; Zip = ""; Group = $hudGroup; Desc = $hudDesc; Include = @(); NexusVersion = $hudVersion; Category = "main"; ArchiveExisting = $true }
+    @{ Name = "HUD"; File = $hudNexusZip; Zip = ""; Group = $hudGroup; Desc = $hudDesc; Include = @(); NexusVersion = $hudVersion; Category = "optional"; ArchiveExisting = $true }
 )
 if ($publishWindows) {
     # Support-review upload creates a second live Windows file alongside the existing one.
@@ -242,7 +242,7 @@ foreach ($p in $platforms) {
     $args = @{
         FilePath      = $p.File
         Version       = $p.NexusVersion
-        FileGroupId   = $p.Group
+        ModFileId     = $p.Group
         ZipAs         = $p.Zip
         Description   = $p.Desc
         IncludeFiles  = $p.Include

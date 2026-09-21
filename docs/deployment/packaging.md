@@ -70,19 +70,19 @@ a new Windows ZIP alongside the existing live Windows file for review, run:
 The review path sends `archive_existing_file: false`, so both Windows files remain available. After
 Nexus support approves the new file, remove the old Windows file manually in the Nexus Files tab.
 The ordinary release path does not upload Windows to Nexus, and therefore does not require
-`NEXUS_FILE_GROUP_ID_WINDOWS`.
+`NEXUS_MOD_FILE_ID_WINDOWS`.
 
 **Required env vars** (Windows: set as USER env vars so they persist across PowerShell sessions. Linux/`pwsh`: put them in the repo-root `.env`/`.env.local` — `release.ps1` auto-loads them via `Import-DotEnv` — or `export` them before running):
 - `NEXUS_API_KEY` — personal API key from nexusmods.com/settings/api-keys
-- `NEXUS_FILE_GROUP_ID_WINDOWS` — file-group id for the Windows file (required only with `-PublishWindowsForReview`; Files tab → Manage Files → API Info)
-- `NEXUS_FILE_GROUP_ID_LINUX` — file-group id for the Linux file
-- `NEXUS_FILE_GROUP_ID_LINUX_DEB` — separate file-group id for the Linux `.deb` file
-- `NEXUS_FILE_GROUP_ID_HUD` — separate file-group id for the optional HUD ZIP on the same Nexus mod page
+- `NEXUS_MOD_FILE_ID_WINDOWS` — stable v3 mod-file ID for Windows (required only with `-PublishWindowsForReview`)
+- `NEXUS_MOD_FILE_ID_LINUX` — stable v3 mod-file ID for the Linux AppImage
+- `NEXUS_MOD_FILE_ID_LINUX_DEB` — stable v3 mod-file ID for the Linux `.deb`
+- `NEXUS_MOD_FILE_ID_HUD` — stable v3 mod-file ID for the optional HUD ZIP
 - `VT_API_KEY` — VirusTotal personal API key
 - `PROD_ADMIN_RELEASE_TOKEN` — backend admin release token (from `backend/.env`)
 
 The HUD file is uploaded as a separate optional Nexus file group, so it does not replace the
-desktop download. Set `NEXUS_FILE_GROUP_ID_HUD` to the group created for the HUD package in the
+desktop download. Set `NEXUS_MOD_FILE_ID_HUD` to the stable ID created for the HUD package in the
 Nexus Files tab. The wrapper builds the separate `FCM HUD Mod-<widget-version> (PROD)-Nexus.zip` from the
 validated local HUD artifacts; the website ZIP is not its upload input. It archives the previous
 HUD file only when the new Nexus file reaches `available` state. The low-level uploader
@@ -103,7 +103,7 @@ defaults to preserving the previous file; the wrapper opts into archiving for th
 3. `POST <complete presigned url>` — complete the S3 multipart upload (XML body with ETags)
 4. `POST /uploads/{id}/finalise` — hand the upload back to Nexus
 5. `GET /uploads/{id}` (poll) — wait until state is `available` (Nexus virus-scans the file)
-6. `POST /mod-file-update-groups/{group_id}/versions` — attach as a new file, with
+6. `POST /mod-files/{id}/versions` — attach as a new version of the stable mod file, with
    `archive_existing_file` explicitly set by the caller
 
 There is no standalone archive/delete endpoint on Nexus; the previous file is archived as a side
@@ -113,7 +113,7 @@ accident. Pass `-ArchiveExisting:$true` only for an approved replacement.
 
 **Windows curl.exe / Schannel TLS note:** All Nexus API calls use `curl.exe` (not `Invoke-RestMethod`) with `--ssl-revoke-best-effort` to avoid a hard-revocation handshake failure. Windows curl is built against Schannel, which does a hard OCSP/CRL check. When the Nexus/Cloudflare revocation responder is slow or unreachable, the TLS handshake never completes (HTTP 000, `time_appconnect = 0`). The `--ssl-revoke-best-effort` flag tolerates an unreachable responder without disabling revocation entirely. Calls also carry `--connect-timeout 15 --max-time 120` and retry up to 4 times on transient failures (HTTP 0 or 5xx).
 
-**Parameters:** `-FilePath`, `-Version`, `-FileGroupId`, `-ZipAs` (wrap in a zip before upload), `-Description`, `-IncludeFiles` (extra files to bundle in the zip), `-ArchiveExisting`, `-DryRun`.
+**Parameters:** `-FilePath`, `-Version`, `-ModFileId`, `-ZipAs` (wrap in a zip before upload), `-Description`, `-IncludeFiles` (extra files to bundle in the zip), `-ArchiveExisting`, `-DryRun`. API keys and IDs are trimmed and may be quoted in dotenv files.
 
 ---
 

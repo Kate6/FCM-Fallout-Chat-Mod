@@ -38,10 +38,10 @@
 
     Required env vars for a live run (step 6 -- Nexus; unless -SkipWindowsNexus for the Windows group):
       NEXUS_API_KEY
-      NEXUS_FILE_GROUP_ID_WINDOWS -- required unless -SkipWindowsNexus
-      NEXUS_FILE_GROUP_ID_LINUX
-      NEXUS_FILE_GROUP_ID_LINUX_DEB
-      NEXUS_FILE_GROUP_ID_HUD
+      NEXUS_MOD_FILE_ID_WINDOWS -- required unless -SkipWindowsNexus
+      NEXUS_MOD_FILE_ID_LINUX
+      NEXUS_MOD_FILE_ID_LINUX_DEB
+      NEXUS_MOD_FILE_ID_HUD
 
 .PARAMETER Version
     Required. Version string, e.g. 1.3.84.
@@ -230,8 +230,8 @@ if (-not $relToken) {
 # registration. The child script repeats these checks, but doing them here keeps
 # a missing Nexus setting from leaving a partially advertised release behind.
 if (-not $DryRun) {
-    $nexusRequired = @('NEXUS_API_KEY', 'NEXUS_FILE_GROUP_ID_LINUX', 'NEXUS_FILE_GROUP_ID_LINUX_DEB', 'NEXUS_FILE_GROUP_ID_HUD')
-    if (-not $SkipWindowsNexus) { $nexusRequired += 'NEXUS_FILE_GROUP_ID_WINDOWS' }
+    $nexusRequired = @('NEXUS_API_KEY', 'NEXUS_MOD_FILE_ID_LINUX', 'NEXUS_MOD_FILE_ID_LINUX_DEB', 'NEXUS_MOD_FILE_ID_HUD')
+    if (-not $SkipWindowsNexus) { $nexusRequired += 'NEXUS_MOD_FILE_ID_WINDOWS' }
     $nexusMissing = @($nexusRequired | Where-Object { -not (Get-ConfiguredEnv $_) })
     if ($nexusMissing.Count -gt 0) {
         Fail "pre-flight (Nexus credentials)" "Missing: $($nexusMissing -join ', '). Set them as process or USER environment variables, or use -SkipWindowsNexus to omit only the Windows review upload."

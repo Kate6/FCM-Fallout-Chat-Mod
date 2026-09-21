@@ -25,16 +25,17 @@ def main() -> None:
     vt_gate = (ROOT / "Packaging/vt-gate.ps1").read_text(encoding="utf-8")
 
     required_nexus_markers = (
-        "$hudGroup   = $env:NEXUS_FILE_GROUP_ID_HUD",
-        "$linuxDebGroup = $env:NEXUS_FILE_GROUP_ID_LINUX_DEB",
-        "NEXUS_FILE_GROUP_ID_LINUX_DEB",
-        "NEXUS_FILE_GROUP_ID_HUD",
+        "$hudGroup   = $env:NEXUS_MOD_FILE_ID_HUD",
+        "$linuxDebGroup = $env:NEXUS_MOD_FILE_ID_LINUX_DEB",
+        "NEXUS_MOD_FILE_ID_LINUX_DEB",
+        "NEXUS_MOD_FILE_ID_HUD",
         "$hudVersion = (& $pythonCommand.Source $hudPackage --print-version).Trim()",
         '$hudZip   = Join-Path $DistDir "FCM HUD Mod-$hudVersion (PROD).zip"',
         '@{ Name = "HUD";',
         "NexusVersion = $hudVersion",
-        'NexusVersion = $hudVersion; Category = "main"; ArchiveExisting = $true',
+        'NexusVersion = $hudVersion; Category = "optional"; ArchiveExisting = $true',
         "FileCategory  = $p.Category",
+        "ModFileId     = $p.Group",
         '$linuxDeb = Join-Path $DistDir "Fallout Chat Mod-$Version.deb"',
         '@{ Name = "Linux .deb";',
         "[switch]$PublishWindowsForReview",
@@ -79,6 +80,8 @@ def main() -> None:
         "[bool]  $ArchiveExisting   = $false",
         "archive_existing_file        = $ArchiveExisting",
         "preserving previous file",
+        'Normalize-ConfiguredValue',
+        '$BaseUrl/mod-files/$ModFileId/versions',
     ):
         assert marker in nexus_uploader, f"Nexus uploader is missing safe archive guard: {marker}"
 

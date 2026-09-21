@@ -10,8 +10,7 @@
       3. POST <complete presigned url>    - finish the S3 multipart (XML)
       4. POST /uploads/{id}/finalise      - hand the upload back to Nexus
       5. GET  /uploads/{id}  (poll)       - wait until state == "available"
-      6. POST /mod-file-update-groups/{group_id}/versions
-                                          - attach as the new file and optionally
+      6. POST /mod-files/{id}/versions     - attach as the new version and optionally
                                             archive the previous one
 
     There is no standalone "delete/archive" endpoint on Nexus - retiring the old
@@ -59,9 +58,8 @@
 .PARAMETER ApiKey
     Nexus personal API key. Defaults to $env:NEXUS_API_KEY.
 
-.PARAMETER FileGroupId
-    The mod's file-group / update-group id (Files tab -> Manage Files -> "API Info").
-    Defaults to $env:NEXUS_FILE_GROUP_ID.
+.PARAMETER ModFileId
+    The stable Nexus v3 mod-file id. Defaults to $env:NEXUS_MOD_FILE_ID.
 
 .PARAMETER FileCategory
     Nexus file category for the new file. Assignable values: main / optional /
@@ -80,7 +78,7 @@ param(
     [Parameter(Mandatory = $true)] [string]$FilePath,
     [Parameter(Mandatory = $true)] [string]$Version,
     [string]$ApiKey            = $env:NEXUS_API_KEY,
-    [string]$FileGroupId       = $env:NEXUS_FILE_GROUP_ID,
+    [string]$ModFileId         = $env:NEXUS_MOD_FILE_ID,
     [ValidateSet("main", "optional", "miscellaneous")]
     [string]$FileCategory      = "main",
     # When set, the installer is wrapped in a .zip with THIS name before upload
@@ -104,14 +102,28 @@ $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 function Fail($msg) { Write-Error "[nexus] $msg"; exit 1 }
+function Normalize-ConfiguredValue([string]$Value) {
+    if ($null -eq $Value) { return "" }
+    $trimmed = $Value.Trim()
+    if ($trimmed.Length -ge 2) {
+        $first = $trimmed[0]
+        $last = $trimmed[$trimmed.Length - 1]
+        if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+            return $trimmed.Substring(1, $trimmed.Length - 2)
+        }
+    }
+    return $trimmed
+}
 
 # --- Validate inputs ---------------------------------------------------------
 # Process env may not carry persistent USER-scope vars (e.g. when launched via
 # WSL interop) - fall back to reading them straight from the User environment.
-if (-not $ApiKey)      { $ApiKey      = [Environment]::GetEnvironmentVariable('NEXUS_API_KEY','User') }
-if (-not $FileGroupId) { $FileGroupId = [Environment]::GetEnvironmentVariable('NEXUS_FILE_GROUP_ID','User') }
+if (-not $ApiKey)    { $ApiKey    = [Environment]::GetEnvironmentVariable('NEXUS_API_KEY','User') }
+if (-not $ModFileId) { $ModFileId = [Environment]::GetEnvironmentVariable('NEXUS_MOD_FILE_ID','User') }
+$ApiKey = Normalize-ConfiguredValue $ApiKey
+$ModFileId = Normalize-ConfiguredValue $ModFileId
 if (-not $ApiKey)      { Fail "No API key. Pass -ApiKey or set NEXUS_API_KEY (https://www.nexusmods.com/settings/api-keys)." }
-if (-not $FileGroupId) { Fail "No file-group id. Pass -FileGroupId or set NEXUS_FILE_GROUP_ID (Files tab -> Manage Files -> API Info)." }
+if (-not $ModFileId)   { Fail "No mod-file id. Pass -ModFileId or set NEXUS_MOD_FILE_ID." }
 if (-not (Test-Path $FilePath)) { Fail "File not found: $FilePath" }
 
 # Nexus wants the installer wrapped in a .zip (with a platform-suffixed display
@@ -158,10 +170,10 @@ $sizeBytes = $file.Length
 $apiHeaders = @{ "apikey" = $ApiKey; "Content-Type" = "application/json" }
 
 Write-Host "[nexus] Publishing $fileName ($([math]::Round($sizeBytes/1MB,1)) MB) as version $Version"
-Write-Host "[nexus]   group=$FileGroupId category=$FileCategory archiveExisting=$ArchiveExisting"
+Write-Host "[nexus]   modFile=$ModFileId category=$FileCategory archiveExisting=$ArchiveExisting"
 
 if ($DryRun) {
-    Write-Host "[nexus] DRY RUN - would POST $BaseUrl/uploads/multipart then attach to /mod-file-update-groups/$FileGroupId/versions"
+    Write-Host "[nexus] DRY RUN - would POST $BaseUrl/uploads/multipart then attach to /mod-files/$ModFileId/versions"
     exit 0
 }
 
@@ -355,7 +367,7 @@ $archiveLabel = if ($ArchiveExisting) { "archiving previous file" } else { "pres
 Write-Host "[nexus] 6/6 attaching new version + $archiveLabel ..."
 # Nexus auto-appends ".zip" to names for zip uploads - strip it to avoid ".zip.zip".
 $displayName = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
-$result = Invoke-Nexus -Method Post -Uri "$BaseUrl/mod-file-update-groups/$FileGroupId/versions" -Body @{
+$result = Invoke-Nexus -Method Post -Uri "$BaseUrl/mod-files/$ModFileId/versions" -Body @{
     upload_id                    = $uploadId
     name                         = $displayName
     version                      = $Version
@@ -368,5 +380,6 @@ $result = Invoke-Nexus -Method Post -Uri "$BaseUrl/mod-file-update-groups/$FileG
 }
 $result = if ($result.data) { $result.data } else { $result }
 $categoryLabel = $FileCategory.ToUpperInvariant()
-Write-Host "[nexus] DONE - new file uid=$($result.id) attached as $categoryLabel; previous file archived=$ArchiveExisting"
+$versionId = if ($result.version) { $result.version.id } else { $result.id }
+Write-Host "[nexus] DONE - new file-version uid=$versionId attached as $categoryLabel; previous file archived=$ArchiveExisting"
 exit 0
