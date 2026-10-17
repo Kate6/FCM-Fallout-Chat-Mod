@@ -143,6 +143,14 @@ class FCMChatWidget extends MovieClip {
     // "server" (index 5) is the world-session channel — not directly selectable.
     static var CHAN_SLUGS:Array<String> = ["global", "trade", "events", "infests", "raids", "server"];
     static var CHAN_NAMES:Array<String> = ["GENERAL", "TRADING", "EVENTS", "INFESTS", "RAIDS", "SERVER"];
+    // Personal Events-only variant (-D events_only): the widget locks to the EVENTS leaf.
+    // All user sends are disabled; world-event auto-broadcasts (which call
+    // chat.v1.sendMessage directly with chan="events") are unaffected.
+    #if events_only
+    static inline var DEFAULT_CHAN:Int = 2;
+    #else
+    static inline var DEFAULT_CHAN:Int = 0;
+    #end
 
     // ── Layout ────────────────────────────────────────────────────────────────
     // Row order from top: TAB_H (main tab) | SUB_H (channel tabs) | log | input height
@@ -291,7 +299,7 @@ class FCMChatWidget extends MovieClip {
     var _hudEventListenerAttached:Bool = false;
 
     // ── Channel state ─────────────────────────────────────────────────────────
-    var _chanIdx:Int             = 0;   // 0=global
+    var _chanIdx:Int             = DEFAULT_CHAN;   // 0=global (2=events under -D events_only)
 
     // ── Hide state (CAP-011) ────────────────────────────────────────────────────
     var _hidden:Bool             = false;   // true while the panel is hidden (/hide, F11 menu, hideKey)
@@ -1043,7 +1051,11 @@ class FCMChatWidget extends MovieClip {
      * player's server-room control. Nearby-player observations alone are not membership.
      */
     function tabOrder():Array<Int> {
+        #if events_only
+        return [2]; // Events-only variant: a single EVENTS tab; nothing else is selectable.
+        #else
         return _serverSessionReady ? [0, 5, 1, 2, 3, 4] : [0, 1, 2, 3, 4];
+        #end
     }
 
     function renderMainTabs():Void {
@@ -1089,7 +1101,11 @@ class FCMChatWidget extends MovieClip {
         if (!_cfg.showHints) return "";
         var suffix:String = _canModerate ? "  |  [F11] moderation" : "";
         return '<font face="' + FONT_BODY + '" size="13" color="' + hx(_cfg.promptColor) + '">&#x203A; ['
+            #if events_only
+            + _cfg.openKey + '] events' + suffix + '</font>';
+            #else
             + _cfg.openKey + '] chat  |  [g/t/e/i/r/s] tab | [/t message] send' + suffix + '</font>';
+            #end
     }
 
     function typingPrompt():String {
@@ -2513,6 +2529,14 @@ class FCMChatWidget extends MovieClip {
 
     function openInput():Void {
         if (_disposed) return;
+        #if events_only
+        // Events-only variant: user sends are disabled entirely (read-only feed apart
+        // from world-event auto-broadcasts, which bypass the editor). The open key
+        // still restores a hidden panel — but text ownership is never taken.
+        if (_hidden) show();
+        bumpAutoHide();
+        return;
+        #end
         if (_inputOpen) return;
         if (_xscalSessionReleaseUncertain) {
             zfeLog("warn", "input", "xScal open blocked: prior session release unconfirmed");
@@ -3391,6 +3415,14 @@ class FCMChatWidget extends MovieClip {
         var destinationIndex = _chanIdx;
         var channelCommand = FcmCommand.channelSubmission(s);
         if (channelCommand.handled) {
+            #if events_only
+            // Events-only variant: strict — any non-Events channel prefix is consumed
+            // and discarded. Never let "/g <msg>" silently become an Events send.
+            if (channelCommand.channelIndex != 2) {
+                zfeLog("info", "chan", "channel send ignored — events-only build");
+                return;
+            }
+            #end
             destinationIndex = channelCommand.channelIndex;
             if (destinationIndex == 5 && !_serverSessionReady) {
                 setLogText(_serverSessionError.length > 0
@@ -3703,6 +3735,13 @@ class FCMChatWidget extends MovieClip {
 
     function sendMessage(raw:String, destinationIndex:Int = -1):Void {
         if (_disposed) return;
+        #if events_only
+        // Events-only variant: backstop — the editor never opens and channel prefixes
+        // are consumed above, but no user send may ever reach transport through any
+        // path. Auto-broadcasts call the native verb directly and are unaffected.
+        zfeLog("info", "send", "user send suppressed — events-only build");
+        return;
+        #end
         // Lazily recover _outboxIdentity if LINK COMPLETE just fired but the
         // next getAuthState has not yet populated it; avoids the 8294-type
         // "outboxIdLen=0" block that shows the link screen even though needsLink is false.
@@ -5411,6 +5450,12 @@ class FCMChatWidget extends MovieClip {
             // Store each source message once before projecting it into General or its tab.
             // A replay must be rejected BEFORE matching a newer same-text pending send.
             if (CHAN_SLUGS.indexOf(channel) < 0) continue;
+            #if events_only
+            // Events-only variant: silently ignore every non-Events row. Protocol
+            // control frames were already handled above (system/FCMCTL); observe()
+            // still tracks all cursors so history/recovery stays consistent.
+            if (channel != "events") continue;
+            #end
             if (!eventEditAccepted && !markSeenEvent(channel, evId, messageId)) {
                 duplicateRejectedCount++;
                 continue;
@@ -5949,7 +5994,7 @@ class FCMChatWidget extends MovieClip {
         _serverSessionError = ready ? "" : ((error == null) ? "" : error);
         if (!ready) { _nameplatePresence.reset(); _nameplatePainter.clear(); }
         if (!ready) stopServerHistoryDrain();
-        if (!ready && _chanIdx == 5) _chanIdx = 0;
+        if (!ready && _chanIdx == 5) _chanIdx = DEFAULT_CHAN;
         if (changed) {
             rebuildChannelTabs();
             renderRecords();

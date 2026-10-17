@@ -1,13 +1,13 @@
 {
   "artifacts": {
-    "FCMChatWidget.ba2": "daeba7c8a87415d3fb6e8322a61bc32de7057907225bd3a2cf0e4428c80a8dfb",
-    "FCMChatWidget.swf": "5a3c6b2677b1b386858f71b3f8000db05bc4f2541e08b8fa3202cdb3e6985e2a"
+    "FCMChatWidget.ba2": "d0fb628e5b676f87b87d7ac3fd582c811d60341eb84f7c35a8c58216d0ddb2cc",
+    "FCMChatWidget.swf": "5037ded04b29f83a7d155ad647b2d6554350e25eaec2491e0bec5b1695bd5ab7"
   },
   "format": 1,
   "sources": {
     "FcmAuthFlow.hx": "dcfa605765f45a404ef3c139fd253e5ddadd491ff2f46751707a28f5901fc729",
     "FcmNativeApi.hx": "1bb137aebf8b5f596f6390fa8e615ce3a731cd4b2bf95befb8272496cf0b96fe",
-    "hudmodloader-chat/FCMChatWidget.hx": "9dfcdbadd7d60e76e63caddcaa34b9166f78db08c39d8e0c23aa7cdac02bdc46",
+    "hudmodloader-chat/FCMChatWidget.hx": "96fcf8131dbcdd1210253f0e4fece725bcd6e5b8180b0d105fdaba4509aa934d",
     "hudmodloader-chat/FcmBrowser.hx": "e0ff11e37ccfc85a01019be369d6d8cea30388b239690c2fa865d93eefd02430",
     "hudmodloader-chat/FcmCommand.hx": "896317cdd22b43ab6627e8b84476a08912be1d8a60f47f05d8c8396b5cfbd3a1",
     "hudmodloader-chat/FcmConfig.hx": "5eacdb03a5216af9f608f4ae89c1669f8fe43d3a0914bc4efd55732c558fec9c",

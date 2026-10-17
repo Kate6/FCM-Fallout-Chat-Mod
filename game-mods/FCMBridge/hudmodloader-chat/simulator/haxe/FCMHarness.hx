@@ -91,6 +91,7 @@ class FCMHarness extends Sprite {
             if (scenario == "cooldown") CooldownScenario.start(widget, provider);
             if (scenario == "giveaway") GiveawayScenario.start(widget, provider);
             if (scenario == "events") EventScenario.start(widget, provider);
+            if (scenario == "events-only") EventsOnlyScenario.start(widget, provider);
             if (scenario == "typing-renewal") TypingRenewalScenario.start(widget, provider);
             if (scenario == "xscal-local-layout") XscalLayoutScenario.start(widget);
             if (scenario == "xscal-session-input" || scenario == "xscal-session-fallback"

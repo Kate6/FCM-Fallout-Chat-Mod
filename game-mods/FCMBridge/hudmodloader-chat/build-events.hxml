@@ -1,0 +1,20 @@
+## Personal Events-only widget variant (prod)
+## NOT the shipped widget. Build: haxe build-events.hxml
+## Then normalize + validate + pack as a distinctly-named archive:
+##   python3 normalize_swf.py FCMEventsWidget.swf
+##   python3 ../tools/validate_swf.py FCMEventsWidget.swf --require-signature FWS --require-version 32
+##   python3 ../hudmenu-chat/ba2tool.py create FCMEventsWidget.ba2 interface/FCMEventsWidget.swf=FCMEventsWidget.swf
+## Installs INSTEAD of FCMChatWidget (never alongside it): loader entry FCMEventsWidget
+## with fragment Data/ZFE/TextChat/fragments/FCMEventsWidget.ini (prod endpoint).
+## User sends are compiled out; world-event auto-broadcasts still send to events.
+
+--main FCMChatWidget
+--class-path ..
+--swf FCMEventsWidget.swf
+--swf-version 32
+
+# Fallout GFx does not guarantee Flash Player 11 native JSON.
+-D haxeJSON
+
+# Personal variant: lock to the EVENTS leaf, disable all user sends.
+-D events_only
